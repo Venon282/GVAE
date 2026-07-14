@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+to_ask.md
+
+# Testing / typing / linting
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Experiment tracking / data
+outputs/
+multirun/
+wandb/
+mlruns/
+data/raw/
+data/processed/
+*.ckpt
+*.pt
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

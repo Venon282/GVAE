@@ -1,0 +1,23 @@
+# Illustrative model config (spec §9). Not yet consumed by the code —
+# GlobalVae is currently built with a plain Python dict (see
+# models/global_vae.py and tests/integration/). Wiring this file up via
+# Hydra + structured dataclasses/Pydantic (spec §10, §11) is a deferred
+# decision, not yet made.
+model:
+  name: global_vae
+  modalities:
+    signal: # first concrete dataset for this modality: SAXS
+      encoder: signal_cnn_v1
+      decoder: signal_cnn_v1
+    image:
+      encoder: resnet_encoder_v1
+      decoder: resnet_decoder_v1
+  latent:
+    mode: single # single | factorized
+    dim: 128
+  fusion:
+    strategy: poe # poe | moe | concat_mlp | cross_attention
+    residual: true
+  training:
+    beta_schedule: linear_warmup
+    modality_dropout_p: 0.15 # trains robustness to missing modalities

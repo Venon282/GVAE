@@ -168,9 +168,10 @@ global-vae/
 │       │   ├── sum.py
 │       │   └── average.py
 │       ├── latent/
-│       │   ├── base.py          # LatentSpace, RoutingGraph, validateRoutingGraph
-│       │   ├── single.py        # preset: one latent space feeding every decoder
-│       │   └── shared_private.py # preset: shared + private latent spaces
+│       │   ├── routing_graph_builders/
+│       │   │   ├── single.py        # preset: one latent space feeding every decoder
+│       │   │   ├── shared_private.py # preset: shared + private latent spaces
+│       │   └── base.py          # LatentSpace, RoutingGraph, validateRoutingGraph
 │       ├── models/
 │       │   └── global_vae.py    # assembles encoders + fusion + latent + decoders from a routing graph
 │       ├── losses/

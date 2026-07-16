@@ -29,6 +29,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
   including the naming-convention override (`N802`/`N803`/`N806`
   disabled) required by spec §10.
 
+### Changed
+- Renamed `latent/factorized.py` to `latent/shared_private.py` and
+  `buildFactorizedRoutingGraph` to `buildSharedPrivateRoutingGraph`,
+  since "several latent spaces" is a general routing graph, not a
+  hardcoded factorization scheme. And deplace them to `routing_graph_builders` directory
+
 ### Fixed
 - `validateRoutingGraph` now rejects a decoder that consumes more than
   one latent space but has no assembler assigned, instead of silently

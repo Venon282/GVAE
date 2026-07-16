@@ -38,6 +38,15 @@ versioning follows [Semantic Versioning](https://semver.org/).
   concrete assemblers in one file) into its own `assemblers/`
   subpackage, one class per file, matching the rest of the codebase's
   modularity rule.
+- `GlobalVae` is now built from an explicit `RoutingGraph` instead of
+  assuming a single fused latent space fed by every encoder.
+- `GlobalVae.__init__` takes separate `encoder_configs` and
+  `decoder_configs` instead of one `modality_configs` dict, so a single
+  shared decoder can be registered under its own name (the `*-D1` rows
+  of spec §2.1) instead of reusing a modality name that may not exist.
+- Fusion strategy is now selected per latent space (only required for
+  latent spaces fed by more than one encoder), not once globally for
+  the whole model.
 
 ### Fixed
 - `validateRoutingGraph` now rejects a decoder that consumes more than
@@ -45,3 +54,11 @@ versioning follows [Semantic Versioning](https://semver.org/).
   skipping the dimensionality check for it.
 - Fixed a typo in the decoder registry's error message ("Unknow" to
   "Unknown").
+- `GlobalVae.__init__` no longer crashes on construction: the fusion
+  strategy name was being called as a function before being resolved
+  to a class.
+- `GlobalVae.__init__` now explicitly rejects, with a clear
+  `NotImplementedError`, an encoder assigned to more than one latent
+  space, instead of silently reusing its output at the wrong
+  dimension for the second latent space. Found by running the
+  shared-plus-private preset end to end; see ADR 0002.

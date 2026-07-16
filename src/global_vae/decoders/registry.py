@@ -6,6 +6,7 @@ from global_vae.decoders.base import AbstractDecoder
 
 _DECODER_REGISTRY: dict[str, type[AbstractDecoder]] = {}
 
+
 def registerDecoder(name: str) -> Callable[[type[AbstractDecoder]], type[AbstractDecoder]]:
     """Class decorator registering a decoder implementation under `name`.
 
@@ -28,6 +29,7 @@ def registerDecoder(name: str) -> Callable[[type[AbstractDecoder]], type[Abstrac
 
     return decorator
 
+
 def getDecoderClass(name: str) -> type[AbstractDecoder]:
     """Look up a registered decoder class by name.
 
@@ -42,8 +44,9 @@ def getDecoderClass(name: str) -> type[AbstractDecoder]:
     """
     if name not in _DECODER_REGISTRY:
         available = ", ".join(sorted(_DECODER_REGISTRY)) or "(none registered)"
-        raise KeyError(f"Unknow decoder '{name}'. Available: {available}")
+        raise KeyError(f"Unknown decoder '{name}'. Available: {available}")
     return _DECODER_REGISTRY[name]
+
 
 def listRegisteredDecoders() -> list[str]:
     """Return all currently registered decoder names.

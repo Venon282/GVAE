@@ -84,34 +84,3 @@ def listRegisteredAssemblers() -> list[str]:
         Sorted list of registered assembler names.
     """
     return sorted(_ASSEMBLER_REGISTRY)
-
-@registerAssembler("concat")
-class ConcatAssembler(AbstractAssembler):
-    """Concatenates latent vectors along the feature dimension.
-
-    No dimensionality restriction across inputs (spec §2.2).
-    """
-    def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
-        return torch.cat(latents, dim=-1)
-
-@registerAssembler("sum")
-class SumAssembler(AbstractAssembler):
-    """Sums latent vectors elementwise.
-
-    Requires all input latent spaces to share the same dimensionality
-    (enforced at construction time by `validateRoutingGraph`).
-    """
-
-    def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
-        return torch.stack(latents, dim=0).sum(dim=0)
-
-@registerAssembler("average")
-class AverageAssembler(AbstractAssembler):
-    """Averages latent vectors elementwise.
-
-    Requires all input latent spaces to share the same dimensionality
-    (enforced at construction time by `validateRoutingGraph`).
-    """
-
-    def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
-        return torch.stack(latents, dim=0).mean(dim=0)

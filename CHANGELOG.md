@@ -34,7 +34,11 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `buildFactorizedRoutingGraph` to `buildSharedPrivateRoutingGraph`,
   since "several latent spaces" is a general routing graph, not a
   hardcoded factorization scheme. And deplace them to `routing_graph_builders` directory
-
+- Split `latent/assembler.py` (base class, registry, and all three
+  concrete assemblers in one file) into its own `assemblers/`
+  subpackage, one class per file, matching the rest of the codebase's
+  modularity rule.
+  
 ### Fixed
 - `validateRoutingGraph` now rejects a decoder that consumes more than
   one latent space but has no assembler assigned, instead of silently

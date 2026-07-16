@@ -116,6 +116,9 @@ def validateRoutingGraph(
             continue
 
         assembler_name = graph.decoder_assemblers.get(decoder_name)
+        if assembler_name is None and len(latent_names) > 1:
+            raise ValueError(f"Decoder {decoder_name} receive several latent spaces but no defined assembler")
+
         if assembler_name in dimension_locked_assemblers:
             dims = {graph.latent_specs[name].dim for name in latent_names}
             if len(dims) > 1:

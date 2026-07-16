@@ -28,3 +28,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `pyproject.toml` with `ruff`, `mypy` (strict), and `pytest` configured,
   including the naming-convention override (`N802`/`N803`/`N806`
   disabled) required by spec §10.
+
+### Fixed
+- `validateRoutingGraph` now rejects a decoder that consumes more than
+  one latent space but has no assembler assigned, instead of silently
+  skipping the dimensionality check for it.

@@ -2,17 +2,18 @@
 
 A `LatentSpace` is one independent Gaussian latent with its own
 posterior, its own prior, and its own KL term. "Several latent spaces"
-in the spec is *not* a fixed shared/private split — it is an arbitrary
+in the spec is not a fixed shared/private split. It is an arbitrary
 number of these, wired to encoders and decoders through a configurable
-routing graph. `single.py` (one latent space) and `factorized.py`
-(shared + private) are just two convenience presets built on top of
-the general `RoutingGraph` defined here; the framework does not treat
-either as a hardcoded special case.
+routing graph. `single.py` (one latent space) and `shared_private.py`
+(shared plus private, one example topology) are convenience presets
+built on top of the general `RoutingGraph` defined here; the framework
+does not treat either as a hardcoded special case.
 """
 
 from dataclasses import dataclass, field
 
 import torch
+
 
 @dataclass
 class LatentSpace:
@@ -50,13 +51,15 @@ class LatentSpace:
 
         Returns:
             Per-sample KL divergence, shape `(batch,)`. Callers sum
-            across latent spaces and average across the batch.
+            across latent spaces and average across the batch (see
+            `losses.kl.computeTotalKlLoss`).
         """
         return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=-1)
 
+
 @dataclass
 class RoutingGraph:
-    """Encoder <-> latent <-> decoder wiring for one model instance (spec §2.2).
+    """Encoder, latent, and decoder wiring for one model instance (spec §2.2).
 
     Attributes:
         latent_specs: Latent space name -> `LatentSpace`.
@@ -66,8 +69,9 @@ class RoutingGraph:
         latent_to_decoders: Latent space name -> list of decoder names
             that consume it.
         decoder_assemblers: Decoder name -> assembler strategy name.
-            Only meaningful for decoders consuming more than one
-            latent space (see `latent/assembler.py`).
+            Required for every decoder consuming more than one latent
+            space (see `assemblers/`); not needed for decoders
+            consuming exactly one.
     """
 
     latent_specs: dict[str, LatentSpace]
@@ -75,17 +79,22 @@ class RoutingGraph:
     latent_to_decoders: dict[str, list[str]] = field(default_factory=dict)
     decoder_assemblers: dict[str, str] = field(default_factory=dict)
 
+
 def validateRoutingGraph(
     graph: RoutingGraph,
     dimension_locked_assemblers: frozenset[str] = frozenset({"sum", "average"}),
 ) -> None:
     """Validate a routing graph against the constraints in spec §2.2.
 
-    Two constraints are enforced:
+    Three constraints are enforced:
       1. Every latent space must have at least one encoder feeding it
          and at least one decoder consuming it (no orphan latent
          spaces).
-      2. `sum`/`average` assemblers require all of their input latent
+      2. Every decoder that consumes more than one latent space must
+         have an assembler assigned in `decoder_assemblers`. A decoder
+         consuming several latent spaces with no assembler was
+         previously accepted silently; this is now rejected.
+      3. `sum`/`average` assemblers require all of their input latent
          spaces to share the same dimensionality (`concat` has no such
          restriction).
 
@@ -95,11 +104,10 @@ def validateRoutingGraph(
             matching dimensionality across their inputs.
 
     Raises:
-        ValueError: If either constraint is violated.
+        ValueError: If any constraint is violated.
     """
     fed_latents = {latent for latents in graph.encoder_to_latents.values() for latent in latents}
 
-    # check if every latent space have at least one encoder and one decoder
     for name in graph.latent_specs:
         if name not in fed_latents:
             raise ValueError(f"Latent space '{name}' has no encoder feeding it (orphan latent).")
@@ -116,8 +124,11 @@ def validateRoutingGraph(
             continue
 
         assembler_name = graph.decoder_assemblers.get(decoder_name)
-        if assembler_name is None and len(latent_names) > 1:
-            raise ValueError(f"Decoder {decoder_name} receive several latent spaces but no defined assembler")
+        if assembler_name is None:
+            raise ValueError(
+                f"Decoder '{decoder_name}' consumes {len(latent_names)} latent spaces "
+                f"{latent_names} but has no assembler assigned in `decoder_assemblers`."
+            )
 
         if assembler_name in dimension_locked_assemblers:
             dims = {graph.latent_specs[name].dim for name in latent_names}

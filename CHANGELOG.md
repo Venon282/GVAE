@@ -28,6 +28,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `pyproject.toml` with `ruff`, `mypy` (strict), and `pytest` configured,
   including the naming-convention override (`N802`/`N803`/`N806`
   disabled) required by spec §10.
+- `tests/integration/test_en_l1_dn_default.py` rebuilt against the
+  `GlobalVae.createSingleLatent(...)` constructor introduced in ADR
+  0002 (the previous version targeted the old `EN-L1-DN`-only
+  constructor from ADR 0001 and was flagged as stale by ADR 0002's own
+  "Consequences" section). Covers, with dummy per-modality
+  encoders/decoders and a dummy PoE fusion: forward-pass shapes for
+  every reconstruction and for the fused latent, missing-modality
+  robustness (spec §5), KL-loss finiteness, gradient flow into every
+  encoder and decoder, and the registry `KeyError` path. Passes `ruff
+  check`, `ruff format --check`, and `mypy --strict`.
 
 ### Changed
 - Renamed `latent/factorized.py` to `latent/shared_private.py` and
@@ -62,3 +72,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
   space, instead of silently reusing its output at the wrong
   dimension for the second latent space. Found by running the
   shared-plus-private preset end to end; see ADR 0002.
+
+### Removed
+- `assemblers/assembler.py`: a leftover duplicate of `AbstractAssembler`
+  and the assembler registry, left behind at the new subpackage path
+  after the split described above under "Changed".s

@@ -19,10 +19,10 @@ Build a **modular, extensible multimodal Variational Autoencoder framework** cap
 Context: research project with both industrial and academic ambitions. No artificial ceiling on complexity: the framework should be able to evolve toward richer generative architectures (hierarchical/sequential latents, discrete codes, autoregressive priors) if the research direction moves toward world-model-like or LLM-adjacent systems. We are not building that now, but the core interfaces must not make assumptions that would block it later.
 
 **Starting modalities (Phase 1):**
-1. 1D signals: a generic modality (any scalar series indexed by one variable). The first concrete dataset is SAXS (Small-Angle X-ray Scattering, scattering intensity vs. scattering vector *q*), but the encoder/decoder must be designed for the "1D signal" modality in general, not hardcoded to SAXS specifics.
+1. 1D signals: a generic modality (any scalar series indexed by one variable). 
 2. Images
 
-SAXS is a dataset/instance of the signal modality, not a modality of its own. Other signal sources (spectroscopy, sensor time series, etc.) should slot into the same "signal" encoder/decoder family later, with only preprocessing differing, not the architecture.
+Other signal sources (spectroscopy, sensor time series, etc.) should slot into the same "signal" encoder/decoder family later, with only preprocessing differing, not the architecture.
 
 Everything beyond this is added later through the same extension mechanism, with no special-casing.
 
@@ -312,6 +312,7 @@ All three examples are illustrative, not final: the actual schema still needs va
 - **CI:** GitHub Actions running lint, type-check, and tests on every push.
 - **Documentation:** `mkdocs` + `mkdocstrings` built from docstrings; major architectural choices (e.g. "why PoE + MoE + cross-attention", "why a routing graph instead of a fixed shared/private split") recorded as short ADRs (`docs/adr/NNNN-title.md`).
 - **New-modality checklist:** adding a modality means (1) subclass `Encoder`, (2) subclass `Decoder`, (3) register both, (4) add a config entry, (5) add a test. This keeps the "no limit on data types" promise operational rather than aspirational.
+- **Flexibility:** The code should be as flexible and generalist as possible so that it can be adapted to suit all users. In other words, avoid hard-coded values that may be significant to the user; instead, define default values. Another example: the signal encoder is not general-purpose, whereas the 1D CNN encoder and the ResNet 1D encoder are
 
 ---
 

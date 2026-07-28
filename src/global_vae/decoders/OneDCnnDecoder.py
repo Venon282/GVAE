@@ -182,7 +182,7 @@ class OneDCnnDecoder(AbstractDecoder):
         dilations_ = broadcastPerStage(dilations, num_transitions, "dilations")
         activations_ = broadcastPerStage(activations, num_transitions, "activations")
         normalizations_ = broadcastPerStage(normalizations, num_transitions, "normalizations")
-        upsample_modes_ = broadcastPerStage(normalizations, num_transitions, "upsample_modes")
+        upsample_modes_ = broadcastPerStage(upsample_modes, num_transitions, "upsample_modes")
 
         if output_paddings is not None:
             output_paddings_ = broadcastPerStage(
@@ -262,7 +262,7 @@ class OneDCnnDecoder(AbstractDecoder):
                 )
             )
             if not is_last:
-                normalization = normalizations[stage]
+                normalization = normalizations_[stage]
                 if normalization is not None:
                     layers.append(normalization(widths[stage + 1]))
                 activation = activations_[stage]
@@ -279,7 +279,7 @@ class OneDCnnDecoder(AbstractDecoder):
         paddings: int | Sequence[int] = 1,
         output_paddings: int | Sequence[int] = 0,
         dilations: int | Sequence[int] = 1,
-        upsample_mode: str = "conv_transpose",
+        upsample_modes: str = "interpolate_conv",
     ) -> int:
         """Compute the output length a given configuration produces.
 
@@ -307,7 +307,7 @@ class OneDCnnDecoder(AbstractDecoder):
             output_paddings: As in `__init__`, except always an
                 explicit shared-or-per-transition value.
             dilations: As in `__init__`.
-            upsample_mode: As in `__init__`.
+            upsample_modes: As in `__init__`.
 
         Returns:
             The resulting output length.
@@ -323,6 +323,8 @@ class OneDCnnDecoder(AbstractDecoder):
         paddings_ = broadcastPerStage(paddings, num_transitions, "paddings")
         output_paddings_ = broadcastPerStage(output_paddings, num_transitions, "output_paddings")
         dilations_ = broadcastPerStage(dilations, num_transitions, "dilations")
+        upsample_modes_ = broadcastPerStage(upsample_modes, num_transitions, "upsample_modes")
+
         return _computeLengthFromResolved(
             seed_length,
             kernel_sizes_,
@@ -330,7 +332,7 @@ class OneDCnnDecoder(AbstractDecoder):
             paddings_,
             output_paddings_,
             dilations_,
-            upsample_mode,
+            upsample_modes_,
         )
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
@@ -351,5 +353,5 @@ class OneDCnnDecoder(AbstractDecoder):
         return reconstruction.squeeze(1) if reconstruction.shape[1] == 1 else reconstruction
 
     @property
-    def modality_name(self) -> str:
+    def modalityName(self) -> str:
         return self._modality_name

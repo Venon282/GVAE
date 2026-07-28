@@ -45,6 +45,7 @@ class OneDCnnEncoder(AbstractEncoder):
     """
     def __init__(
         self,
+        modality_name: str,
         latent_dim: int,
         in_channels: int = 1,
         hidden_channels: tuple[int | nn.Module, ...] = (32, 64, 128),
@@ -116,6 +117,7 @@ class OneDCnnEncoder(AbstractEncoder):
         """
         super().__init__()
         self._latent_dim = latent_dim
+        self._modality_name = modality_name
         num_stages = len(hidden_channels)
 
         kernel_sizes_ = broadcastPerStage(kernel_sizes, num_stages, "kernel_sizes")
@@ -210,3 +212,7 @@ class OneDCnnEncoder(AbstractEncoder):
     @property
     def latent_dim(self) -> int:
         return self._latent_dim
+
+    @property
+    def modality_name(self) -> str:
+        return self._modality_name

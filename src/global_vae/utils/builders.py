@@ -1,24 +1,38 @@
 from torch import nn
 
-def build1DPoolLayer(pooling: str | None, kernel_size: int, stride: int | None, padding: int = 0, **kwargs) -> nn.Module | None:
-    """Build one stage's pooling layer, or `None` if pooling is disabled.
+def build1DPoolLayer(
+    pooling: str | None,
+    kernel_size: int | None,
+    stride: int | None,
+    padding: int,
+    **kwargs
+) -> nn.Module | None:
+    """Build one stage's 1D pooling layer, or `None` if pooling is disabled.
 
     Args:
         pooling: `"max"`, `"avg"`, or `None` to skip pooling for this
-            stage (e.g. if `strides` alone is used for downsampling).
-        kernel_size: Pooling window size.
-        stride: Pooling stride. `None` resolves to `kernel_size`,
-            i.e. non-overlapping windows.
+            stage entirely (e.g. if strides alone handle
+            downsampling).
+        kernel_size: Pooling window size. Required (not `None`) unless
+            `pooling` is `None`.
+        stride: Pooling stride. `None` resolves to `kernel_size`, i.e.
+            non-overlapping windows.
+        padding: Pooling padding.
+        **kwargs: Forwarded to the underlying `nn.MaxPool1d` /
+            `nn.AvgPool1d` constructor (e.g. `ceil_mode`,
+            `count_include_pad`, `return_indices`).
 
     Returns:
         The pooling module, or `None`.
 
     Raises:
-        ValueError: If `pooling` is not one of `"max"`, `"avg"`, `None`.
+        ValueError: If `pooling` is not one of `"max"`, `"avg"`, `None`,
+            or if `pooling` is set but `kernel_size` is `None`.
     """
     if pooling is None:
         return None
-
+    if kernel_size is None:
+        raise ValueError(f"pooling='{pooling}' requires a kernel_size, but kernel_size is None.")
     resolved_stride = stride if stride is not None else kernel_size
 
     if pooling == "max":
@@ -36,8 +50,8 @@ def build1DUpSampleStage(
     padding: int,
     output_padding: int,
     dilation: int,
-    groups: int = 1,
     upsample_mode: str = "interpolate_conv",
+    groups: int = 1,
     interp_mode: str = "nearest",
 ) -> nn.Module:
     """Build one transition's upsampling layer.

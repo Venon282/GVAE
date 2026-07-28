@@ -23,17 +23,25 @@ class OneDCnnEncoder(AbstractEncoder):
     pooling, so a single set of weights covers series of any length.
 
     Every per-stage hyperparameter (`kernel_sizes`, `strides`,
+    `paddings`, `dilations`, `poolings` and its own sub-parameters,
     `paddings`, `dilations`) accepts either one value shared by every
+    `activations`, `normalizations`) accepts either one value shared by every
     stage or a sequence of exactly `len(hidden_channels)` values, one
     per stage (see `utils.stage_config.broadcastPerStage`).
 
-    Note: if `pooling` is not `None`, each stage's pooling step reduces
+    Note: if a stage's `poolings` entry is not `None`, that stage's
     sequence length; if `strides` greater than 1 are also used, both
+    pooling step reduces sequence length; if that stage's `strides` is
     reductions compound. The input length must stay large enough,
+    also greater than 1, both reductions compound. The input length
     after however much downsampling the chosen configuration performs,
+    must stay large enough, after however much downsampling the chosen
     that no intermediate feature map collapses to zero length. This is
+    configuration performs, that no intermediate feature map collapses
     a real constraint of any strided/pooled conv stack, not something
+    to zero length. This is a real constraint of any strided/pooled
     silently handled.
+    conv stack, not something silently handled.
     """
     def __init__(
         self,
@@ -45,12 +53,12 @@ class OneDCnnEncoder(AbstractEncoder):
         paddings: int | Sequence[int] | None = None,
         dilations: int | Sequence[int] = 1,
         poolings: str | None | Sequence[str | None] = "max",
-        pool_kernel_sizes: int | Sequence[int] | None = 2,
-        pool_strides: int | Sequence[int] | None = None,
+        pool_kernel_sizes: int | None | Sequence[int | None] = 2,
+        pool_strides: int | None | Sequence[int | None] = None,
         pool_paddings: int | Sequence[int] = 0,
         pool_kwargs: dict | Sequence[dict] = {},
-        activations: Callable[[], nn.Module] | Sequence[Callable[[], nn.Module]] | None = nn.ReLU,
-        normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module]] | None = nn.BatchNorm1d,
+        activations: Callable[[], nn.Module] | Sequence[Callable[[], nn.Module] | None] | None = nn.ReLU,
+        normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module | None]] | None = nn.BatchNorm1d,
         global_pool: str = "avg",
     ) -> None:
         """Build the encoder.
@@ -62,42 +70,49 @@ class OneDCnnEncoder(AbstractEncoder):
                 are stacked, e.g. multiple detectors).
             hidden_channels: Output channel width of each conv stage,
                 applied in order. Its length fixes the number of
-                stages. Or the nn.Module ready
+                stages. Or directly a layer.
             kernel_sizes: Convolution kernel size, per stage or shared.
             strides: Convolution stride, per stage or shared. Use this
-                (with `pooling=None`) to downsample via strided
+                (with `poolings=None`) to downsample via strided
                 convolutions instead of a separate pooling layer.
             paddings: Convolution padding, per stage or shared.
                 Defaults (`None`) to `dilation * (kernel_size // 2)`
                 for each stage, which keeps a stride-1 stage's output
                 length equal to its input length.
             dilations: Convolution dilation, per stage or shared.
-            poolings: `"max"`, `"avg"`, or `None` to disable pooling per stage or
-                every stage.
+            poolings: `"max"`, `"avg"`, or `None` to disable pooling,
+                per stage or shared. Different stages may use
+                different pooling strategies.
             pool_kernel_sizes: Pooling window size, per stage or
-                shared. Ignored if `pooling` is `None`.
-            pool_strides: Pooling stride, per stage or shared.
-                Defaults (`None`) to each stage's pooling kernel size
-                (non-overlapping windows). Ignored if `pooling` is
-                `None`.
+                shared. Required (not `None`) for any stage whose
+                `poolings` entry is not `None`; ignored otherwise.
+            pool_strides: Pooling stride, per stage or shared. Defaults
+                (`None`) to that stage's pooling kernel size
+                (non-overlapping windows). Ignored for stages whose
+                `poolings` entry is `None`.
             pool_paddings: Pooling padding, per stage or shared.
-                Defaults 0 to each stage's pooling padding size
-            pool_kwargs: Pooling additional kwargs, per stage or shared.
+                Ignored for stages whose `poolings` entry is `None`.
+            pool_kwargs: Additional keyword arguments forwarded to the
+                pooling layer's constructor (e.g. `ceil_mode`,
+                `count_include_pad`), per stage or shared. Defaults
+                (`None`) to no extra arguments for any stage.
             activations: Zero-argument factory returning a fresh
-                activation module, applied after every stage. Pass
-                `None` to disable activation entirely.
+                activation module, per stage or shared. Pass `None`
+                (either overall, or as one stage's entry in a sequence)
+                to disable activation for that stage.
             normalizations: One-argument factory taking a channel count
-                and returning a fresh normalization module, applied
-                after every stage's convolution. Pass `None` to
-                disable normalization entirely.
+                and returning a fresh normalization module, per stage
+                or shared. Pass `None` the same way to disable
+                normalization for a stage.
             global_pool: `"avg"` or `"max"`: which adaptive pooling
                 reduces the final feature map to a single fixed-size
                 vector, regardless of input length.
 
         Raises:
             ValueError: If any per-stage sequence argument does not
-                have exactly `len(hidden_channels)` values, or if
-                `pooling` / `global_pool` is not a recognized choice.
+                have exactly `len(hidden_channels)` values, if a stage
+                requests pooling without a `pool_kernel_sizes` entry, or
+                if `global_pool` is not a recognized choice.
         """
         super().__init__()
         self._latent_dim = latent_dim
@@ -126,8 +141,12 @@ class OneDCnnEncoder(AbstractEncoder):
         channels = in_channels
         for stage in range(num_stages):
             out_channels = hidden_channels[stage]
-            layers.append(
-                nn.Conv1d(
+
+
+            if isinstance(hidden_channels, nn.Module):
+                layer = hidden_channels
+            else:
+                layer = nn.Conv1d(
                     channels,
                     out_channels,
                     kernel_size=kernel_sizes_[stage],
@@ -135,7 +154,8 @@ class OneDCnnEncoder(AbstractEncoder):
                     padding=paddings_[stage],
                     dilation=dilations_[stage],
                 )
-            )
+
+            layers.append(layer)
 
             normalization = normalizations_[stage]
             if normalization is not None:

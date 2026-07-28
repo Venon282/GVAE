@@ -6,7 +6,7 @@
 model:
   name: global_vae
   modalities:
-    signal: # first concrete dataset for this modality: SAXS
+    signal:
       encoder: signal_cnn_v1
       decoder: signal_cnn_v1
     image:

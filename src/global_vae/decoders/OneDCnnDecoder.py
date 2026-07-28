@@ -76,7 +76,6 @@ class OneDCnnDecoder(AbstractDecoder):
     """
     def __init__(
         self,
-        modality_name: str,
         latent_dim: int,
         output_length: int,
         out_channels: int = 1,
@@ -94,6 +93,7 @@ class OneDCnnDecoder(AbstractDecoder):
         normalizations: (
             Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module] | None] | None
         ) = nn.BatchNorm1d,
+        modality_name: str = "vector",
     ) -> None:
         """Build the decoder.
 

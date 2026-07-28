@@ -45,7 +45,6 @@ class OneDCnnEncoder(AbstractEncoder):
     """
     def __init__(
         self,
-        modality_name: str,
         latent_dim: int,
         in_channels: int = 1,
         hidden_channels: tuple[int | nn.Module, ...] = (32, 64, 128),
@@ -61,6 +60,7 @@ class OneDCnnEncoder(AbstractEncoder):
         activations: Callable[[], nn.Module] | Sequence[Callable[[], nn.Module] | None] | None = nn.ReLU,
         normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module | None]] | None = nn.BatchNorm1d,
         global_pool: str = "avg",
+        modality_name: str = "vector",
     ) -> None:
         """Build the encoder.
 
@@ -210,9 +210,9 @@ class OneDCnnEncoder(AbstractEncoder):
         return mu, logvar
 
     @property
-    def latent_dim(self) -> int:
+    def latentDim(self) -> int:
         return self._latent_dim
 
     @property
-    def modality_name(self) -> str:
+    def modalityName(self) -> str:
         return self._modality_name

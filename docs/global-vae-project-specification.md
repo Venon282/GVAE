@@ -57,10 +57,10 @@ The table above is a simplified overview. For any "several latent spaces" row, t
 
 ### 2.2 Latent routing graph
 
-"Several latent spaces" does not mean a fixed shared/private split. It means the model can have **any number of independent latent spaces**, each with its own posterior, its own prior, and its own KL term, wired to encoders and decoders through a **configurable routing graph**:
+"Several latent spaces" does not mean a fixed shared/private split. It means the model can have **any number of independent latent spaces**, each with its own posterior, its own prior, and its own egularization term (§2.3), wired to encoders and decoders through a **configurable routing graph**:
 
-- **Encoder → latent.** An encoder can feed exactly one latent space, or fan out to several, e.g. one shared trunk with several independent projection heads, each producing its own `(mu, logvar)`. When *several encoders* feed the *same* latent space, that's the Fusion problem from §4 (PoE / MoE / concat+MLP / cross-attention). Fusion combines distribution parameters, before sampling.
-- **Latent → decoder.** A decoder can consume exactly one latent space, or several. When it consumes several, an **Assembler** combines the already-realized latent vectors into one input tensor. Candidate assemblers: `concat`, `sum`, `average`: a pluggable registry following the same pattern as Fusion, but operating on realized vectors rather than distribution parameters (no probabilistic machinery needed here: the vectors already exist, this is just merging them for the decoder's input layer).
+- **Encoder -> latent.** An encoder produces one `(mu, logvar)` output; that same output can feed one latent space directly, or several. When it feeds several, each encoder -> latent edge may apply an optional **Latent Head** (identity by default, or a small linear/MLP projection when the target latent space's dimensionality or purpose differs) to adapt the shared encoder output before it becomes that latent space's own parameters. When *several encoders* feed the *same* latent space, that's the Fusion problem from §4 (PoE / MoE / concat+MLP / cross-attention), applied to the (optionally head-adapted) outputs. Fusion combines distribution parameters, before sampling.
+- **Latent -> decoder.** A decoder can consume exactly one latent space, or several. When it consumes several, an **Assembler** combines the already-realized latent vectors into one input tensor. Candidate assemblers: `concat`, `sum`, `average`, `weighted_sum` (learned per-space weights), and `attention` (cross-attention over latent vectors, no fixed-dimensionality requirement) . a pluggable registry following the same pattern as Fusion, but operating on realized vectors rather than distribution parameters (no probabilistic machinery needed here: the vectors already exist, this is just merging them for the decoder's input layer).
 
 This **generalizes** the earlier "shared + private" idea rather than replacing it. Shared+private is just one specific routing graph: all encoders feed a `z_shared` via Fusion, each encoder also feeds its own untouched `z_private_m`, and each modality's decoder consumes `{z_shared, z_private_m}` via `concat`. The framework supports that topology as *one configuration among others*, not as the hardcoded meaning of "several latent spaces."
 
@@ -68,22 +68,34 @@ This **generalizes** the earlier "shared + private" idea rather than replacing i
 - Every latent space must have at least one encoder feeding it and at least one decoder consuming it: no orphan latent spaces.
 - `sum` and `average` assemblers require all their input latent spaces to share the same dimensionality; `concat` has no such restriction.
 
+### 2.3 Latent regularization
+ 
+KL divergence to a standard normal prior is the default regularization term for a latent space, but it must not be hardcoded as the only option. Each latent space's regularization is a **pluggable strategy** (`AbstractLatentRegularizer`, registered like Fusion / Assembler / Latent Head), so alternatives . Maximum Mean Discrepancy (WAE-style), free-bits KL, or eventually a learned/autoregressive prior (§7) . can be added without touching the model class.
+ 
+The weight applied to a latent space's regularization term (`beta`) is likewise flexible. The three common patterns below are meant to be expressible through the same config mechanism, not mutually exclusive code paths:
+- a single constant shared by every latent space (simplest, no annealing);
+- a global schedule (e.g. linear warm-up, cyclical annealing) shared by every latent space;
+- a per-latent-space value or schedule, letting different latent spaces (e.g. a shared vs. a private code) be regularized differently.
+`losses/regularizers/` holds the registry of regularization strategies; the schedule (constant, or a function of training step) is a separate, orthogonal config concern from *which* regularizer is used for a given latent space.
+
 ---
 
 ## 3. Glossary (keep consistent everywhere)
-
+ 
 - **Modality**: a data type/source (1D signal, image, ...). A modality may have several concrete datasets (e.g. SAXS is one dataset within the "1D signal" modality).
 - **Encoder**: network mapping one modality's raw input to distribution parameters (or to features destined for fusion).
+- **Latent head**: optional per-edge module adapting an encoder's `(mu, logvar)` output to a specific latent space's dimensionality/purpose, used when that encoder feeds more than one latent space. Identity by default.
 - **Fusion module**: combines outputs of multiple *encoders* into a single set of latent distribution parameters, for one given latent space. Operates on distribution parameters, before sampling.
-- **Latent space**: an independent probabilistic code `z_i`, with its own posterior, its own prior, and its own KL term. A model has one or several; when several, they are wired to encoders and decoders through the routing graph (§2.2), not a fixed shared/private split.
-- **Assembler**: combines several already-realized *latent vectors* into one decoder input (`concat`, `sum`, `average`, ...). Distinct from Fusion: Fusion acts on distribution parameters before sampling; the Assembler acts on realized vectors after.
-- **Routing graph**: the bipartite wiring {encoders → latent spaces} and {latent spaces → decoders}, set via config, that determines connectivity whenever there is more than one latent space.
+- **Latent space**: an independent probabilistic code `z_i`, with its own posterior, its own prior, and its own regularization term (not necessarily KL divergence, see §2.3). A model has one or several; when several, they are wired to encoders and decoders through the routing graph (§2.2), not a fixed shared/private split.
+- **Assembler**: combines several already-realized *latent vectors* into one decoder input (`concat`, `sum`, `average`, `weighted_sum`, `attention`, ...). Distinct from Fusion: Fusion acts on distribution parameters before sampling; the Assembler acts on realized vectors after.
+- **Routing graph**: the bipartite wiring {encoders -> latent spaces} and {latent spaces -> decoders}, set via config, that determines connectivity whenever there is more than one latent space.
 - **Decoder**: network mapping latent(s) back to a modality-specific reconstruction.
 - **Configuration**: the tuple {encoder cardinality, latent cardinality, decoder cardinality, routing graph, per-latent-space fusion strategy, per-decoder assembler strategy, residual flag} that fully determines a model instance.
 
+
 ---
 
-## 4. Fusion strategies (encoder → latent)
+## 4. Fusion strategies (encoder -> latent)
 
 No single fusion strategy is hardcoded, and fusion is not a single model-wide choice: it is selected **per latent space**, for whichever latent spaces are fed by more than one encoder (see the routing graph, §2.2). A latent space fed by exactly one encoder needs no fusion strategy at all. Each fusion assignment can optionally use residual connections (a config flag alongside it).
 
@@ -96,7 +108,7 @@ No single fusion strategy is hardcoded, and fusion is not a single model-wide ch
 
 This is implemented as a **strategy pattern**: an `AbstractFusion` interface with each strategy as a subclass, registered by name (e.g. `poe`, `moe`, `concat_mlp`, `cross_attention`) so a new one can be added without touching existing code.
 
-See §2.2 for the symmetric decoder-side mechanism (the Assembler) used when a decoder consumes more than one independent latent space.
+See §2.2 for the symmetric decoder-side mechanism (the Assembler) used when a decoder consumes more than one independent latent space, and for the Latent Head, the analogous mechanism on the encoder side when a single encoder feeds more than one latent space.
 
 ---
 
@@ -118,6 +130,15 @@ Explicitly desired, but achieved as a **side effect of the fusion strategy choic
 | 2 | Images | Candidate encoders: CNN (ResNet-style) or ViT, depending on resolution/dataset size. |
 | 3+ | Open-ended (audio, tabular, text, time series, graphs, point clouds, ...) | Adding a modality = writing one new `Encoder` + `Decoder` subclass and registering them. Zero changes to core framework code. |
 
+### 6.1 Near-term milestones
+ 
+The genericity described above (§1, §6) is a design constraint on the architecture, not the order in which things get built. The concrete build order is:
+ 
+1. **A working single-modality signal VAE.** One encoder, one latent space, one decoder . no fusion, no second modality, just `signal -> z -> signal` . trained end to end on SAXS data, with the ability to inspect training curves and visualize the latent space. This validates the base building blocks (encoder, latent, decoder, losses) in isolation before any multimodal machinery is exercised.
+2. **A paired signal + image setup.** Two datasets (signal, image) that are currently separate get associated into (signal, image) pairs. The exact pairing mechanism (matching by filename/sample-ID convention, or otherwise) is still open (§11). This is what exercises Fusion (§4) and the `EN-L1-DN` default (§2.1) for the first time.
+3. Everything else in the roadmap table above (further modalities, richer latent topologies) comes after milestones 1 and 2 are working end to end.
+Future Claude conversations should default to whichever milestone is currently active, rather than jumping straight to the fully general multimodal machinery.
+
 ---
 
 ## 7. Long-term direction (not built now, but not blocked either)
@@ -133,7 +154,7 @@ These are **future directions**, listed to keep core abstractions (encoder/decod
 ---
 
 ## 8. Repository structure
-
+ 
 ```
 global-vae/
 ├── pyproject.toml
@@ -161,27 +182,36 @@ global-vae/
 │       │   ├── moe.py
 │       │   ├── concat_mlp.py
 │       │   └── cross_attention.py
+│       ├── heads/
+│       │   ├── base.py          # AbstractLatentHead interface
+│       │   ├── registry.py
+│       │   ├── identity.py      # default: no-op passthrough
+│       │   └── linear.py        # small learned projection between an encoder output and a latent space
 │       ├── assemblers/
 │       │   ├── base.py          # AbstractAssembler interface
 │       │   ├── registry.py
 │       │   ├── concat.py
 │       │   ├── sum.py
-│       │   └── average.py
+│       │   ├── average.py
+│       │   ├── weighted_sum.py
+│       │   └── attention.py
 │       ├── latent/
-│       │   ├── routing_graph_builders/
-│       │   │   ├── single.py        # preset: one latent space feeding every decoder
-│       │   │   ├── shared_private.py # preset: shared + private latent spaces
-│       │   └── base.py          # LatentSpace, RoutingGraph, validateRoutingGraph
+│       │   ├── base.py          # LatentSpace, RoutingGraph, validateRoutingGraph
+│       │   ├── single.py        # preset: one latent space feeding every decoder
+│       │   └── shared_private.py # preset: shared + private latent spaces
 │       ├── models/
-│       │   └── global_vae.py    # assembles encoders + fusion + latent + decoders from a routing graph
+│       │   └── global_vae.py    # assembles encoders + heads + fusion + latent + decoders from a routing graph
 │       ├── losses/
 │       │   ├── reconstruction.py
-│       │   └── kl.py            # aggregates KL across latent spaces
+│       │   └── regularizers/
+│       │       ├── base.py      # AbstractLatentRegularizer interface
+│       │       ├── registry.py
+│       │       └── kl_standard_normal.py  # default strategy
 │       ├── data/
 │       │   ├── datamodule.py
 │       │   └── transforms/
 │       ├── training/
-│       │   └── trainer.py
+│       │   └── trainer.py       # raw PyTorch loop for now (see §10); Lightning/Fabric later
 │       └── utils/
 ├── tests/
 │   ├── unit/
@@ -192,13 +222,12 @@ global-vae/
 ```
 
 ---
-
 ## 9. Illustrative config examples
-
+ 
 Not final: these show how the registry + config-driven pattern is meant to operate in practice, matching `GlobalVae`'s two constructors (`__init__` with an explicit `RoutingGraph`, and the `createSingleLatent()` convenience wrapper; see `models/global_vae.py` and ADR 0002).
-
+ 
 **Single latent space** (`GlobalVae.createSingleLatent`, the `EN-L1-DN` Phase-1 default):
-
+ 
 ```yaml
 model:
   name: global_vae
@@ -216,12 +245,12 @@ model:
       strategy: poe            # poe | moe | concat_mlp | cross_attention
       residual: true
   training:
-    beta_schedule: linear_warmup
+    beta: linear_warmup       # constant | schedule name | per-space dict (see §2.3)
     modality_dropout_p: 0.15  # trains robustness to missing modalities
 ```
-
+ 
 **Several independent latent spaces, no encoder fan-out** (`GlobalVae.__init__` with an explicit `RoutingGraph`; this pattern works end to end today, verified against ADR 0002):
-
+ 
 ```yaml
 model:
   name: global_vae
@@ -244,12 +273,12 @@ model:
     decoders_consume:
       joint: {spaces: [z_signal, z_image], assembler: concat}
   training:
-    beta_schedule: linear_warmup
+    beta: linear_warmup       # constant | schedule name | per-space dict (see §2.3)
     modality_dropout_p: 0.15
 ```
-
-**Shared plus private latent spaces** (`latent/shared_private.py`'s preset; illustrative only, does not run yet, see ADR 0002):
-
+ 
+**Shared plus private latent spaces** (`latent/shared_private.py`'s preset . the encoder fan-out case, resolved via the Latent Head, §2.2):
+ 
 ```yaml
 model:
   name: global_vae
@@ -270,21 +299,23 @@ model:
       z_signal_private:
         dim: 32
         fed_by: [signal]                # same encoder as z_shared: this is encoder fan-out
+        head: linear                    # projects the signal encoder's 128-dim output down to 32
       z_image_private:
         dim: 32
         fed_by: [image]                  # same encoder as z_shared: this is encoder fan-out
+        head: linear                    # projects the image encoder's 128-dim output down to 32
     decoders_consume:
       signal: {spaces: [z_shared, z_signal_private], assembler: concat}
       image:  {spaces: [z_shared, z_image_private],  assembler: concat}
   training:
-    beta_schedule: linear_warmup
+    beta: linear_warmup            # constant | schedule name | per-space dict (see §2.3)
     modality_dropout_p: 0.15
 ```
-
-`fed_by: [signal]` for `z_signal_private` looks identical in shape to the working example above, but `signal` is *also* listed under `z_shared`'s `fed_by`. That is the encoder fan-out case: the `signal` encoder would need to produce two independent `(mu, logvar)` pairs (one per latent space it feeds) instead of one. Building the `RoutingGraph` succeeds, but `GlobalVae` currently rejects it with `NotImplementedError` rather than silently using the same pair for both spaces.
-
+ 
+`signal` feeds both `z_shared` (through Fusion, combined with `image`) and its own `z_signal_private`. This is the encoder fan-out case from §2.2: the `signal` encoder produces one `(mu, logvar)` pair, and the `head: linear` on the `z_signal_private` edge adapts that shared output down to this latent space's own dimensionality (128 -> 32), so the two latent spaces stay genuinely independent instead of accidentally sharing the same values.
+ 
 All three examples are illustrative, not final: the actual schema still needs validation logic and a Hydra/dataclass binding (§11).
-
+ 
 ---
 
 ## 10. Coding standards
@@ -292,17 +323,19 @@ All three examples are illustrative, not final: the actual schema still needs va
 - **Language/runtime:** Python 3.11+, PyTorch (latest stable).
 - **Formatting/linting:** `ruff` (lint + format), consistent import ordering.
 - **Naming convention (custom, overrides PEP8 default for callables):**
-  - Classes → `CamelCase` (e.g. `GlobalVae`, `SignalEncoder`, `ProductOfExperts`).
-  - Variables → `snake_case` (e.g. `latent_dim`, `batch_size`).
-  - Functions and methods → same rule as classes but starting lowercase, i.e. `camelCase` (e.g. `computeLoss`, `encodeSignal`, `registerEncoder`), not PEP8's usual `snake_case` for callables.
+  - Classes -> `CamelCase` (e.g. `GlobalVae`, `SignalEncoder`, `ProductOfExperts`).
+  - Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
+  - Functions and methods -> same rule as classes but starting lowercase, i.e. `camelCase` (e.g. `computeLoss`, `encodeSignal`, `registerEncoder`), not PEP8's usual `snake_case` for callables.
   - Since this deviates from PEP8, disable/adjust `ruff`'s naming rules (`N802`, `N803`, `N806`) in `pyproject.toml` and note the exception in the contributor docs, so linting doesn't silently "fix" it back to snake_case later.
-- **Typography:** no em dashes (`—`) in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead. This is a house style rule, not a technical one, so there is no linter for it; review for it like any other style note.
+- **Typography:** no em dashes (`—`) and in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead. This is a house style rule, not a technical one, so there is no linter for it; review for it like any other style note. Same for the arrows (`→`) you can use `->` instead
 - **Typing:** type hints mandatory everywhere; `mypy` run in CI.
 - **Docstrings:** Google-style, mandatory on every public class/function: purpose, `Args`, `Returns`, `Raises`.
-- **Modularity:** one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers. No god-files: a base class, its registry, and every concrete strategy each get their own file (see `fusion/` and `assemblers/`).
-- **Interfaces:** `AbstractEncoder`, `AbstractDecoder`, `AbstractFusion`, `AbstractAssembler` as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (`@registerEncoder("signal")`); this is what makes "add a modality without touching the core" actually true, not just aspirational.
+- **Modularity:** one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers/heads/regularizers. No god-files: a base class, its registry, and every concrete strategy each get their own file (see `fusion/`, `assemblers/`, `heads/`, `losses/regularizers/`).
+- **Interfaces:** `AbstractEncoder`, `AbstractDecoder`, `AbstractFusion`, `AbstractAssembler`, `AbstractLatentHead`, `AbstractLatentRegularizer` as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (`@registerEncoder("signal")`); this is what makes "add a modality without touching the core" actually true, not just aspirational.
 - **Registry population:** a class decorated with `@registerX(...)` is only registered once its module has actually been imported. Each registry-based subpackage's `__init__.py` must import every concrete implementation for that side effect (`import global_vae.assemblers.concat  # noqa: F401`, one line per file), or `getXClass(name)` raises `KeyError` even though the file exists on disk.
-- **Routing graph validation:** `validateRoutingGraph` (`latent/base.py`) must run at model-construction time for every configuration, not just the Phase-1 default. It rejects orphan latent spaces, rejects a decoder that consumes more than one latent space without an assigned assembler, and checks dimensional compatibility for `sum`/`average` assemblers.
+- **Routing graph validation:** `validateRoutingGraph` (`latent/base.py`) must run at model-construction time for every configuration, not just the Phase-1 default. It rejects orphan latent spaces, rejects a decoder that consumes more than one latent space without an assigned assembler, checks dimensional compatibility for `sum`/`average` assemblers, and rejects an encoder -> latent edge whose `head` output dimension does not match the target latent space's declared `dim`.
+- **Latent regularization:** never hardcode `LatentSpace.klDivergence` (or an equivalent KL-only computation) as the only regularization path inside the model class; route it through the `AbstractLatentRegularizer` registry (§2.3) so alternative strategies (MMD, free-bits, learned priors) can be swapped in via config.
+- **Training loop:** a raw PyTorch loop (`training/trainer.py`) for now, favoring transparency while the architecture (routing graph, registries) is still actively changing; migrate to PyTorch Lightning (or `Lightning Fabric` as an intermediate step) once the model design stabilizes and multi-GPU/scaling needs become concrete.
 - **Config management:** Hydra + structured dataclasses (or Pydantic) for validated, composable configs. No magic strings/dicts scattered through the code.
 - **Testing:** `pytest`. Unit tests per module, plus an integration test that instantiates **each of the 8 architecture combinations** end-to-end on dummy tensors (shape and gradient sanity checks). Coverage should target core logic (fusion math, loss correctness, forward/backward pass), not a vanity percentage.
 - **Experiment tracking:** Weights & Biases or MLflow, logging losses, latent-space visualizations, and reconstructions per run.
@@ -318,21 +351,23 @@ All three examples are illustrative, not final: the actual schema still needs va
 
 ## 11. Open questions (deliberately deferred)
 
-- Exact schema (YAML/dataclass) for expressing the routing graph in config (`fed_by`, `spaces`, `decoders_consume` in §9's second example are illustrative, not final) and how it is validated before being turned into a `RoutingGraph`.
-- Which assembler operators to implement beyond `concat` / `sum` / `average` (e.g. a learned or attention-weighted assembler); not needed for Phase 1, but the registry should stay open to it.
-- How `AbstractEncoder` should expose one `(mu, logvar)` pair per latent space it feeds, for encoders assigned to more than one latent space (needed for `E1-*` rows and for the shared-plus-private preset in `latent/shared_private.py`; see ADR 0002). Until this is decided, `GlobalVae` rejects that case with `NotImplementedError` rather than guessing.
-- Precise loss weighting / β-VAE annealing schedule, including whether β is shared across latent spaces or set per latent space (`losses.kl.computeTotalKlLoss` already accepts either; the actual values/schedule are still undecided).
-- Whether training uses raw PyTorch loops or PyTorch Lightning.
-- First concrete joint signal+image dataset/task to validate the pipeline end-to-end (using SAXS as the initial signal dataset).
-- Production/serving requirements, if any arise later (currently out of scope, research framework first).
+- Exact schema (YAML/dataclass) for expressing the routing graph, the Latent Head assignments, and the regularizer/beta configuration . §2.2, §2.3, and §9 are illustrative, not final; the validation logic (`validateRoutingGraph` and its Hydra/Pydantic binding, §10) still needs to be written.
+- Which assembler operators to implement first: `concat`, `sum`, `average`, `weighted_sum`, and `attention` are all wanted (§2.2) . order of implementation is open, but none is deferred indefinitely.
+- Which regularizer strategies to implement beyond the default `kl_standard_normal` (§2.3) . MMD and free-bits KL are candidates; not needed immediately, but the registry should stay open.
+- Exact pairing mechanism for the first paired signal+image dataset (§6.1) . matching by filename/sample-ID convention is the likely approach, but the concrete scheme isn't decided yet.
+- Precise β schedule hyperparameters (warm-up length, cyclical period, per-space values) . the mechanism supports all of this (§2.3); only the actual numbers are still to be tuned empirically once training starts.
+- Concrete production/serving target (API serving, batch inference, edge deployment, ...) . in scope longer-term (§1), but sequenced after the model is functionally complete; specific requirements aren't known yet.
 
 ---
 
 ## 12. How future Claude conversations should use this document
 
 - Treat the terminology in §3 as canonical: don't invent new names for the same concepts.
-- Any new component (encoder, decoder, fusion strategy, assembler) must follow the registry pattern in §10, not be hardcoded into the model class, and must be added to its subpackage's `__init__.py` imports so it actually registers.
+- Any new component (encoder, decoder, fusion strategy, assembler, latent head, regularizer) must follow the registry pattern in §10, not be hardcoded into the model class, and must be added to its subpackage's `__init__.py` imports so it actually registers.
 - Latent spaces are independent by construction: never hardcode a shared/private split as *the* meaning of "several latent spaces"; always go through the routing graph (§2.2). Fusion is chosen per latent space, not once for the whole model.
+- Encoder fan-out to several latent spaces goes through a Latent Head (§2.2), never by giving `AbstractEncoder` multiple output heads or duplicating the encoder.
+- Regularization is never hardcoded to KL-to-standard-normal inside the model class; it goes through the `AbstractLatentRegularizer` registry (§2.3).
 - Build routing graphs through `RoutingGraph` directly or through a preset in `latent/` (`single.py`, `shared_private.py`, or a new one); never re-derive the same construction inline in a model class.
+- Respect the milestone order in §6.1: don't build the fully general multimodal machinery before the single-modality signal VAE (encoder -> latent -> decoder, training + latent visualization) actually works end to end.
 - If a request would violate the "no fixed fusion strategy" or "no fixed modality set" principles, flag it rather than silently narrowing the design.
 - When a decision in §11 is needed to proceed, ask: don't guess and move on.

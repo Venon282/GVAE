@@ -7,8 +7,8 @@ model:
   name: global_vae
   modalities:
     signal:
-      encoder: signal_cnn_v1
-      decoder: signal_cnn_v1
+      encoder: 1d_cnn_encoder_v1
+      decoder: 1d_cnn_encoder_v1
     image:
       encoder: resnet_encoder_v1
       decoder: resnet_decoder_v1

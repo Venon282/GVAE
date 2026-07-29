@@ -142,12 +142,16 @@ class OneDCnnEncoder(AbstractEncoder):
         layers: list[nn.Module] = []
         channels = in_channels
         for stage in range(num_stages):
-            out_channels = hidden_channels[stage]
+
 
 
             if isinstance(hidden_channels, nn.Module):
+                out_channels = hidden_channels.out_channels if hasattr(hidden_channels, "out_channels") else \
+                                hidden_channels.out_features if hasattr(hidden_channels, "out_features") else \
+                                (_ for _ in ()).throw(AttributeError(f"The {hidden_channels.__class__.__name__} in hidden_channels do not have an out_channels or out_features which is required."))
                 layer = hidden_channels
             else:
+                out_channels = hidden_channels[stage]
                 layer = nn.Conv1d(
                     channels,
                     out_channels,

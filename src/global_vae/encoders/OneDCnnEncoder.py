@@ -61,6 +61,7 @@ class OneDCnnEncoder(AbstractEncoder):
         normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module | None]] | None = nn.BatchNorm1d,
         global_pool: str = "avg",
         head_hidden_dims: tuple[int, ...] = (),
+        head_activation: Callable[[], nn.Module] | None = nn.ReLU,
         modality_name: str = "vector",
     ) -> None:
         """Build the encoder.
@@ -106,14 +107,16 @@ class OneDCnnEncoder(AbstractEncoder):
                 and returning a fresh normalization module, per stage
                 or shared. Pass `None` the same way to disable
                 normalization for a stage.
+            global_pool: `"avg"` or `"max"`: which adaptive pooling
+                            reduces the final feature map to a single fixed-size
+                            vector, regardless of input length.
             head_hidden_dims: Hidden layer sizes for an optional small MLP
                 inserted between the pooled features and the `to_mu`/
                 `to_logvar` heads. Empty tuple (default) keeps today's
                 behavior: a single linear layer straight from pooled
                 features to each head.
-            global_pool: `"avg"` or `"max"`: which adaptive pooling
-                reduces the final feature map to a single fixed-size
-                vector, regardless of input length.
+            head_activation: Optional head activation layer
+
 
         Raises:
             ValueError: If any per-stage sequence argument does not
@@ -201,7 +204,9 @@ class OneDCnnEncoder(AbstractEncoder):
         head_layers: list[nn.Module] = []
         head_in = channels
         for hidden_dim in head_hidden_dims:
-            head_layers += [nn.Linear(head_in, hidden_dim), nn.ReLU()]
+            head_layers.append(nn.Linear(head_in, hidden_dim))
+            if head_activation is not None:
+                head_layers.append(head_activation())
             head_in = hidden_dim
         self.head: nn.Module = nn.Sequential(*head_layers) if head_layers else nn.Identity()
 

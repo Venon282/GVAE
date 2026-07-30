@@ -93,6 +93,8 @@ class OneDCnnDecoder(AbstractDecoder):
         normalizations: (
             Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module] | None] | None
         ) = nn.BatchNorm1d,
+        head_hidden_dims: tuple[int, ...] = (),
+        head_activation: Callable[[], nn.Module] | None = nn.ReLU,
         modality_name: str = "vector",
     ) -> None:
         """Build the decoder.
@@ -159,6 +161,11 @@ class OneDCnnDecoder(AbstractDecoder):
                 and returning a fresh normalization module, per
                 transition or shared, applied the same places as
                 `activations`.
+            head_hidden_dims: Hidden layer sizes for an optional small MLP
+                inserted between the latent vector and the seed projection.
+                Empty tuple (default) keeps today's behavior: a single
+                linear layer straight from `z` to the seed.
+            head_activation: Optional activation layer to use for the head
             modality_name:
 
         Raises:
@@ -243,7 +250,17 @@ class OneDCnnDecoder(AbstractDecoder):
 
         self._seed_channels = hidden_channels[0]
         self._seed_length = seed_length
-        self.project = nn.Linear(latent_dim, hidden_channels[0] * seed_length)
+
+        head_layers: list[nn.Module] = []
+        head_in = latent_dim
+        for hidden_dim in head_hidden_dims:
+            head_layers.append(nn.Linear(head_in, hidden_dim))
+            if head_activation is not None:
+                head_layers.append(head_activation())
+            head_in = hidden_dim
+        self.head: nn.Module = nn.Sequential(*head_layers) if head_layers else nn.Identity()
+
+        self.project = nn.Linear(head_in, hidden_channels[0] * seed_length)
 
         widths = (*hidden_channels, out_channels)
         layers: list[nn.Module] = []
@@ -348,7 +365,7 @@ class OneDCnnDecoder(AbstractDecoder):
             output_length)` if `out_channels` was set above `1`.
         """
         batch_size = z.shape[0]
-        seed = self.project(z).view(batch_size, self._seed_channels, self._seed_length)
+        seed = self.project(self.head(z)).view(batch_size, self._seed_channels, self._seed_length)
         reconstruction: torch.Tensor = self.deconv(seed)
         return reconstruction.squeeze(1) if reconstruction.shape[1] == 1 else reconstruction
 

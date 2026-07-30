@@ -326,6 +326,7 @@ All three examples are illustrative, not final: the actual schema still needs va
   - Classes -> `CamelCase` (e.g. `GlobalVae`, `SignalEncoder`, `ProductOfExperts`).
   - Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
   - Functions and methods -> same rule as classes but starting lowercase, i.e. `camelCase` (e.g. `computeLoss`, `encodeSignal`, `registerEncoder`), not PEP8's usual `snake_case` for callables.
+  - Property not calculated -> snake_case
   - Since this deviates from PEP8, disable/adjust `ruff`'s naming rules (`N802`, `N803`, `N806`) in `pyproject.toml` and note the exception in the contributor docs, so linting doesn't silently "fix" it back to snake_case later.
 - **Typography:** no em dashes (`—`) and in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead. This is a house style rule, not a technical one, so there is no linter for it; review for it like any other style note. Same for the arrows (`→`) you can use `->` instead
 - **Typing:** type hints mandatory everywhere; `mypy` run in CI.

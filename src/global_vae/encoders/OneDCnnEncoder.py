@@ -60,6 +60,7 @@ class OneDCnnEncoder(AbstractEncoder):
         activations: Callable[[], nn.Module] | Sequence[Callable[[], nn.Module] | None] | None = nn.ReLU,
         normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module | None]] | None = nn.BatchNorm1d,
         global_pool: str = "avg",
+        head_hidden_dims: tuple[int, ...] = (),
         modality_name: str = "vector",
     ) -> None:
         """Build the encoder.
@@ -105,6 +106,11 @@ class OneDCnnEncoder(AbstractEncoder):
                 and returning a fresh normalization module, per stage
                 or shared. Pass `None` the same way to disable
                 normalization for a stage.
+            head_hidden_dims: Hidden layer sizes for an optional small MLP
+                inserted between the pooled features and the `to_mu`/
+                `to_logvar` heads. Empty tuple (default) keeps today's
+                behavior: a single linear layer straight from pooled
+                features to each head.
             global_pool: `"avg"` or `"max"`: which adaptive pooling
                 reduces the final feature map to a single fixed-size
                 vector, regardless of input length.
@@ -191,8 +197,16 @@ class OneDCnnEncoder(AbstractEncoder):
         else:
             raise ValueError(f"Unknown global_pool '{global_pool}'. Expected 'avg' or 'max'.")
 
-        self.to_mu = nn.Linear(channels, latent_dim)
-        self.to_logvar = nn.Linear(channels, latent_dim)
+        # add an optional mlp before the mu and log var
+        head_layers: list[nn.Module] = []
+        head_in = channels
+        for hidden_dim in head_hidden_dims:
+            head_layers += [nn.Linear(head_in, hidden_dim), nn.ReLU()]
+            head_in = hidden_dim
+        self.head: nn.Module = nn.Sequential(*head_layers) if head_layers else nn.Identity()
+
+        self.to_mu = nn.Linear(head_in, latent_dim)
+        self.to_logvar = nn.Linear(head_in, latent_dim)
 
     def forward(self, x:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Encode a batch of 1D series.
@@ -209,6 +223,7 @@ class OneDCnnEncoder(AbstractEncoder):
         series = x.unsqueeze(1) if x.dim() == 2 else x
         features = self.conv(series)
         pooled: torch.Tensor = self.pool(features).squeeze(-1)
+        pooled = self.head(pooled)
         mu: torch.Tensor = self.to_mu(pooled)
         logvar: torch.Tensor = self.to_logvar(pooled)
         return mu, logvar

@@ -370,5 +370,5 @@ class OneDCnnDecoder(AbstractDecoder):
         return reconstruction.squeeze(1) if reconstruction.shape[1] == 1 else reconstruction
 
     @property
-    def modalityName(self) -> str:
+    def modality_name(self) -> str:
         return self._modality_name

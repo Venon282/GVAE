@@ -10,6 +10,7 @@ from global_vae.encoders.base import AbstractEncoder
 from global_vae.encoders.registry import registerEncoder
 from global_vae.utils.stage_config import broadcastPerStage
 from global_vae.utils.builders import build1DPoolLayer
+from global_vae.utils.conv_math import solveMinimumInputLengthForConv1d
 
 @registerEncoder("1d_cnn_encoder_v1")
 class OneDCnnEncoder(AbstractEncoder):
@@ -148,12 +149,26 @@ class OneDCnnEncoder(AbstractEncoder):
         activations_ = broadcastPerStage(activations, num_stages, "activations")
         normalizations_ = broadcastPerStage(normalizations, num_stages, "normalizations")
 
+        # Get the minimal input len need for this configuation
+        resolved_pool_strides = tuple(
+            pool_strides_[stage] if pool_strides_[stage] is not None else pool_kernel_sizes_[stage]
+            for stage in range(num_stages)
+        )
+        self._min_input_length = OneDCnnEncoder.computeMinimumInputLength(
+            hidden_channels=hidden_channels,
+            kernel_sizes=kernel_sizes_,
+            strides=strides_,
+            paddings=paddings_,
+            dilations=dilations_,
+            poolings=poolings_,
+            pool_kernel_sizes=pool_kernel_sizes_,
+            pool_strides=resolved_pool_strides,
+            pool_paddings=pool_paddings_,
+        )
+
         layers: list[nn.Module] = []
         channels = in_channels
         for stage in range(num_stages):
-
-
-
             if isinstance(hidden_channels, nn.Module):
                 out_channels = hidden_channels.out_channels if hasattr(hidden_channels, "out_channels") else \
                                 hidden_channels.out_features if hasattr(hidden_channels, "out_features") else \
@@ -210,33 +225,159 @@ class OneDCnnEncoder(AbstractEncoder):
             head_in = hidden_dim
         self.head: nn.Module = nn.Sequential(*head_layers) if head_layers else nn.Identity()
 
-        self.to_mu = nn.Linear(head_in, latent_dim)
-        self.to_logvar = nn.Linear(head_in, latent_dim)
+        self.to_mu = nn.Linear(head_in, self._latent_dim)
+        self.to_logvar = nn.Linear(head_in, self._latent_dim)
 
-    def forward(self, x:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """Encode a batch of 1D series.
+    @staticmethod
+    def computeMinimumInputLength(
+        hidden_channels: tuple[int, ...],
+        kernel_sizes: int | Sequence[int] = 5,
+        strides: int | Sequence[int] = 1,
+        paddings: int | Sequence[int] | None = None,
+        dilations: int | Sequence[int] = 1,
+        poolings: str | None | Sequence[str | None] = "max",
+        pool_kernel_sizes: int | None | Sequence[int | None] = 2,
+        pool_strides: int | None | Sequence[int | None] = None,
+        pool_paddings: int | Sequence[int] = 0,
+    ) -> int:
+        """Compute the minimum input length a given configuration can accept.
+
+        Lets a caller check, before constructing a full `OneDCnnEncoder` (or after, to
+        understand why `forward()` raised), the shortest `input_length` that keeps every
+        intermediate feature map at a length `>= 1` for this architecture (spec §12: verify
+        a configuration before committing to it, rather than discovering a mismatch only
+        once a strided/pooled conv stack has already collapsed).
+
+        Solves the requirement backward, from the last stage to the first, inverting each
+        stage's convolution (and pooling layer, if present) via
+        `solveMinimumInputLengthForConv1d`.
 
         Args:
-            x: Raw series, shape `(batch, length)` or
-                `(batch, in_channels, length)`. A 2D input is treated
-                as `(batch, length)` and given an explicit channel
-                dimension of `1`.
+            hidden_channels: As in `__init__`. Only its length (the number of stages)
+                affects the result.
+            kernel_sizes: As in `__init__`.
+            strides: As in `__init__`.
+            paddings: As in `__init__`. `None` resolves the same way `__init__` does:
+                `dilation * (kernel_size // 2)` per stage.
+            dilations: As in `__init__`.
+            poolings: As in `__init__`.
+            pool_kernel_sizes: As in `__init__`.
+            pool_strides: As in `__init__`. `None` resolves to that stage's
+                `pool_kernel_sizes` entry, matching `build1DPoolLayer`'s own default.
+            pool_paddings: As in `__init__`.
 
         Returns:
-            A `(mu, logvar)` tuple, each of shape `(batch, latent_dim)`.
+            The minimum `input_length` this configuration can accept without any
+            intermediate feature map collapsing to a length `<= 0`.
+
+        Raises:
+            ValueError: If any per-stage sequence argument does not have exactly
+                `len(hidden_channels)` values.
         """
-        series = x.unsqueeze(1) if x.dim() == 2 else x
-        features = self.conv(series)
-        pooled: torch.Tensor = self.pool(features).squeeze(-1)
-        pooled = self.head(pooled)
-        mu: torch.Tensor = self.to_mu(pooled)
-        logvar: torch.Tensor = self.to_logvar(pooled)
-        return mu, logvar
+        num_stages = len(hidden_channels)
+        kernel_sizes_ = broadcastPerStage(kernel_sizes, num_stages, "kernel_sizes")
+        strides_ = broadcastPerStage(strides, num_stages, "strides")
+        dilations_ = broadcastPerStage(dilations, num_stages, "dilations")
+        if paddings is None:
+            paddings_ = tuple(
+                dilation * (kernel_size // 2)
+                for kernel_size, dilation in zip(kernel_sizes_, dilations_, strict=True)
+            )
+        else:
+            paddings_ = broadcastPerStage(paddings, num_stages, "paddings")
+        poolings_ = broadcastPerStage(poolings, num_stages, "poolings")
+        pool_kernel_sizes_ = broadcastPerStage(pool_kernel_sizes, num_stages, "pool_kernel_sizes")
+        pool_strides_ = (
+            broadcastPerStage(pool_strides, num_stages, "pool_strides")
+            if pool_strides is not None
+            else (None,) * num_stages
+        )
+        pool_paddings_ = broadcastPerStage(pool_paddings, num_stages, "pool_paddings")
+
+        required_min_length = 1
+        for stage in reversed(range(num_stages)):
+            if poolings_[stage] is not None and pool_kernel_sizes_[stage] is None:
+                raise ValueError(
+                    f"pooling='{poolings_[stage]}' requires a kernel_size, but "
+                    f"kernel_size is None."
+                )
+            if poolings_[stage] is not None:
+                pool_stride = (
+                    pool_strides_[stage]
+                    if pool_strides_[stage] is not None
+                    else pool_kernel_sizes_[stage]
+                )
+                required_min_length = solveMinimumInputLengthForConv1d(
+                    required_min_length,
+                    pool_kernel_sizes_[stage],
+                    pool_stride,
+                    pool_paddings_[stage],
+                    dilation=1,
+                )
+            required_min_length = solveMinimumInputLengthForConv1d(
+                required_min_length,
+                kernel_sizes_[stage],
+                strides_[stage],
+                paddings_[stage],
+                dilations_[stage],
+            )
+
+        return required_min_length
+
+    def _validateInputLength(self, input_length: int) -> None:
+        """Verify that `input_length` meets this architecture's precomputed minimum.
+
+        The minimum itself is computed once, at construction time, by
+        `computeMinimumInputLength` (architecture-only, independent of any actual input);
+        this check is therefore a single integer comparison per `forward()` call, not a
+        replay of the stage-by-stage computation, so it adds no meaningful cost next to the
+        convolutions that follow.
+
+        Args:
+            input_length: Length of the raw input series for this call.
+
+        Raises:
+            ValueError: If `input_length` is below the architecture's minimum, i.e. some
+                intermediate feature map would collapse to a length `<= 0`.
+        """
+        if input_length < self._min_input_length:
+            raise ValueError(
+                f"OneDCnnEncoder: input_length={input_length} is below the minimum "
+                f"input_length={self._min_input_length} this architecture can accept "
+                f"without an intermediate feature map collapsing to length <= 0. Use "
+                f"OneDCnnEncoder.computeMinimumInputLength(...) with the same "
+                f"architecture arguments to see which stage is responsible."
+            )
+
+    def forward(self, x:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            """Encode a batch of 1D series.
+
+            Args:
+                x: Raw series, shape `(batch, length)` or
+                    `(batch, in_channels, length)`. A 2D input is treated
+                    as `(batch, length)` and given an explicit channel
+                    dimension of `1`.
+
+            Returns:
+                A `(mu, logvar)` tuple, each of shape `(batch, latent_dim)`.
+            """
+            series = x.unsqueeze(1) if x.dim() == 2 else x
+            self._validateInputLength(series.shape[-1])
+            features = self.conv(series)
+            pooled: torch.Tensor = self.pool(features).squeeze(-1)
+            pooled = self.head(pooled)
+            mu: torch.Tensor = self.to_mu(pooled)
+            logvar: torch.Tensor = self.to_logvar(pooled)
+            return mu, logvar
 
     @property
-    def latentDim(self) -> int:
+    def latent_dim(self) -> int:
         return self._latent_dim
 
     @property
-    def modalityName(self) -> str:
+    def modality_name(self) -> str:
         return self._modality_name
+
+    @property
+    def minimal_input_length(self) -> str:
+        return self._min_input_length

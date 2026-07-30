@@ -121,3 +121,33 @@ def solveConvTranspose1dOutputPadding(
         input_length, kernel_size, stride, padding, output_padding=0, dilation=dilation
     )
     return target_length - length_with_zero_output_padding
+
+def solveMinimumInputLengthForConv1d(
+    min_output_length: int,
+    kernel_size: int,
+    stride: int,
+    padding: int,
+    dilation: int,
+) -> int:
+    """Solve for the minimum input length whose `Conv1d` output length reaches `min_output_length`.
+
+    `computeConv1dOutputLength` is a nondecreasing function of `input_length` (stride,
+    padding, dilation held fixed), so there is a unique minimum input length that reaches
+    any given output length target. Also valid for pooling layers (`MaxPool1d`/`AvgPool1d`),
+    which share the same length formula: call with `dilation=1` for `AvgPool1d`, which has
+    no dilation parameter of its own.
+
+    Args:
+        min_output_length: Smallest acceptable output length for this layer (typically `1`,
+            to keep the layer from collapsing its input to an empty or invalid feature map).
+        kernel_size: Layer kernel size.
+        stride: Layer stride.
+        padding: Layer padding (applied to both sides).
+        dilation: Layer dilation.
+
+    Returns:
+        The minimum input length whose `computeConv1dOutputLength` result is at least
+        `min_output_length`. Always at least `1`.
+    """
+    minimum = stride * (min_output_length - 1) - 2 * padding + dilation * (kernel_size - 1) + 1
+    return max(1, minimum)

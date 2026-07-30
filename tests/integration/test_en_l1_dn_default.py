@@ -52,8 +52,16 @@ class _DummySignalEncoder(AbstractEncoder):
         return self.to_mu(x), self.to_logvar(x)
 
     @property
-    def latentDim(self) -> int:
+    def latent_dim(self) -> int:
         return self._latent_dim
+
+    @property
+    def modality_name(self):
+        return "dummy"
+
+    @property
+    def minimal_input_length(self):
+        return 10
 
 
 @registerEncoder("dummy_image_encoder_en_l1_dn")
@@ -70,8 +78,16 @@ class _DummyImageEncoder(AbstractEncoder):
         return self.to_mu(x), self.to_logvar(x)
 
     @property
-    def latentDim(self) -> int:
+    def latent_dim(self) -> int:
         return self._latent_dim
+
+    @property
+    def modality_name(self):
+        return "dummy"
+
+    @property
+    def minimal_input_length(self):
+        return 10
 
 
 @registerDecoder("dummy_signal_decoder_en_l1_dn")
@@ -87,7 +103,7 @@ class _DummySignalDecoder(AbstractDecoder):
         return reconstruction
 
     @property
-    def modalityName(self) -> str:
+    def modality_name(self) -> str:
         return "signal"
 
 
@@ -104,7 +120,7 @@ class _DummyImageDecoder(AbstractDecoder):
         return reconstruction
 
     @property
-    def modalityName(self) -> str:
+    def modality_name(self) -> str:
         return "image"
 
 

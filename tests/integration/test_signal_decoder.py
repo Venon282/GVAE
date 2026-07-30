@@ -99,12 +99,12 @@ def test_multi_channel_output_keeps_channel_dimension() -> None:
 
 def test_modality_name_defaults_to_signal_but_is_configurable() -> None:
     default_decoder = OneDCnnDecoder(latent_dim=16, output_length=_DEFAULT_NATURAL_LENGTH, upsample_modes="conv_transpose")
-    assert default_decoder.modalityName == "vector"
+    assert default_decoder.modality_name == "vector"
 
     audio_decoder = OneDCnnDecoder(
         latent_dim=16, output_length=_DEFAULT_NATURAL_LENGTH, modality_name="audio", upsample_modes="conv_transpose"
     )
-    assert audio_decoder.modalityName == "audio"
+    assert audio_decoder.modality_name == "audio"
 
 
 def test_per_transition_activation_and_normalization_can_differ() -> None:

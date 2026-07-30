@@ -37,7 +37,7 @@ class AbstractDecoder(nn.Module, ABC):
 
     @property
     @abstractmethod
-    def modalityName(self) -> str:
+    def modality_name(self) -> str:
         """Name of the modality this decoder reconstructs.
 
         Returns:

@@ -33,10 +33,10 @@ def test_handles_varying_input_length() -> None:
 
 
 def test_latent_dim_property() -> None:
-    """`latentDim` (camelCase) is the property `AbstractEncoder` requires; a `latent_dim`
+    """`latent_dim` (camelCase) is the property `AbstractEncoder` requires; a `latent_dim`
     property alone would leave the class abstract and unable to be instantiated."""
     encoder = OneDCnnEncoder(latent_dim=32)
-    assert encoder.latentDim == 32
+    assert encoder.latent_dim == 32
 
 
 def test_gradients_reach_every_parameter() -> None:
@@ -141,3 +141,9 @@ def test_unknown_global_pool_raises() -> None:
 def test_unknown_pooling_raises() -> None:
     with pytest.raises(ValueError, match="pooling"):
         OneDCnnEncoder(latent_dim=8, poolings="sum")
+
+def test_forward_below_minimum_input_length_raises_clear_error() -> None:
+    encoder = OneDCnnEncoder(latent_dim=8)
+    minimum = OneDCnnEncoder.computeMinimumInputLength(hidden_channels=(32, 64, 128))
+    with pytest.raises(ValueError, match="below the minimum"):
+        encoder(torch.randn(2, minimum - 1))

@@ -42,10 +42,30 @@ class AbstractEncoder(nn.Module, ABC):
 
     @property
     @abstractmethod
-    def latentDim(self) -> int:
+    def modality_name(self) -> str:
+        """Name of the modality this encoder.
+
+            Returns:
+            The modality name (e.g. `"signal"`, `"image"`).
+        """
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def latent_dim(self) -> int:
         """Dimensionality of the distribution parameters this encoder outputs.
 
         Returns:
             The latent (or pre-fusion feature) dimensionality.
+        """
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def minimal_input_length(self) -> int:
+        """Minimal input len that can receive the encoder to avoid to collapse.
+
+        Returns:
+            The minimal input len.
         """
         raise NotImplementedError

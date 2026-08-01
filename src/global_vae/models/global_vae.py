@@ -19,6 +19,11 @@ latent space would give those spaces identical posteriors rather than
 the independent ones the routing graph promises. `__init__` rejects
 this case explicitly instead of silently producing the wrong shapes.
 See `docs/adr/0002-generalize-global-vae-to-routing-graph.md`.
+
+Each latent space also gets its own regularization strategy (spec
+§2.3), selected per latent space exactly like Fusion, defaulting to
+`"kl_standard_normal"` when unspecified. See
+`docs/adr/0003-pluggable-latent-regularization.md`.
 """
 
 from typing import Any
@@ -30,9 +35,10 @@ from global_vae.assemblers.registry import getAssemblerClass
 from global_vae.decoders.registry import getDecoderClass
 from global_vae.encoders.registry import getEncoderClass
 from global_vae.fusion.registry import getFusionClass
-from global_vae.latent.base import LatentSpace, RoutingGraph, validateRoutingGraph
+from global_vae.latent.base import RoutingGraph, validateRoutingGraph
 from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
-from global_vae.losses.kl import computeTotalKlLoss
+from global_vae.losses.regularization import computeTotalRegularizationLoss
+from global_vae.losses.regularizers.registry import getRegularizerClass
 
 
 class GlobalVae(nn.Module):
@@ -48,6 +54,10 @@ class GlobalVae(nn.Module):
             latent space fed by more than one encoder.
         assemblers: Decoder name -> assembler module, one entry per
             decoder consuming more than one latent space.
+        regularizers: Latent space name -> regularizer module (spec
+            §2.3), one entry per latent space in `routing_graph`.
+            Defaults to `"kl_standard_normal"` for any latent space not
+            given an explicit entry in `regularizer_strategies`.
     """
 
     def __init__(
@@ -56,9 +66,11 @@ class GlobalVae(nn.Module):
         decoder_configs: dict[str, str],
         routing_graph: RoutingGraph,
         fusion_strategies: dict[str, str] | None = None,
+        regularizer_strategies: dict[str, str] | None = None,
         encoder_kwargs: dict[str, dict[str, Any]] | None = None,
         decoder_kwargs: dict[str, dict[str, Any]] | None = None,
         fusion_kwargs: dict[str, dict[str, Any]] | None = None,
+        regularizer_kwargs: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Build a `GlobalVae` instance from a routing graph.
 
@@ -79,10 +91,20 @@ class GlobalVae(nn.Module):
                 name. Required for every latent space fed by more than
                 one encoder; ignored for latent spaces fed by exactly
                 one.
+            regularizer_strategies: Latent space name -> latent
+                regularizer registry name (spec §2.3, `losses/
+                regularizers/`). Every latent space in `routing_graph`
+                gets its own regularizer module; any latent space
+                absent from this dict defaults to
+                `"kl_standard_normal"`, so the common case (every
+                latent space regularized the same, default way) needs
+                no entries here at all.
             encoder_kwargs: Optional per-encoder constructor kwargs.
             decoder_kwargs: Optional per-decoder constructor kwargs.
             fusion_kwargs: Optional per-latent-space constructor kwargs
                 for fusion modules.
+            regularizer_kwargs: Optional per-latent-space constructor
+                kwargs for regularizer modules.
 
         Raises:
             ValueError: If `routing_graph` is invalid (spec §2.2), or
@@ -91,6 +113,9 @@ class GlobalVae(nn.Module):
             NotImplementedError: If any encoder in `routing_graph` is
                 assigned to more than one latent space (fan-out is not
                 yet supported).
+            KeyError: If `regularizer_strategies` (or its default,
+                `"kl_standard_normal"`) names a strategy absent from
+                the regularizer registry.
         """
         super().__init__()
         validateRoutingGraph(routing_graph)
@@ -108,7 +133,9 @@ class GlobalVae(nn.Module):
         encoder_kwargs = encoder_kwargs or {}
         decoder_kwargs = decoder_kwargs or {}
         fusion_kwargs = fusion_kwargs or {}
+        regularizer_kwargs = regularizer_kwargs or {}
         fusion_strategies = fusion_strategies or {}
+        regularizer_strategies = regularizer_strategies or {}
 
         self.routing_graph = routing_graph
         self.latent_spaces = routing_graph.latent_specs
@@ -140,6 +167,15 @@ class GlobalVae(nn.Module):
             fusions[latent_name] = getFusionClass(strategy)(**fusion_kwargs.get(latent_name, {}))
         self.fusions = nn.ModuleDict(fusions)
 
+        self.regularizers = nn.ModuleDict(
+            {
+                latent_name: getRegularizerClass(
+                    regularizer_strategies.get(latent_name, "kl_standard_normal")
+                )(**regularizer_kwargs.get(latent_name, {}))
+                for latent_name in routing_graph.latent_specs
+            }
+        )
+
         self.assemblers = nn.ModuleDict(
             {
                 decoder_name: getAssemblerClass(assembler_name)()
@@ -154,6 +190,7 @@ class GlobalVae(nn.Module):
         fusion_strategy: str,
         latent_dim: int,
         latent_name: str = "z_fused",
+        regularizer_strategy: str = "kl_standard_normal",
         **kwargs: Any,
     ) -> "GlobalVae":
         """Convenience constructor for the `EN-L1-DN` Phase-1 default.
@@ -173,8 +210,12 @@ class GlobalVae(nn.Module):
                 encoder into the single latent space.
             latent_dim: Dimensionality of the single latent space.
             latent_name: Identifier for the single latent space.
+            regularizer_strategy: Latent regularizer registry name
+                (spec §2.3) used for the single latent space. Defaults
+                to `"kl_standard_normal"`, the plain VAE regularization
+                term.
             **kwargs: Forwarded to `__init__` (`encoder_kwargs`,
-                `decoder_kwargs`, `fusion_kwargs`).
+                `decoder_kwargs`, `fusion_kwargs`, `regularizer_kwargs`).
 
         Returns:
             A `GlobalVae` instance wired as `EN-L1-DN`.
@@ -192,6 +233,7 @@ class GlobalVae(nn.Module):
             decoder_configs=decoder_configs,
             routing_graph=routing_graph,
             fusion_strategies={latent_name: fusion_strategy},
+            regularizer_strategies={latent_name: regularizer_strategy},
             **kwargs,
         )
 
@@ -252,9 +294,7 @@ class GlobalVae(nn.Module):
                 params = {name: encoder_outputs[name] for name in active}
                 mu, logvar = self.fusions[latent_name](params)
             latent_params[latent_name] = (mu, logvar)
-            latent_samples[latent_name] = self.latent_spaces[latent_name].reparameterize(
-                mu, logvar
-            )
+            latent_samples[latent_name] = self.latent_spaces[latent_name].reparameterize(mu, logvar)
 
         reconstructions: dict[str, torch.Tensor] = {}
         for decoder_name, decoder in self.decoders.items():
@@ -277,25 +317,30 @@ class GlobalVae(nn.Module):
             "latent_samples": latent_samples,
         }
 
-    def computeKlLoss(
+    def computeRegularizationLoss(
         self, latent_params: dict[str, tuple[torch.Tensor, torch.Tensor]]
     ) -> torch.Tensor:
-        """Batch-averaged KL divergence, summed across active latent spaces.
+        """Batch-averaged regularization penalty, summed across active latent spaces.
 
-        Delegates the per-space math to `LatentSpace.klDivergence` and
-        the cross-space aggregation to `losses.kl.computeTotalKlLoss`,
-        so the weighting scheme (spec §11, still open) can change
-        without touching this model class.
+        Delegates the per-space computation to each latent space's own
+        `AbstractLatentRegularizer` (`self.regularizers`, spec §2.3)
+        and the cross-space aggregation to
+        `losses.regularization.computeTotalRegularizationLoss`, so
+        neither the regularization strategy nor the weighting scheme
+        (beta, spec §11, still open) is hardcoded into this model
+        class. Renamed from `computeKlLoss`: the default strategy is
+        still KL-to-standard-normal, but this method is no longer
+        KL-specific now that `self.regularizers` is pluggable.
 
         Args:
             latent_params: Latent space name -> `(mu, logvar)`, as
                 returned by `forward()`.
 
         Returns:
-            Scalar KL loss, summed over latent spaces and averaged over
-            the batch.
+            Scalar regularization loss, summed over latent spaces and
+            averaged over the batch.
 
         Raises:
             ValueError: If `latent_params` is empty.
         """
-        return computeTotalKlLoss(self.latent_spaces, latent_params)
+        return computeTotalRegularizationLoss(self.regularizers, latent_params)

@@ -38,6 +38,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
   robustness (spec §5), KL-loss finiteness, gradient flow into every
   encoder and decoder, and the registry `KeyError` path. Passes `ruff
   check`, `ruff format --check`, and `mypy --strict`.
+- `losses/regularizers/` subpackage: `AbstractLatentRegularizer` interface,
+  its self-registration registry (`registerRegularizer` /
+  `getRegularizerClass`), and the default `kl_standard_normal` strategy,
+  extracted from `LatentSpace.klDivergence` so latent regularization is
+  pluggable per latent space (spec §2.3), matching the same pattern
+  already used for Fusion and Assemblers.
+- ADR 0003 documenting the pluggable-regularization retrofit described
+  below.
+- `tests/integration/test_regularizers.py` (registry pattern and
+  `kl_standard_normal` value correctness) and
+  `tests/integration/test_regularization_loss.py` (cross-latent-space
+  aggregation, beta weighting).
+- `GlobalVae.createSingleLatent` gained a `regularizer_strategy`
+  parameter (default `"kl_standard_normal"`), and
+  `tests/integration/test_en_l1_dn_default.py` gained tests proving the
+  default is wired in and that a non-default strategy is actually used,
+  not just accepted.
 
 ### Changed
 - Renamed `latent/factorized.py` to `latent/shared_private.py` and
@@ -57,6 +74,25 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - Fusion strategy is now selected per latent space (only required for
   latent spaces fed by more than one encoder), not once globally for
   the whole model.
+- `GlobalVae.__init__` now accepts `regularizer_strategies` and
+  `regularizer_kwargs`, and builds `self.regularizers` (an
+  `nn.ModuleDict`, one entry per latent space, symmetric to
+  `self.fusions`), instead of the model class going straight to
+  `LatentSpace.klDivergence` for every latent space unconditionally.
+- `losses/kl.py` is superseded by `losses/regularization.py`:
+  `computeTotalRegularizationLoss` aggregates via each latent space's
+  own regularizer module instead of calling `LatentSpace.klDivergence`
+  directly.
+- `GlobalVae.computeKlLoss` renamed to `computeRegularizationLoss`: it
+  was never only about KL divergence in spirit (spec §2.3 always
+  described the regularization term as pluggable), and now it isn't in
+  code either.
+- `LatentSpace` (`latent/base.py`) no longer exposes `klDivergence`;
+  its module docstring no longer refers to "its own KL term" but "its
+  own regularization term, not necessarily KL divergence".
+- `models/global_vae.py` no longer imports the unused `LatentSpace`
+  name from `latent.base` (a pre-existing dead import, `ruff` F401,
+  noticed while editing this file's imports for the change above).
 
 ### Fixed
 - `validateRoutingGraph` now rejects a decoder that consumes more than
@@ -76,4 +112,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ### Removed
 - `assemblers/assembler.py`: a leftover duplicate of `AbstractAssembler`
   and the assembler registry, left behind at the new subpackage path
-  after the split described above under "Changed".s
+  after the split described above under "Changed".
+- `losses/kl.py`: superseded by `losses/regularization.py` (see
+  "Changed" above). Should be deleted from the repository.
+- `LatentSpace.klDivergence`: superseded by
+  `losses.regularizers.kl_standard_normal.KlStandardNormalRegularizer`,
+  which is now the only place this exact computation lives.

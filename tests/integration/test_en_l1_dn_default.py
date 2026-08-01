@@ -30,6 +30,9 @@ from global_vae.encoders.base import AbstractEncoder
 from global_vae.encoders.registry import registerEncoder
 from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import registerFusion
+from global_vae.losses.regularizers.base import AbstractLatentRegularizer
+from global_vae.losses.regularizers.kl_standard_normal import KlStandardNormalRegularizer
+from global_vae.losses.regularizers.registry import registerRegularizer
 from global_vae.models.global_vae import GlobalVae
 
 SIGNAL_INPUT_DIM = 64
@@ -161,6 +164,16 @@ class _DummyProductOfExperts(AbstractFusion):
         return True
 
 
+@registerRegularizer("dummy_zero_regularizer_en_l1_dn")
+class _DummyZeroRegularizer(AbstractLatentRegularizer):
+    """Always-zero penalty, for this test only: proves a non-default
+    `regularizer_strategy` is actually wired in and used, rather than
+    silently falling back to `kl_standard_normal`."""
+
+    def forward(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
+        return mu.new_zeros(mu.shape[0])
+
+
 @pytest.fixture
 def model() -> GlobalVae:
     """Build the `EN-L1-DN` model via the Phase-1 default convenience constructor."""
@@ -214,12 +227,33 @@ class TestEnL1DnDefault:
         with pytest.raises(ValueError):
             model({})
 
-    def test_kl_loss_is_finite_scalar(self, model: GlobalVae) -> None:
+    def test_regularization_loss_is_finite_scalar(self, model: GlobalVae) -> None:
         output = model(_dummyInputs())
-        kl_loss = model.computeKlLoss(output["latent_params"])
+        regularization_loss = model.computeRegularizationLoss(output["latent_params"])
 
-        assert kl_loss.dim() == 0
-        assert torch.isfinite(kl_loss)
+        assert regularization_loss.dim() == 0
+        assert torch.isfinite(regularization_loss)
+
+    def test_default_regularizer_is_kl_standard_normal(self, model: GlobalVae) -> None:
+        """Not passing `regularizer_strategy` at all must still wire in the default (spec §2.3)."""
+        assert isinstance(model.regularizers["z_fused"], KlStandardNormalRegularizer)
+
+    def test_custom_regularizer_strategy_is_used(self) -> None:
+        """`regularizer_strategy` must actually select the given strategy, not just accept it."""
+        zero_reg_model = GlobalVae.createSingleLatent(
+            modality_configs={
+                "signal": {
+                    "encoder": "dummy_signal_encoder_en_l1_dn",
+                    "decoder": "dummy_signal_decoder_en_l1_dn",
+                },
+            },
+            fusion_strategy="dummy_poe_en_l1_dn",
+            latent_dim=LATENT_DIM,
+            regularizer_strategy="dummy_zero_regularizer_en_l1_dn",
+        )
+        output = zero_reg_model({"signal": torch.randn(BATCH_SIZE, SIGNAL_INPUT_DIM)})
+        regularization_loss = zero_reg_model.computeRegularizationLoss(output["latent_params"])
+        assert torch.equal(regularization_loss, torch.tensor(0.0))
 
     def test_gradients_flow_to_every_encoder_and_decoder(self, model: GlobalVae) -> None:
         """A full backward pass must reach every encoder and decoder (ADR 0002)."""
@@ -228,7 +262,7 @@ class TestEnL1DnDefault:
             (recon.pow(2).mean() for recon in output["reconstructions"].values()),
             start=torch.tensor(0.0),
         )
-        kl_loss = model.computeKlLoss(output["latent_params"])
+        kl_loss = model.computeRegularizationLoss(output["latent_params"])
         (reconstruction_loss + kl_loss).backward()
 
         for name, encoder in model.encoders.items():

@@ -1,13 +1,15 @@
 """Latent-space representation and routing-graph validation (spec §2.2).
 
 A `LatentSpace` is one independent Gaussian latent with its own
-posterior, its own prior, and its own KL term. "Several latent spaces"
-in the spec is not a fixed shared/private split. It is an arbitrary
-number of these, wired to encoders and decoders through a configurable
-routing graph. `single.py` (one latent space) and `shared_private.py`
-(shared plus private, one example topology) are convenience presets
-built on top of the general `RoutingGraph` defined here; the framework
-does not treat either as a hardcoded special case.
+posterior, its own prior, and its own regularization term, not
+necessarily KL divergence (spec §2.3; see `losses/regularizers/` for
+the pluggable strategies). "Several latent spaces" in the spec is not
+a fixed shared/private split. It is an arbitrary number of these,
+wired to encoders and decoders through a configurable routing graph.
+`single.py` (one latent space) and `shared_private.py` (shared plus
+private, one example topology) are convenience presets built on top of
+the general `RoutingGraph` defined here; the framework does not treat
+either as a hardcoded special case.
 """
 
 from dataclasses import dataclass, field
@@ -41,21 +43,6 @@ class LatentSpace:
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return mu + eps * std
-
-    def klDivergence(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        """Per-sample KL divergence to a standard normal prior.
-
-        Args:
-            mu: Posterior mean, shape `(batch, dim)`.
-            logvar: Posterior log-variance, shape `(batch, dim)`.
-
-        Returns:
-            Per-sample KL divergence, shape `(batch,)`. Callers sum
-            across latent spaces and average across the batch (see
-            `losses.kl.computeTotalKlLoss`).
-        """
-        return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=-1)
-
 
 @dataclass
 class RoutingGraph:

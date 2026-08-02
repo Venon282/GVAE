@@ -1,11 +1,13 @@
 from torch import nn
 
+from typing import Any
+
 def build1DPoolLayer(
     pooling: str | None,
     kernel_size: int | None,
     stride: int | None,
     padding: int,
-    **kwargs
+    **kwargs: Any,
 ) -> nn.Module | None:
     """Build one stage's 1D pooling layer, or `None` if pooling is disabled.
 

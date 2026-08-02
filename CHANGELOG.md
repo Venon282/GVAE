@@ -55,6 +55,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `tests/integration/test_en_l1_dn_default.py` gained tests proving the
   default is wired in and that a non-default strategy is actually used,
   not just accepted.
+- `training/beta_schedules/` subpackage: `AbstractBetaSchedule` interface
+  (a plain `ABC`, not an `nn.Module`: resolving a training step to a
+  scalar weight is not an autograd computation), its self-registration
+  registry (`registerBetaSchedule` / `getBetaScheduleClass` /
+  `listRegisteredBetaSchedules`), and two default strategies,
+  `ConstantBetaSchedule` (`"constant"`, the explicit no-annealing case)
+  and `LinearWarmupBetaSchedule` (`"linear_warmup"`, ramps linearly
+  from `start_value` to `end_value` over `warmup_steps` then holds
+  `end_value`), making the beta-weighting schedule spec §2.3 requires
+  expressible as a per-latent-space, pluggable strategy instead of a
+  hardcoded branch in a future trainer.
+- `training/beta_schedule_resolution.py`: `resolveBetaSchedules(schedules,
+  step)`, resolving a per-latent-space set of schedules into the plain
+  `dict[str, float]` that `losses.regularization
+  .computeTotalRegularizationLoss` and `GlobalVae.computeRegularizationLoss`
+  already accept as `beta`, with zero changes to either. See ADR 0004.
+- ADR 0004 documenting the pluggable beta-schedule addition and why it
+  required no changes to `GlobalVae` or `losses/regularization.py`.
+- `tests/integration/test_beta_schedules.py`: registry pattern,
+  `ConstantBetaSchedule` / `LinearWarmupBetaSchedule` value
+  correctness (including negative-step clamping, the exact
+  warm-up-boundary case, and the `warmup_steps <= 0` error path), and
+  a round-trip test proving `resolveBetaSchedules`'s output feeds
+  `computeTotalRegularizationLoss` unchanged.
 
 ### Changed
 - Renamed `latent/factorized.py` to `latent/shared_private.py` and
@@ -93,6 +117,10 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `models/global_vae.py` no longer imports the unused `LatentSpace`
   name from `latent.base` (a pre-existing dead import, `ruff` F401,
   noticed while editing this file's imports for the change above).
+- `training/NOTE.md` updated: the raw-loop-vs-Lightning open question
+  it cited is resolved (raw PyTorch loop for now, per spec §10);
+  `trainer.py` itself remains a separate, not-yet-built milestone, now
+  decoupled from the beta-schedule work described above.
 
 ### Fixed
 - `validateRoutingGraph` now rejects a decoder that consumes more than

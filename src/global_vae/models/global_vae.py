@@ -187,8 +187,8 @@ class GlobalVae(nn.Module):
     def createSingleLatent(
         cls,
         modality_configs: dict[str, dict[str, str]],
-        fusion_strategy: str,
         latent_dim: int,
+        fusion_strategy: str | None = None,
         latent_name: str = "z_fused",
         regularizer_strategy: str = "kl_standard_normal",
         **kwargs: Any,
@@ -205,10 +205,19 @@ class GlobalVae(nn.Module):
 
         Args:
             modality_configs: Modality name -> `{"encoder": registry_name,
-                "decoder": registry_name}` (spec §9).
-            fusion_strategy: Fusion registry name used to combine every
-                encoder into the single latent space.
+                "decoder": registry_name}` (spec §9). A single entry
+                (single-modality signal VAE, spec §6.1 milestone 1) is
+                just as valid as several.
             latent_dim: Dimensionality of the single latent space.
+            fusion_strategy: Fusion registry name used to combine every
+                encoder into the single latent space. Only meaningful,
+                and only required, when `modality_configs` has more
+                than one entry (spec §4: a latent space fed by exactly
+                one encoder needs no fusion strategy at all). Defaults
+                to `None`, the correct value for the single-modality
+                case; passing `None` with more than one modality
+                delegates to `__init__`, which raises `ValueError`
+                pointing at the missing `fusion_strategies` entry.
             latent_name: Identifier for the single latent space.
             regularizer_strategy: Latent regularizer registry name
                 (spec §2.3) used for the single latent space. Defaults
@@ -218,7 +227,14 @@ class GlobalVae(nn.Module):
                 `decoder_kwargs`, `fusion_kwargs`, `regularizer_kwargs`).
 
         Returns:
-            A `GlobalVae` instance wired as `EN-L1-DN`.
+            A `GlobalVae` instance wired as `EN-L1-DN` (or as the
+            single-modality `signal -> z -> signal` case of spec §6.1
+            milestone 1, when `modality_configs` has one entry).
+
+        Raises:
+            ValueError: If `modality_configs` has more than one entry
+                and `fusion_strategy` is `None` (delegated to
+                `__init__`; see its own `Raises` section).
         """
         routing_graph = buildSingleLatentRoutingGraph(
             encoder_names=list(modality_configs),
@@ -228,11 +244,12 @@ class GlobalVae(nn.Module):
         )
         encoder_configs = {name: cfg["encoder"] for name, cfg in modality_configs.items()}
         decoder_configs = {name: cfg["decoder"] for name, cfg in modality_configs.items()}
+        fusion_strategies = {latent_name: fusion_strategy} if fusion_strategy is not None else {}
         return cls(
             encoder_configs=encoder_configs,
             decoder_configs=decoder_configs,
             routing_graph=routing_graph,
-            fusion_strategies={latent_name: fusion_strategy},
+            fusion_strategies=fusion_strategies,
             regularizer_strategies={latent_name: regularizer_strategy},
             **kwargs,
         )
@@ -318,7 +335,9 @@ class GlobalVae(nn.Module):
         }
 
     def computeRegularizationLoss(
-        self, latent_params: dict[str, tuple[torch.Tensor, torch.Tensor]]
+        self,
+        latent_params: dict[str, tuple[torch.Tensor, torch.Tensor]],
+        beta: dict[str, float] | float = 1.0,
     ) -> torch.Tensor:
         """Batch-averaged regularization penalty, summed across active latent spaces.
 
@@ -327,14 +346,23 @@ class GlobalVae(nn.Module):
         and the cross-space aggregation to
         `losses.regularization.computeTotalRegularizationLoss`, so
         neither the regularization strategy nor the weighting scheme
-        (beta, spec §11, still open) is hardcoded into this model
-        class. Renamed from `computeKlLoss`: the default strategy is
-        still KL-to-standard-normal, but this method is no longer
+        (beta, spec §2.3) is hardcoded into this model class. Renamed
+        from `computeKlLoss`: the default strategy is still
+        KL-to-standard-normal, but this method is no longer
         KL-specific now that `self.regularizers` is pluggable.
 
         Args:
             latent_params: Latent space name -> `(mu, logvar)`, as
                 returned by `forward()`.
+            beta: A single weight applied to every latent space, or a
+                per-latent-space weight dict, forwarded unchanged to
+                `computeTotalRegularizationLoss`. Defaults to `1.0`
+                (unweighted). A caller using pluggable beta schedules
+                (`training/beta_schedules/`) resolves them for the
+                current step via `resolveBetaSchedules(...)` and
+                passes the result here, exactly as it would pass any
+                hand-written `dict[str, float]` (spec §2.3, ADR 0004):
+                this method needs no awareness that schedules exist.
 
         Returns:
             Scalar regularization loss, summed over latent spaces and
@@ -343,4 +371,4 @@ class GlobalVae(nn.Module):
         Raises:
             ValueError: If `latent_params` is empty.
         """
-        return computeTotalRegularizationLoss(self.regularizers, latent_params)
+        return computeTotalRegularizationLoss(self.regularizers, latent_params, beta=beta)

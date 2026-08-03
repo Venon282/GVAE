@@ -79,8 +79,108 @@ versioning follows [Semantic Versioning](https://semver.org/).
   warm-up-boundary case, and the `warmup_steps <= 0` error path), and
   a round-trip test proving `resolveBetaSchedules`'s output feeds
   `computeTotalRegularizationLoss` unchanged.
+- `losses/regularizers/free_bits_kl.py`: `FreeBitsKlRegularizer`
+  (spec §2.3, §11: named alongside MMD as a candidate strategy). Gives
+  each latent dimension a fixed KL budget (`free_bits` nats, default
+  `0.5`) it is never penalized for using, which is the standard fix
+  for the failure mode where plain KL-to-standard-normal keeps
+  pushing an already-collapsed dimension toward the prior with no
+  counterbalancing pressure. Supports both the standard per-dimension
+  formulation (default) and a coarser aggregate variant
+  (`per_dimension=False`) for parity/ablation purposes. At
+  `free_bits=0`, the per-dimension variant is mathematically identical
+  to `kl_standard_normal` (verified by test).
+- `losses/regularizers/mmd.py`: `MmdRegularizer` (spec §2.3, §11: the
+  other named candidate strategy), a WAE-MMD/InfoVAE-style batch-level
+  kernel two-sample test between reparameterized posterior samples and
+  prior samples, computed with a configurable multi-scale kernel
+  (`"rbf"`, the common default, or `"imq"`, the original WAE-MMD
+  paper's heavier-tailed choice). Unlike KL, MMD only constrains the
+  *aggregate* posterior to look like the prior, not every individual
+  sample, which is the property this strategy is meant to make
+  available where KL's sample-by-sample pressure is suspected of
+  contributing to posterior collapse. Its `forward` docstring documents
+  the one place this strategy deviates from a literal per-sample
+  reading of the shared regularizer interface: MMD returns the same
+  batch-level scalar broadcast across the `(batch,)` output, since MMD
+  itself has no meaningful per-sample decomposition.
+- `training/beta_schedules/cyclical_annealing.py`:
+  `CyclicalAnnealingBetaSchedule` (spec §2.3, explicitly named
+  alongside "linear warm-up" as one of the three common beta-weighting
+  patterns; previously the only implemented pattern was the single
+  warm-up case). Repeats a ramp-then-hold pattern every `period`
+  steps instead of running it once, optionally holding `end_value`
+  indefinitely after `num_cycles` cycles.
+- Tests for all three additions above, mirroring the existing registry
+  test style (registration, value correctness, edge cases): six new
+  test classes across `tests/integration/test_regularizers.py` and
+  `tests/integration/test_beta_schedules.py`.
+- `tests/integration/test_en_l1_dn_default.py` gained
+  `test_single_modality_needs_no_fusion_strategy` and
+  `test_missing_fusion_strategy_with_several_modalities_still_raises`,
+  covering the `GlobalVae.createSingleLatent` change described below
+  under "Changed".
+- `training/callbacks.py`: `TrainerCallback`, the hook interface
+  `Trainer` calls into at `onTrainBegin`/`onEpochBegin`/`onStepEnd`/
+  `onEpochEnd`/`onTrainEnd`. Every hook is a no-op by default. A plain
+  composable `list[TrainerCallback]`, not a registry-selected strategy
+  (see ADR 0005 for why this extension point is shaped differently
+  from encoders/decoders/fusion/assemblers/regularizers/beta
+  schedules).
+- `training/trainer.py`: `Trainer`, the raw PyTorch training loop spec
+  §10 calls for (§6.1 milestone 1: a single-modality signal VAE
+  trained end to end). Forward pass, reconstruction loss
+  (`computeTotalReconstructionLoss`) plus regularization loss
+  (`GlobalVae.computeRegularizationLoss`, weighted by beta, including
+  per-latent-space schedules via `resolveBetaSchedules`), backward,
+  optimizer step (Adam by default, any `torch.optim.Optimizer` class
+  or instance), device placement (explicit or auto-detected
+  CPU/GPU), optional gradient-norm clipping, optional modality dropout
+  (spec §5), console progress via the standard `logging` module (never
+  `print`), and per-step/per-epoch metrics dispatched to every
+  `TrainerCallback`. `Trainer.fit` is resumable across multiple calls
+  on the same instance (`global_step`/`start_epoch`/`history` persist),
+  and always fires `onTrainEnd` even when training exits early via an
+  exception. See ADR 0005 for the full set of design decisions.
+- `docs/adr/0005-training-loop.md` documenting the above.
+- `tests/integration/test_trainer.py`: loss-decreases-over-epochs
+  sanity check on a fixed toy dataset, optimizer configurability
+  (instance and class), device placement, beta-schedule resolution and
+  override precedence, callback firing counts and metric keys
+  (including `onTrainEnd` still firing when a callback raises),
+  modality dropout (default no-op, always keeps at least one modality,
+  no-op for a single-modality model, still trains correctly when
+  enabled on a two-modality model), gradient clipping, multi-epoch
+  history and resumed epoch/step numbering, validation-metrics
+  merging, and the relevant error paths (empty batch/dataloader,
+  invalid constructor arguments, non-positive `num_epochs`).
 
 ### Changed
+
+- `GlobalVae.computeRegularizationLoss` gained a
+  `beta: dict[str, float] | float = 1.0` parameter, forwarded
+  unchanged to `computeTotalRegularizationLoss`. This method did not
+  expose `beta` at all before this change, even though ADR 0004 already
+  documented a trainer calling it as
+  `model.computeRegularizationLoss(latent_params, beta=...)`; that call
+  shape was not actually possible until now. See ADR 0005.
+- `tests/integration/test_en_l1_dn_default.py` gained
+  `test_beta_scales_the_regularization_loss`, covering the fix above.
+- `training/NOTE.md` rewritten to reflect that `Trainer` now exists,
+  and to track what is still deferred (checkpointing, experiment
+  loggers, global seed management) instead of "trainer.py itself is
+  not yet implemented".
+
+- `GlobalVae.createSingleLatent`'s `fusion_strategy` parameter is now
+  `str | None = None` (previously a required `str`), and `latent_dim`
+  moved ahead of it in the parameter list. A latent space fed by
+  exactly one encoder never calls Fusion at all (spec §4), so the
+  single-modality `signal -> z -> signal` case (spec §6.1 milestone 1)
+  no longer has to pass a fusion strategy name that is never used.
+  Passing `None` with more than one modality still raises `ValueError`
+  from `__init__`, unchanged (delegates to the existing
+  `fusion_strategies` validation instead of duplicating it).
+
 - Renamed `latent/factorized.py` to `latent/shared_private.py` and
   `buildFactorizedRoutingGraph` to `buildSharedPrivateRoutingGraph`,
   since "several latent spaces" is a general routing graph, not a

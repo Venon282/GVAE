@@ -279,6 +279,44 @@ class TestEnL1DnDefault:
                 f"decoder '{name}' got an all-zero gradient"
             )
 
+    def test_single_modality_needs_no_fusion_strategy(self) -> None:
+        """A latent space fed by exactly one encoder needs no Fusion at all (spec §4).
+
+        `fusion_strategy` must be genuinely optional here, not merely
+        accept `None` and fail later: this is the `signal -> z -> signal`
+        single-modality case from spec §6.1 milestone 1.
+        """
+        single_modality_model = GlobalVae.createSingleLatent(
+            modality_configs={
+                "signal": {
+                    "encoder": "dummy_signal_encoder_en_l1_dn",
+                    "decoder": "dummy_signal_decoder_en_l1_dn",
+                },
+            },
+            latent_dim=LATENT_DIM,
+        )
+        assert "z_fused" not in single_modality_model.fusions
+
+        output = single_modality_model({"signal": torch.randn(BATCH_SIZE, SIGNAL_INPUT_DIM)})
+        assert output["reconstructions"]["signal"].shape == (BATCH_SIZE, SIGNAL_INPUT_DIM)
+
+    def test_missing_fusion_strategy_with_several_modalities_still_raises(self) -> None:
+        """`fusion_strategy=None` must still fail loudly once there is more than one encoder."""
+        with pytest.raises(ValueError, match="fusion_strategies"):
+            GlobalVae.createSingleLatent(
+                modality_configs={
+                    "signal": {
+                        "encoder": "dummy_signal_encoder_en_l1_dn",
+                        "decoder": "dummy_signal_decoder_en_l1_dn",
+                    },
+                    "image": {
+                        "encoder": "dummy_image_encoder_en_l1_dn",
+                        "decoder": "dummy_image_decoder_en_l1_dn",
+                    },
+                },
+                latent_dim=LATENT_DIM,
+            )
+
     def test_unknown_registry_name_raises_key_error(self) -> None:
         """Sanity check for the registry error path `GlobalVae` relies on (spec §10)."""
         with pytest.raises(KeyError):

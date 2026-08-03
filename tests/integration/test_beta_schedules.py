@@ -18,6 +18,7 @@ from global_vae.losses.regularizers.kl_standard_normal import KlStandardNormalRe
 from global_vae.training.beta_schedule_resolution import resolveBetaSchedules
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
 from global_vae.training.beta_schedules.constant import ConstantBetaSchedule
+from global_vae.training.beta_schedules.cyclical_annealing import CyclicalAnnealingBetaSchedule
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
 from global_vae.training.beta_schedules.registry import (
     getBetaScheduleClass,
@@ -29,8 +30,10 @@ from global_vae.training.beta_schedules.registry import (
 def test_constant_and_linear_warmup_are_registered_by_default() -> None:
     assert "constant" in listRegisteredBetaSchedules()
     assert "linear_warmup" in listRegisteredBetaSchedules()
+    assert "cyclical_annealing" in listRegisteredBetaSchedules()
     assert getBetaScheduleClass("constant") is ConstantBetaSchedule
     assert getBetaScheduleClass("linear_warmup") is LinearWarmupBetaSchedule
+    assert getBetaScheduleClass("cyclical_annealing") is CyclicalAnnealingBetaSchedule
 
 
 def test_unknown_beta_schedule_name_raises_key_error() -> None:
@@ -96,6 +99,69 @@ class TestLinearWarmupBetaSchedule:
             LinearWarmupBetaSchedule(warmup_steps=0)
         with pytest.raises(ValueError, match="warmup_steps"):
             LinearWarmupBetaSchedule(warmup_steps=-5)
+
+
+class TestCyclicalAnnealingBetaSchedule:
+    def test_starts_each_cycle_at_start_value(self) -> None:
+        schedule = CyclicalAnnealingBetaSchedule(period=100, start_value=0.0, end_value=1.0)
+        assert schedule(0) == pytest.approx(0.0)
+        assert schedule(100) == pytest.approx(0.0)  # start of the second cycle
+        assert schedule(200) == pytest.approx(0.0)  # start of the third cycle
+
+    def test_ramp_reaches_end_value_at_ramp_proportion(self) -> None:
+        """ramp_proportion=0.5 over a period of 100 means the ramp completes at step 50."""
+        schedule = CyclicalAnnealingBetaSchedule(
+            period=100, ramp_proportion=0.5, start_value=0.0, end_value=1.0
+        )
+        assert schedule(50) == pytest.approx(1.0)
+
+    def test_holds_end_value_for_the_rest_of_the_cycle(self) -> None:
+        schedule = CyclicalAnnealingBetaSchedule(
+            period=100, ramp_proportion=0.5, start_value=0.0, end_value=1.0
+        )
+        assert schedule(75) == pytest.approx(1.0)
+        assert schedule(99) == pytest.approx(1.0)
+
+    def test_midpoint_of_the_ramp_is_linearly_interpolated(self) -> None:
+        schedule = CyclicalAnnealingBetaSchedule(
+            period=100, ramp_proportion=0.5, start_value=0.0, end_value=1.0
+        )
+        assert schedule(25) == pytest.approx(0.5)  # halfway through a 50-step ramp
+
+    def test_full_ramp_proportion_is_a_plain_sawtooth(self) -> None:
+        schedule = CyclicalAnnealingBetaSchedule(
+            period=100, ramp_proportion=1.0, start_value=0.0, end_value=1.0
+        )
+        assert schedule(99) == pytest.approx(0.99)
+        assert schedule(100) == pytest.approx(0.0)  # new cycle restarts at start_value
+
+    def test_num_cycles_holds_end_value_after_the_last_cycle(self) -> None:
+        schedule = CyclicalAnnealingBetaSchedule(
+            period=100, ramp_proportion=0.5, start_value=0.0, end_value=1.0, num_cycles=2
+        )
+        assert schedule(150) == pytest.approx(1.0)  # still inside cycle 2, past its own ramp
+        assert schedule(200) == pytest.approx(1.0)  # would restart cycle 3 without num_cycles
+        assert schedule(250) == pytest.approx(1.0)
+
+    def test_negative_step_is_clamped_to_start_value(self) -> None:
+        schedule = CyclicalAnnealingBetaSchedule(period=100, start_value=0.2, end_value=1.0)
+        assert schedule(-10) == pytest.approx(0.2)
+
+    def test_non_positive_period_raises(self) -> None:
+        with pytest.raises(ValueError, match="period"):
+            CyclicalAnnealingBetaSchedule(period=0)
+        with pytest.raises(ValueError, match="period"):
+            CyclicalAnnealingBetaSchedule(period=-5)
+
+    def test_ramp_proportion_out_of_range_raises(self) -> None:
+        with pytest.raises(ValueError, match="ramp_proportion"):
+            CyclicalAnnealingBetaSchedule(period=100, ramp_proportion=0.0)
+        with pytest.raises(ValueError, match="ramp_proportion"):
+            CyclicalAnnealingBetaSchedule(period=100, ramp_proportion=1.5)
+
+    def test_non_positive_num_cycles_raises(self) -> None:
+        with pytest.raises(ValueError, match="num_cycles"):
+            CyclicalAnnealingBetaSchedule(period=100, num_cycles=0)
 
 
 def _kl(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:

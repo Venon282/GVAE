@@ -16,21 +16,41 @@ This is an initial scaffold, not a finished framework. What's built:
   constraints from spec §2.2 (no orphan latent spaces; `sum`/`average`
   assemblers require matching dimensionality), enforced at
   model-construction time.
-- `GlobalVae`, assembling the **`EN-L1-DN`** configuration (spec's
-  recommended Phase-1 default: per-modality encoders, one fused latent,
-  per-modality decoders) from a config dict.
+- `GlobalVae`, assembling any routing graph (spec §2.2) from
+  `encoder_configs`/`decoder_configs`/`routing_graph`, plus
+  `createSingleLatent(...)`, a convenience constructor for the
+  **`EN-L1-DN`** configuration (spec's recommended Phase-1 default:
+  per-modality encoders, one fused latent, per-modality decoders) and
+  for the single-modality `signal -> z -> signal` case (spec §6.1
+  milestone 1), which needs no fusion strategy at all.
+- Concrete implementations: `OneDCnnEncoder`/`OneDCnnDecoder`
+  (`1d_cnn_encoder_v1`/`1d_cnn_decoder_v1`, spec §6's 1D signal
+  modality, length-agnostic on the encoder side via adaptive pooling)
+  and `ProductOfExperts` (`poe`, spec §4's MVAE-style fusion strategy).
+- Pluggable latent regularization (`losses/regularizers/`:
+  `kl_standard_normal`, `free_bits_kl`, `mmd`) and pluggable
+  beta-weighting schedules (`training/beta_schedules/`: `constant`,
+  `linear_warmup`, `cyclical_annealing`), both spec §2.3.
+- `training/trainer.py`: `Trainer`, a raw PyTorch training loop
+  (forward, reconstruction + regularization loss, backward, optimizer
+  step, device placement, optional modality dropout, per-step/per-epoch
+  metrics via `TrainerCallback` hooks). See
+  `docs/adr/0005-training-loop.md`.
 - A unit-test suite for the registries and the routing-graph validator,
-  plus the first of the 8 end-to-end integration tests spec §10 asks
-  for (`EN-L1-DN`, with dummy encoders/decoders/fusion — see
-  `docs/adr/0001-phase1-default-configuration.md` for why this one
+  plus end-to-end integration tests for the `EN-L1-DN` configuration
+  and for `Trainer` (with dummy encoders/decoders/fusion — see
+  `docs/adr/0001-phase1-default-configuration.md` for why `EN-L1-DN`
   first).
 
 What's deliberately **not** built yet, and why (see `NOTE.md` in each
-directory): concrete signal/image encoders and decoders, the PoE/MoE/
-cross-attention fusion strategies, the data pipeline, and the training
-loop. Each of these depends on an open question flagged in spec §11
-(first joint dataset/task, Lightning vs. raw loops, loss-weighting
-schedule) that hasn't been decided yet — per spec §12, that's a reason
+directory): concrete image encoders/decoders, the MoE/concat_mlp/
+cross-attention fusion strategies, the data pipeline (out of this
+framework's scope by design; the person building on it owns their own
+data loading), checkpointing, and concrete experiment loggers
+(TensorBoard/CSV/W&B/MLflow; `TrainerCallback` is the seam they plug
+into). Each of these either depends on an open question flagged in
+spec §11 that hasn't been decided yet, or is simply the next
+not-yet-reached milestone — per spec §12, an open question is a reason
 to ask, not to guess.
 
 ## Setup

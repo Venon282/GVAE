@@ -36,6 +36,13 @@ This is an initial scaffold, not a finished framework. What's built:
   step, device placement, optional modality dropout, per-step/per-epoch
   metrics via `TrainerCallback` hooks). See
   `docs/adr/0005-training-loop.md`.
+- Reproducibility (spec §10): `utils/seed.py`'s `setGlobalSeed` (global
+  RNG seeding, a documented deterministic-mode flag) and
+  `training/checkpoint.py`'s `saveCheckpoint`/`loadCheckpoint`/
+  `CheckpointCallback` (model + optimizer + step/epoch/history + an
+  arbitrary config snapshot + RNG state, so evaluation or visualization
+  can run on a trained model without retraining it). See
+  `docs/adr/0006-reproducibility-seed-and-checkpointing.md`.
 - A unit-test suite for the registries and the routing-graph validator,
   plus end-to-end integration tests for the `EN-L1-DN` configuration
   and for `Trainer` (with dummy encoders/decoders/fusion — see
@@ -46,12 +53,13 @@ What's deliberately **not** built yet, and why (see `NOTE.md` in each
 directory): concrete image encoders/decoders, the MoE/concat_mlp/
 cross-attention fusion strategies, the data pipeline (out of this
 framework's scope by design; the person building on it owns their own
-data loading), checkpointing, and concrete experiment loggers
-(TensorBoard/CSV/W&B/MLflow; `TrainerCallback` is the seam they plug
-into). Each of these either depends on an open question flagged in
-spec §11 that hasn't been decided yet, or is simply the next
-not-yet-reached milestone — per spec §12, an open question is a reason
-to ask, not to guess.
+data loading), and concrete experiment loggers (TensorBoard/CSV/W&B/
+MLflow; `TrainerCallback` is the seam they plug into, exactly as
+`CheckpointCallback` already demonstrates for checkpointing). Each of
+these either depends on an open question flagged in spec §11 that
+hasn't been decided yet, or is simply the next not-yet-reached
+milestone — per spec §12, an open question is a reason to ask, not to
+guess.
 
 ## Setup
 

@@ -154,6 +154,30 @@ versioning follows [Semantic Versioning](https://semver.org/).
   history and resumed epoch/step numbering, validation-metrics
   merging, and the relevant error paths (empty batch/dataloader,
   invalid constructor arguments, non-positive `num_epochs`).
+- `utils/seed.py`: `setGlobalSeed(seed, deterministic=False, warn_only=False)`
+  (spec §10's "global seed management, deterministic-mode flag
+  documented"). Seeds Python's `random`, NumPy (if installed), and
+  PyTorch's CPU/CUDA generators; `deterministic=True` enables
+  `torch.use_deterministic_algorithms`, disables cuDNN auto-tuning,
+  and best-effort sets `CUBLAS_WORKSPACE_CONFIG` (via `setdefault`,
+  never overwriting an existing value); `deterministic=False` (default)
+  explicitly resets those same flags, so the mode never silently leaks
+  across calls in the same process.
+- `training/checkpoint.py`: `saveCheckpoint`/`loadCheckpoint`
+  (model + optional optimizer state + step/epoch/history + an
+  arbitrary `config` snapshot, spec §10's "config snapshotted with
+  every run", + RNG state for exact resumability) and
+  `CheckpointCallback`, a concrete `TrainerCallback` that saves
+  periodically (`every_n_epochs`) with optional `keep_last_n` pruning
+  of older checkpoints. `Trainer.saveCheckpoint`/`Trainer.loadCheckpoint`
+  are thin convenience wrappers using the trainer's own model,
+  optimizer, step, epoch, and history. See
+  `docs/adr/0006-reproducibility-seed-and-checkpointing.md`.
+- `tests/integration/test_seed.py` and `tests/integration/test_checkpoint.py`
+  covering the above; see ADR 0006 for the full list.
+- `docs/adr/0006-reproducibility-seed-and-checkpointing.md` documenting
+  both additions above and the `Trainer.fit` bug fix described below
+  under "Fixed".
 
 ### Changed
 
@@ -223,6 +247,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
   decoupled from the beta-schedule work described above.
 
 ### Fixed
+- `Trainer.fit` updated `self.start_epoch` *after* invoking every
+  `onEpochEnd` callback for that epoch, so a callback that saves
+  `trainer.start_epoch` (such as `CheckpointCallback`) would persist a
+  resume point one epoch behind where training should actually
+  resume. Fixed by updating `self.start_epoch` before the `onEpochEnd`
+  callback loop. Caught by
+  `tests/integration/test_checkpoint.py::TestCheckpointCallback::test_last_checkpoint_can_be_loaded_and_matches_final_state`;
+  see `docs/adr/0006-reproducibility-seed-and-checkpointing.md`.
 - `validateRoutingGraph` now rejects a decoder that consumes more than
   one latent space but has no assembler assigned, instead of silently
   skipping the dimensionality check for it.

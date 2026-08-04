@@ -234,6 +234,16 @@ class TestEnL1DnDefault:
         assert regularization_loss.dim() == 0
         assert torch.isfinite(regularization_loss)
 
+    def test_beta_scales_the_regularization_loss(self, model: GlobalVae) -> None:
+        """`beta` must actually reach `computeTotalRegularizationLoss`, not be silently dropped."""
+        output = model(_dummyInputs())
+        unweighted = model.computeRegularizationLoss(output["latent_params"])
+        halved = model.computeRegularizationLoss(output["latent_params"], beta=0.5)
+        assert torch.allclose(halved, 0.5 * unweighted, atol=1e-5)
+
+        per_space = model.computeRegularizationLoss(output["latent_params"], beta={"z_fused": 0.5})
+        assert torch.allclose(per_space, 0.5 * unweighted, atol=1e-5)
+
     def test_default_regularizer_is_kl_standard_normal(self, model: GlobalVae) -> None:
         """Not passing `regularizer_strategy` at all must still wire in the default (spec §2.3)."""
         assert isinstance(model.regularizers["z_fused"], KlStandardNormalRegularizer)

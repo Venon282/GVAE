@@ -1,6 +1,6 @@
 # Status
 
-`trainer.py` (`Trainer`) is now implemented: a raw PyTorch loop (spec
+`trainer.py` (`Trainer`) is implemented: a raw PyTorch loop (spec
 §10's resolved raw-loop-vs-Lightning question), covering forward pass,
 reconstruction + regularization loss (weighted by beta, including
 per-latent-space schedules via `beta_schedule_resolution.py`),
@@ -17,20 +17,33 @@ that ADR's own stated plan; `GlobalVae.computeRegularizationLoss` was
 retrofitted with a `beta` parameter to make that call actually possible
 (it did not expose one yet when ADR 0004 was written).
 
-# Deferred
+`checkpoint.py` (`saveCheckpoint`/`loadCheckpoint`/`CheckpointCallback`/
+`BestCheckpointCallback`) and `../utils/seed.py` (`setGlobalSeed`) are
+implemented, covering all three parts of spec §10's "Reproducibility"
+bullet (global seed management, a documented deterministic-mode flag,
+config snapshotted with every run). `CheckpointCallback` (periodic,
+for resuming an interrupted run) and `BestCheckpointCallback` (saves
+only on improvement of a monitored metric, for evaluating/visualizing
+the best model without retraining) are separate, single-purpose
+callbacks: see `docs/adr/0006-reproducibility-seed-and-checkpointing.md`
+and `docs/adr/0007-best-checkpoint-callback.md`.
 
-- **Checkpointing** (spec §10, "Reproducibility"): saving/restoring
-  model + optimizer + step/epoch state is not built yet. `Trainer`'s
-  `global_step`/`start_epoch`/`history` state is deliberately kept
-  simple and instance-level so a future checkpoint feature has
-  something clean to serialize, without needing to touch `Trainer`'s
-  loop logic itself.
-- **Experiment tracking** (spec §10: "Weights & Biases or MLflow,
-  logging losses, latent-space visualizations, and reconstructions per
-  run"): `TrainerCallback` is the seam this plugs into (a logger
-  implemented as, or wrapped by, a callback), but no concrete logger
-  (TensorBoard, CSV, W&B, MLflow) is implemented yet.
-- **Global seed management / deterministic-mode flag** (spec §10,
-  "Reproducibility"): not yet a dedicated utility; needs to run before
-  model construction, so it is out of `Trainer`'s own scope regardless
-  of when it is added.
+`loggers/` (`AbstractExperimentLogger`, `CsvLogger`, `TensorBoardLogger`)
+is implemented, covering spec §10's "Experiment tracking" bullet.
+Every concrete logger is itself a `TrainerCallback`, so no change to
+`Trainer` was needed to support it (`callbacks=[CsvLogger(...)]`, or
+several loggers at once, just works). See
+`docs/adr/0008-experiment-loggers.md`.
+
+# Nothing currently deferred under spec §10 for this subpackage.
+
+`trainer.py` itself may still grow (e.g. mixed precision, multi-GPU,
+gradient accumulation) as real training needs surface, and migrating
+to PyTorch Lightning remains the eventual plan once the architecture
+stabilizes (spec §10), but every item spec §10 explicitly lists for
+the training loop (raw loop, reconstruction + regularization loss,
+optimizer, device placement, logging, reproducibility, experiment
+tracking, checkpointing) is now built. Keeping the top-`K` best
+checkpoints (`K > 1`, rather than only the single best
+`BestCheckpointCallback` keeps) is a natural, not-yet-built extension,
+noted in `docs/adr/0007-best-checkpoint-callback.md`.

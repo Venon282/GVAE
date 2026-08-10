@@ -1,5 +1,13 @@
 """Latent regularization aggregation across one or more latent spaces (spec §2.2, §2.3).
 
+Supersedes `losses/kl.py`: each latent space's regularization strategy
+(`AbstractLatentRegularizer`, `losses/regularizers/`) computes its own
+raw per-space penalty. This module is the policy layer that sums the
+(optionally weighted) penalties across every active latent space into
+the model's total regularization loss, so the weighting scheme (beta,
+spec §11, still open) and the aggregation itself stay independent of
+which strategy any given latent space uses.
+
 `regularizers` is typed as `nn.ModuleDict` rather than
 `Mapping[str, AbstractLatentRegularizer]` (or `dict[...]`) on purpose:
 `GlobalVae.regularizers` must be an `nn.ModuleDict` for PyTorch to

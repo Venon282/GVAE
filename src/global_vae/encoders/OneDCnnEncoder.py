@@ -1,7 +1,8 @@
 """1D CNN encoder
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Sequence, Sized
+from typing import Any, cast
 
 import torch
 from torch import nn
@@ -57,9 +58,9 @@ class OneDCnnEncoder(AbstractEncoder):
         pool_kernel_sizes: int | None | Sequence[int | None] = 2,
         pool_strides: int | None | Sequence[int | None] = None,
         pool_paddings: int | Sequence[int] = 0,
-        pool_kwargs: dict | Sequence[dict] = {},
+        pool_kwargs: dict[str, Any] | Sequence[dict[str, Any]] = {},
         activations: Callable[[], nn.Module] | Sequence[Callable[[], nn.Module] | None] | None = nn.ReLU,
-        normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module | None]] | None = nn.BatchNorm1d,
+        normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module] | None] | None = nn.BatchNorm1d,
         global_pool: str = "avg",
         head_hidden_dims: tuple[int, ...] = (),
         head_activation: Callable[[], nn.Module] | None = nn.ReLU,
@@ -137,8 +138,10 @@ class OneDCnnEncoder(AbstractEncoder):
             paddings_ = tuple(dilation * (kernel_size // 2) for kernel_size, dilation in zip(kernel_sizes_, dilations_, strict=True))
         else:
             paddings_ = broadcastPerStage(paddings, num_stages, "paddings")
-        poolings_ = broadcastPerStage(poolings, num_stages, "poolings")
-        pool_kernel_sizes_ = broadcastPerStage(pool_kernel_sizes, num_stages, "pool_kernel_sizes")
+        poolings_: tuple[str | None, ...] = broadcastPerStage(poolings, num_stages, "poolings")
+        pool_kernel_sizes_: tuple[int | None, ...] = broadcastPerStage(
+            pool_kernel_sizes, num_stages, "pool_kernel_sizes"
+        )
         pool_strides_: tuple[int | None, ...] = (
             broadcastPerStage(pool_strides, num_stages, "pool_strides")
             if pool_strides is not None
@@ -147,7 +150,9 @@ class OneDCnnEncoder(AbstractEncoder):
         pool_paddings_ = broadcastPerStage(pool_paddings, num_stages, "pool_paddings")
         pool_kwargs_ = broadcastPerStage(pool_kwargs, num_stages, "pool_kwargs")
         activations_ = broadcastPerStage(activations, num_stages, "activations")
-        normalizations_ = broadcastPerStage(normalizations, num_stages, "normalizations")
+        normalizations_: tuple[Callable[[int], nn.Module] | None, ...] = broadcastPerStage(
+            normalizations, num_stages, "normalizations"
+        )
 
         # Get the minimal input len need for this configuation
         resolved_pool_strides = tuple(
@@ -169,13 +174,25 @@ class OneDCnnEncoder(AbstractEncoder):
         layers: list[nn.Module] = []
         channels = in_channels
         for stage in range(num_stages):
-            if isinstance(hidden_channels, nn.Module):
-                out_channels = hidden_channels.out_channels if hasattr(hidden_channels, "out_channels") else \
-                                hidden_channels.out_features if hasattr(hidden_channels, "out_features") else \
-                                (_ for _ in ()).throw(AttributeError(f"The {hidden_channels.__class__.__name__} in hidden_channels do not have an out_channels or out_features which is required."))
-                layer = hidden_channels
+            stage_channels = hidden_channels[stage]
+            if isinstance(stage_channels, nn.Module):
+                if hasattr(stage_channels, "out_channels"):
+                    # nn.Module does not statically declare `out_channels`; every
+                    # standard PyTorch layer that has one sets it as a plain int
+                    # (e.g. Conv1d.out_channels), a convention mypy's generic
+                    # Module.__getattr__ stub (-> Tensor | Module) cannot express.
+                    out_channels = cast(int, stage_channels.out_channels)
+                elif hasattr(stage_channels, "out_features"):
+                    out_channels = cast(int, stage_channels.out_features)
+                else:
+                    raise AttributeError(
+                        f"The {stage_channels.__class__.__name__} passed as stage {stage} of "
+                        f"hidden_channels has no out_channels or out_features attribute, which "
+                        f"is required so later stages know this stage's output width."
+                    )
+                layer: nn.Module = stage_channels
             else:
-                out_channels = hidden_channels[stage]
+                out_channels = stage_channels
                 layer = nn.Conv1d(
                     channels,
                     out_channels,
@@ -230,7 +247,7 @@ class OneDCnnEncoder(AbstractEncoder):
 
     @staticmethod
     def computeMinimumInputLength(
-        hidden_channels: tuple[int, ...],
+        hidden_channels: Sized,
         kernel_sizes: int | Sequence[int] = 5,
         strides: int | Sequence[int] = 1,
         paddings: int | Sequence[int] | None = None,
@@ -285,9 +302,11 @@ class OneDCnnEncoder(AbstractEncoder):
             )
         else:
             paddings_ = broadcastPerStage(paddings, num_stages, "paddings")
-        poolings_ = broadcastPerStage(poolings, num_stages, "poolings")
-        pool_kernel_sizes_ = broadcastPerStage(pool_kernel_sizes, num_stages, "pool_kernel_sizes")
-        pool_strides_ = (
+        poolings_: tuple[str | None, ...] = broadcastPerStage(poolings, num_stages, "poolings")
+        pool_kernel_sizes_: tuple[int | None, ...] = broadcastPerStage(
+            pool_kernel_sizes, num_stages, "pool_kernel_sizes"
+        )
+        pool_strides_: tuple[int | None, ...] = (
             broadcastPerStage(pool_strides, num_stages, "pool_strides")
             if pool_strides is not None
             else (None,) * num_stages
@@ -302,14 +321,18 @@ class OneDCnnEncoder(AbstractEncoder):
                     f"kernel_size is None."
                 )
             if poolings_[stage] is not None:
+                kernel_size_for_stage = pool_kernel_sizes_[stage]
+                # Guaranteed non-None by the ValueError check above: reaching this
+                # branch means poolings_[stage] is not None, so the compound
+                # condition there would already have raised if this were None.
+                assert kernel_size_for_stage is not None
+                stride_for_stage = pool_strides_[stage]
                 pool_stride = (
-                    pool_strides_[stage]
-                    if pool_strides_[stage] is not None
-                    else pool_kernel_sizes_[stage]
+                    stride_for_stage if stride_for_stage is not None else kernel_size_for_stage
                 )
                 required_min_length = solveMinimumInputLengthForConv1d(
                     required_min_length,
-                    pool_kernel_sizes_[stage],
+                    kernel_size_for_stage,
                     pool_stride,
                     pool_paddings_[stage],
                     dilation=1,
@@ -379,5 +402,5 @@ class OneDCnnEncoder(AbstractEncoder):
         return self._modality_name
 
     @property
-    def minimal_input_length(self) -> str:
+    def minimal_input_length(self) -> int:
         return self._min_input_length

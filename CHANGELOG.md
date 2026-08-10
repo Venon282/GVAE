@@ -178,8 +178,54 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `docs/adr/0006-reproducibility-seed-and-checkpointing.md` documenting
   both additions above and the `Trainer.fit` bug fix described below
   under "Fixed".
+- `training/checkpoint.py`: `BestCheckpointCallback(path, monitor=
+  "val/loss/total", mode="min", config=None)`, saving a checkpoint only
+  when the monitored metric improves, always overwriting a single file
+  (unlike `CheckpointCallback`'s periodic, save-every-N-epochs
+  behavior). This is the callback for "give me the best model to
+  evaluate or visualize", which periodic/`keep_last_n` saving does not
+  provide (the most recent epoch is not necessarily the best one). See
+  `docs/adr/0007-best-checkpoint-callback.md`.
+- `tests/integration/test_checkpoint.py::TestBestCheckpointCallback`
+  covering the above.
+- `docs/adr/0007-best-checkpoint-callback.md` documenting the above and
+  the `CheckpointCallback`/`BestCheckpointCallback` split rationale.
+- `training/loggers/`: `AbstractExperimentLogger(TrainerCallback, ABC)`
+  (spec §10 "Experiment tracking"), self-registered like every other
+  pluggable strategy (`registerLogger`/`getLoggerClass`/
+  `listRegisteredLoggers`). `onStepEnd`/`onEpochEnd`/`onTrainEnd` are
+  pre-wired to `logScalars(..., tag="step"|"epoch")`/`close()`; a
+  concrete backend only needs `logScalar` (mandatory) and, optionally,
+  `logImage`/`logFigure`/`close`. Two built-in backends: `CsvLogger`
+  (a single file, long/tidy `(x, tag, metric, value)` format, chosen
+  specifically because the metric-key set differs between step- and
+  epoch-level entries and can even change across `Trainer.fit` calls,
+  which a wide CSV format cannot cleanly accommodate) and
+  `TensorBoardLogger` (wraps `torch.utils.tensorboard.SummaryWriter`;
+  scalars, images, and figures; the `tensorboard` package is a soft
+  dependency, imported lazily inside `__init__` so importing
+  `training.loggers` never requires it). No dedicated
+  "CompositeLogger" was needed: every logger is already a
+  `TrainerCallback`, so `Trainer.callbacks` (a plain list since ADR
+  0005) already supports running several loggers at once. See
+  `docs/adr/0008-experiment-loggers.md`.
+- `pyproject.toml` gained a `tensorboard` optional extra (`pip install
+  -e ".[tensorboard]"`) and lists it under `dev` too, so this
+  project's own test suite exercises `TensorBoardLogger` against the
+  real package rather than a mock.
+- `tests/integration/test_loggers.py` covering the registry pattern,
+  `CsvLogger`'s row format and lifecycle, `TensorBoardLogger` against
+  the real package (including the missing-package `ImportError` path),
+  full `Trainer.fit` runs through each logger, and two loggers active
+  simultaneously with no dedicated composition code.
+- `docs/adr/0008-experiment-loggers.md` documenting the above.
 
 ### Changed
+
+- `CheckpointCallback`'s docstring rewritten to state its actual,
+  narrower purpose (resuming an interrupted training run) explicitly,
+  and to point at the new `BestCheckpointCallback` for best-model
+  selection instead. No behavior change.
 
 - `GlobalVae.computeRegularizationLoss` gained a
   `beta: dict[str, float] | float = 1.0` parameter, forwarded

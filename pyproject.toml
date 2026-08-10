@@ -18,6 +18,13 @@ dev = [
     "mypy>=1.9",
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "tensorboard>=2.14",  # exercised for real by tests/integration/test_loggers.py
+]
+# Soft dependency: only needed to actually construct TrainerCallback.training.loggers.
+# TensorBoardLogger; importing global_vae or the loggers subpackage never requires it
+# (the import is deferred to TensorBoardLogger.__init__ itself).
+tensorboard = [
+    "tensorboard>=2.14",
 ]
 
 [build-system]

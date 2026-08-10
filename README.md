@@ -38,11 +38,23 @@ This is an initial scaffold, not a finished framework. What's built:
   `docs/adr/0005-training-loop.md`.
 - Reproducibility (spec §10): `utils/seed.py`'s `setGlobalSeed` (global
   RNG seeding, a documented deterministic-mode flag) and
-  `training/checkpoint.py`'s `saveCheckpoint`/`loadCheckpoint`/
-  `CheckpointCallback` (model + optimizer + step/epoch/history + an
-  arbitrary config snapshot + RNG state, so evaluation or visualization
-  can run on a trained model without retraining it). See
-  `docs/adr/0006-reproducibility-seed-and-checkpointing.md`.
+  `training/checkpoint.py`'s `saveCheckpoint`/`loadCheckpoint`,
+  `CheckpointCallback` (periodic, for resuming an interrupted run), and
+  `BestCheckpointCallback` (saves only on improvement of a monitored
+  metric, so evaluation or visualization can run on the best model
+  without retraining). See
+  `docs/adr/0006-reproducibility-seed-and-checkpointing.md` and
+  `docs/adr/0007-best-checkpoint-callback.md`.
+- Experiment tracking (spec §10): `training/loggers/`'s
+  `AbstractExperimentLogger` (self-registered like every other
+  pluggable strategy) with two built-in backends, `CsvLogger` (a
+  single long/tidy-format file, no extra dependency) and
+  `TensorBoardLogger` (`tensorboard` is an optional extra,
+  `pip install -e ".[tensorboard]"`). Every logger is itself a
+  `TrainerCallback`, so no `Trainer` changes were needed to support it,
+  and running several loggers at once needs no dedicated "composite"
+  class (`callbacks=[CsvLogger(...), TensorBoardLogger(...)]` just
+  works). See `docs/adr/0008-experiment-loggers.md`.
 - A unit-test suite for the registries and the routing-graph validator,
   plus end-to-end integration tests for the `EN-L1-DN` configuration
   and for `Trainer` (with dummy encoders/decoders/fusion — see
@@ -51,15 +63,12 @@ This is an initial scaffold, not a finished framework. What's built:
 
 What's deliberately **not** built yet, and why (see `NOTE.md` in each
 directory): concrete image encoders/decoders, the MoE/concat_mlp/
-cross-attention fusion strategies, the data pipeline (out of this
+cross-attention fusion strategies, and the data pipeline (out of this
 framework's scope by design; the person building on it owns their own
-data loading), and concrete experiment loggers (TensorBoard/CSV/W&B/
-MLflow; `TrainerCallback` is the seam they plug into, exactly as
-`CheckpointCallback` already demonstrates for checkpointing). Each of
-these either depends on an open question flagged in spec §11 that
-hasn't been decided yet, or is simply the next not-yet-reached
-milestone — per spec §12, an open question is a reason to ask, not to
-guess.
+data loading). Each of these either depends on an open question
+flagged in spec §11 that hasn't been decided yet, or is simply the
+next not-yet-reached milestone — per spec §12, an open question is a
+reason to ask, not to guess.
 
 ## Setup
 

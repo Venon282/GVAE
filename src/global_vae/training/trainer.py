@@ -25,6 +25,7 @@ without any extra plumbing on the caller's side.
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -37,6 +38,8 @@ from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedule_resolution import resolveBetaSchedules
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
 from global_vae.training.callbacks import TrainerCallback
+from global_vae.training.checkpoint import loadCheckpoint as loadCheckpointFile
+from global_vae.training.checkpoint import saveCheckpoint as saveCheckpointFile
 from global_vae.utils.autograd import backward
 
 logger = logging.getLogger(__name__)
@@ -408,14 +411,77 @@ class Trainer:
                     epoch,
                     ", ".join(f"{key}={value:.4f}" for key, value in epoch_metrics.items()),
                 )
+                self.start_epoch = epoch + 1
                 for callback in self.callbacks:
                     callback.onEpochEnd(self, epoch, epoch_metrics)
-                self.start_epoch = epoch + 1
         finally:
             for callback in self.callbacks:
                 callback.onTrainEnd(self)
 
         return self.history
+
+    def saveCheckpoint(self, path: str | Path, config: Any = None) -> None:
+        """Save this trainer's full state (model, optimizer, step/epoch, history) to `path`.
+
+        Thin wrapper around `training.checkpoint.saveCheckpoint`, using
+        this instance's own model/optimizer/step/epoch/history; see
+        that function for the exact checkpoint contents.
+
+        Args:
+            path: Destination file path. Parent directories are
+                created if they do not already exist.
+            config: Arbitrary, picklable snapshot of whatever
+                configuration produced this model/trainer (spec §10:
+                "config snapshotted with every run"). `None` (default)
+                saves no config.
+        """
+        saveCheckpointFile(
+            path,
+            model=self.model,
+            optimizer=self.optimizer,
+            global_step=self.global_step,
+            start_epoch=self.start_epoch,
+            history=self.history,
+            config=config,
+        )
+
+    def loadCheckpoint(
+        self, path: str | Path, restore_optimizer: bool = True, strict: bool = True
+    ) -> Any:
+        """Restore this trainer's state from a checkpoint saved by `saveCheckpoint`.
+
+        `self.global_step`, `self.start_epoch`, and `self.history` are
+        overwritten from the checkpoint, so a subsequent `fit()` call
+        continues exactly where the checkpointed run left off (spec
+        §10, ADR 0005). RNG state (Python/NumPy/PyTorch) is restored
+        too, so resumed training continues drawing from the same
+        random sequence it would have without the interruption.
+
+        Args:
+            path: Checkpoint file path.
+            restore_optimizer: If `True` (default), also restore the
+                optimizer's own state (e.g. Adam's moment estimates).
+                Set to `False` to load only the model weights, keeping
+                this trainer's freshly-constructed optimizer state
+                (e.g. to resume with a different learning rate).
+            strict: Forwarded to `model.load_state_dict`.
+
+        Returns:
+            The `config` snapshot stored in the checkpoint (whatever
+            shape was passed to `saveCheckpoint`; `None` if none was
+            given), for the caller to inspect or reuse.
+        """
+        metadata = loadCheckpointFile(
+            path,
+            model=self.model,
+            optimizer=self.optimizer if restore_optimizer else None,
+            map_location=self.device,
+            strict=strict,
+        )
+        self.global_step = metadata.global_step
+        self.start_epoch = metadata.start_epoch
+        self.history = metadata.history
+        return metadata.config
 
     def _moveBatchToDevice(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Move every tensor in `batch` to `self.device`.

@@ -44,6 +44,7 @@ class LatentSpace:
         eps = torch.randn_like(std)
         return mu + eps * std
 
+
 @dataclass
 class RoutingGraph:
     """Encoder, latent, and decoder wiring for one model instance (spec §2.2).

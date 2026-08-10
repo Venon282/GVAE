@@ -23,10 +23,11 @@ import torch
 
 try:
     import numpy as np
-except ImportError: # pragma: no cover
-    np = None # type: ignore[assignment]
+except ImportError:  # pragma: no cover
+    np = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
 
 def setGlobalSeed(seed: int, deterministic: bool = False, warn_only: bool = False) -> None:
     """Seed every RNG this codebase's randomness can come from, and set the determinism mode.
@@ -82,10 +83,10 @@ def setGlobalSeed(seed: int, deterministic: bool = False, warn_only: bool = Fals
         torch.cuda.manual_seed_all(seed)
 
     if deterministic:
-        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8") # eproducible, deterministic GPU execution
+        os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
         torch.use_deterministic_algorithms(True, warn_only=warn_only)
         torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False # disables an automatic   benchmarking feature that searches for the fastest GPU algorithms for your hardware.
+        torch.backends.cudnn.benchmark = False
     else:
         torch.use_deterministic_algorithms(False)
         torch.backends.cudnn.deterministic = False

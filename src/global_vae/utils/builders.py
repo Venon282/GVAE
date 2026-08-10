@@ -1,6 +1,6 @@
-from torch import nn
-
 from typing import Any
+
+from torch import nn
 
 def build1DPoolLayer(
     pooling: str | None,

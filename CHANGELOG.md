@@ -252,6 +252,41 @@ versioning follows [Semantic Versioning](https://semver.org/).
   truncation, curve value correctness, and `HistoryCallback` end to end
   through `Trainer.fit`.
 - `docs/adr/0009-visualization.md` documenting the above.
+- `evaluation/`: a standalone evaluation pass, distinct from training (spec's C8
+  requirement). `evaluation/metrics.py`: `computeMse`/`computeRmse`/`computeMae`/
+  `computeR2`/`computePearsonR` (plain functions, not a registry: a caller wants
+  several computed together) plus `DEFAULT_RECONSTRUCTION_METRICS`; `R2`/`pearson_r`
+  return `nan` rather than raise on a degenerate constant input. `evaluation/evaluate.py`:
+  `evaluate(model, dataloader, ...) -> EvaluationResults`, needing only a `GlobalVae`
+  and a dataloader (no `Trainer`). Aggregate reconstruction/regularization losses are
+  running batch averages (comparable to `Trainer`'s own curves); per-modality metrics
+  and per-latent-space regularization values are computed once over the entire pooled
+  dataset instead (correct for ratio-of-sums metrics like R^2/Pearson r, which a
+  batch-average would get subtly wrong). Every latent space always reports a
+  `"kl_standard_normal"` value alongside its `"configured"` regularizer's own value,
+  so runs trained with different regularizer strategies stay comparable on one number.
+  `EvaluationResults.save`/`.summary()` for a JSON report and a human-readable
+  console summary. `evaluation/visual_export.py`: `exportEvaluationFigures`, pure
+  wiring over `visualization/`'s own collection/plotting functions, saving PNGs.
+  `GlobalVae.forward` gained a `use_mean: bool = False` parameter (default preserves
+  existing behavior for every existing caller) so `evaluate`'s own `use_mean=True`
+  default (deterministic, sampling-noise-free reconstructions) uses the model's own
+  posterior mean directly instead of resampling after the fact.
+  `visualization.reconstruction_plot.plotReconstructionGrid` gained a
+  `title: str | None = None` parameter (`fig.suptitle`) so `exportEvaluationFigures`
+  can label each modality's grid. `scripts/evaluate.py`: a CLI wrapping
+  `loadCheckpoint` + `evaluate` + `exportEvaluationFigures`; model/dataloader
+  construction are dynamically imported from `--model-factory`/`--dataloader-factory`
+  (`"module.path:function_name"`) rather than hardcoded, matching every other place
+  in this framework that keeps model construction and data loading as the caller's
+  own responsibility. See `docs/adr/0010-evaluation.md`.
+- `tests/integration/test_evaluate.py`, `test_visual_export.py`, and
+  `test_evaluate_script.py` covering the above (metric correctness, `EvaluationResults`
+  round-tripping, `evaluate`'s options, figure export, and the CLI script end to end
+  including its dynamic-import error paths). `tests/integration/_script_fixtures.py`
+  holds the CLI test's model/dataloader factories, named outside pytest's own
+  `test_*.py` discovery pattern (see `test_checkpoint.py`'s module docstring for why).
+- `docs/adr/0010-evaluation.md` documenting the above.
 
 ### Changed
 
@@ -326,6 +361,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
   decoupled from the beta-schedule work described above.
 
 ### Fixed
+- `evaluation/visual_export.py`'s `exportEvaluationFigures` contained a dead
+  `... if False else ...` branch left over from an interrupted earlier attempt at
+  passing a `title` to `plotReconstructionGrid`, a parameter that function did not
+  actually have at the time. Fixed by adding `title: str | None = None` to
+  `plotReconstructionGrid` (`fig.suptitle`) and removing the dead branch. See
+  `docs/adr/0010-evaluation.md`.
 - `Trainer.fit` updated `self.start_epoch` *after* invoking every
   `onEpochEnd` callback for that epoch, so a callback that saves
   `trainer.start_epoch` (such as `CheckpointCallback`) would persist a

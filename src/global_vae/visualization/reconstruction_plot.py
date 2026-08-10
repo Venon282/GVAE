@@ -141,6 +141,7 @@ def plotReconstructionGrid(
     max_examples: int = 8,
     ncols: int = 2,
     titles: Sequence[str] | None = None,
+    title: str | None = None,
     original_label: str = "original",
     reconstruction_label: str = "reconstruction",
     xlabel: str = "index",
@@ -165,6 +166,10 @@ def plotReconstructionGrid(
         titles: Optional per-example subplot titles, length matching
             the number of examples actually plotted. Defaults to
             `"example 0"`, `"example 1"`, ...
+        title: Optional whole-figure title (`fig.suptitle`), distinct
+            from `titles`' per-subplot ones, e.g. `"Reconstructions:
+            signal"` when calling this once per modality. `None`
+            (default) adds no overall title.
         original_label: As in `plotReconstruction`.
         reconstruction_label: As in `plotReconstruction`.
         xlabel: As in `plotReconstruction`.
@@ -203,6 +208,8 @@ def plotReconstructionGrid(
         figsize=(figsize_per_plot[0] * ncols, figsize_per_plot[1] * nrows),
         squeeze=False,
     )
+    if title:
+        fig.suptitle(title)
 
     for index in range(num_examples):
         ax = axes[index // ncols][index % ncols]

@@ -271,7 +271,7 @@ class GlobalVae(nn.Module):
         return result
 
     def forward(
-        self, inputs: dict[str, torch.Tensor]
+        self, inputs: dict[str, torch.Tensor], use_mean: bool = False
     ) -> dict[str, dict[str, torch.Tensor] | dict[str, tuple[torch.Tensor, torch.Tensor]]]:
         """Run one encode, fuse, sample, assemble, decode pass.
 
@@ -280,14 +280,28 @@ class GlobalVae(nn.Module):
                 subset of the configured modalities is accepted; actual
                 missing-modality robustness depends on the fusion
                 strategy in use for each latent space (spec §5).
+            use_mean: If `False` (default, unchanged from every prior
+                behavior of this method), each latent space is sampled
+                via the reparameterization trick
+                (`LatentSpace.reparameterize`), matching what training
+                needs for the ELBO objective. If `True`, each latent
+                space instead deterministically uses its posterior
+                mean `mu` in place of a sample, everywhere a latent
+                value is consumed downstream (assemblers, decoders, and
+                `"latent_samples"` in the return value). Standard
+                practice for reporting reconstruction quality
+                (`evaluation.evaluate`, spec §10/§C8): it removes
+                sampling noise as a source of variance between runs,
+                which sampling deliberately keeps during training.
 
         Returns:
             A dict with keys `"reconstructions"` (decoder name ->
             reconstruction tensor), `"latent_params"` (latent space
             name -> `(mu, logvar)`), and `"latent_samples"` (latent
-            space name -> sampled `z`). A latent space or decoder with
-            no available input this pass is simply absent from the
-            corresponding dict, not raised as an error.
+            space name -> sampled, or `mu` if `use_mean=True`, `z`). A
+            latent space or decoder with no available input this pass
+            is simply absent from the corresponding dict, not raised
+            as an error.
 
         Raises:
             ValueError: If `inputs` is empty.
@@ -311,7 +325,9 @@ class GlobalVae(nn.Module):
                 params = {name: encoder_outputs[name] for name in active}
                 mu, logvar = self.fusions[latent_name](params)
             latent_params[latent_name] = (mu, logvar)
-            latent_samples[latent_name] = self.latent_spaces[latent_name].reparameterize(mu, logvar)
+            latent_samples[latent_name] = (
+                mu if use_mean else self.latent_spaces[latent_name].reparameterize(mu, logvar)
+            )
 
         reconstructions: dict[str, torch.Tensor] = {}
         for decoder_name, decoder in self.decoders.items():

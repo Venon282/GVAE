@@ -65,6 +65,19 @@ This is an initial scaffold, not a finished framework. What's built:
   displays, saves, or logs it, so it composes directly with
   `training/loggers/`'s `logFigure`. See
   `docs/adr/0009-visualization.md`.
+- Evaluation (spec's C8 requirement): `evaluation/`'s `evaluate(model,
+  dataloader, ...)`, needing only a `GlobalVae` and a dataloader (no
+  `Trainer`): reconstruction metrics per modality (mse/rmse/mae/r2/
+  pearson_r by default), a regularization value per latent space that
+  always includes a `kl_standard_normal` number directly comparable
+  across runs regardless of which regularizer actually trained the
+  model, and a JSON/console report. `exportEvaluationFigures` saves
+  reconstruction and latent-space figures via `visualization/`.
+  `scripts/evaluate.py` is the CLI entry point
+  (`python scripts/evaluate.py --checkpoint ... --model-factory ...
+  --dataloader-factory ...`), with model/data construction supplied as
+  your own factory functions rather than hardcoded. See
+  `docs/adr/0010-evaluation.md`.
 - A unit-test suite for the registries and the routing-graph validator,
   plus end-to-end integration tests for the `EN-L1-DN` configuration
   and for `Trainer` (with dummy encoders/decoders/fusion — see

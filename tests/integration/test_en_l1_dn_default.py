@@ -216,6 +216,24 @@ class TestEnL1DnDefault:
         assert logvar.shape == (BATCH_SIZE, LATENT_DIM)
         assert output["latent_samples"]["z_fused"].shape == (BATCH_SIZE, LATENT_DIM)
 
+    def test_use_mean_false_is_stochastic_by_default(self, model: GlobalVae) -> None:
+        """Unchanged default behavior: two calls sample different z's."""
+        inputs = _dummyInputs()
+        first = model(inputs)["latent_samples"]["z_fused"]
+        second = model(inputs)["latent_samples"]["z_fused"]
+        assert not torch.equal(first, second)
+
+    def test_use_mean_true_is_deterministic_and_equals_mu(self, model: GlobalVae) -> None:
+        inputs = _dummyInputs()
+        output = model(inputs, use_mean=True)
+        mu, _ = output["latent_params"]["z_fused"]
+        assert torch.equal(output["latent_samples"]["z_fused"], mu)
+
+        # calling again must reproduce the exact same reconstructions (no sampling involved)
+        other_output = model(inputs, use_mean=True)
+        for name in output["reconstructions"]:
+            assert torch.equal(output["reconstructions"][name], other_output["reconstructions"][name])
+
     def test_forward_with_missing_modality(self, model: GlobalVae) -> None:
         """The model must still run and decode every modality with a partial input (spec §5)."""
         output = model({"signal": torch.randn(BATCH_SIZE, SIGNAL_INPUT_DIM)})

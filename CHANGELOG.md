@@ -219,6 +219,39 @@ versioning follows [Semantic Versioning](https://semver.org/).
   full `Trainer.fit` runs through each logger, and two loggers active
   simultaneously with no dedicated composition code.
 - `docs/adr/0008-experiment-loggers.md` documenting the above.
+- `visualization/`: `latent_plot.py` (`projectLatentSamples`: `"auto"`/
+  `"pca"`/`"tsne"`/`"umap"`/`"none"`; `plotLatentSpace`: 1D/2D/3D
+  scatter with optional continuous/categorical label coloring;
+  `collectLatentParams`/`collectLatentSamples`: run a `GlobalVae` over
+  a dataloader to gather one latent space's `(mu, logvar)` or realized
+  values; `plotPerDimensionKl`: a bar chart of average KL per latent
+  dimension, making posterior collapse directly visible), `reconstruction_plot.py`
+  (`plotReconstruction`/`plotReconstructionGrid`: 1D line overlay with
+  an `inverse_transform` hook for undoing the caller's own
+  preprocessing; `collectReconstructions`), `loss_curves.py`
+  (`plotLossCurves` from `Trainer.history`; `plotStepCurves`, keyed by
+  an explicit `"step"` field rather than list position; `plotBetaSchedule`,
+  for sanity-checking a schedule before training), and
+  `history_callback.py` (`HistoryCallback`, an in-memory
+  `TrainerCallback` collecting step/epoch metrics, feeding
+  `plotStepCurves` without a file-based logger). Every function returns
+  a plain `matplotlib.figure.Figure`; nothing here displays, saves, or
+  logs it. See `docs/adr/0009-visualization.md`.
+- `pyproject.toml` gained `visualization` (`matplotlib`, required to
+  import `global_vae.visualization` at all), `tsne` (`scikit-learn`),
+  and `umap` (`umap-learn`) optional extras, all three also listed
+  under `dev` so the test suite exercises every projection method for
+  real.
+- `tests/integration/test_latent_plot.py`,
+  `tests/integration/test_reconstruction_plot.py`, and
+  `tests/integration/test_loss_curves.py` covering the above,
+  including PCA correctness against a synthetic dataset with a known
+  dominant axis, real t-SNE/UMAP, per-dimension KL bar-height
+  correctness against the formula directly, reconstruction overlay
+  correctness (`inverse_transform`, custom x-axis), grid layout and
+  truncation, curve value correctness, and `HistoryCallback` end to end
+  through `Trainer.fit`.
+- `docs/adr/0009-visualization.md` documenting the above.
 
 ### Changed
 

@@ -55,6 +55,16 @@ This is an initial scaffold, not a finished framework. What's built:
   and running several loggers at once needs no dedicated "composite"
   class (`callbacks=[CsvLogger(...), TensorBoardLogger(...)]` just
   works). See `docs/adr/0008-experiment-loggers.md`.
+- Visualization (spec §10, spec §6.1 milestone 1): `visualization/`'s
+  latent-space projection and scatter plots (`"pca"`/`"tsne"`/`"umap"`),
+  a per-dimension KL bar chart for spotting posterior collapse,
+  reconstruction overlay plots with an `inverse_transform` hook for
+  the caller's own preprocessing, and loss/step/beta-schedule curves.
+  Requires the `visualization` extra (`pip install -e ".[visualization]"`).
+  Every function returns a plain `matplotlib.figure.Figure`; nothing
+  displays, saves, or logs it, so it composes directly with
+  `training/loggers/`'s `logFigure`. See
+  `docs/adr/0009-visualization.md`.
 - A unit-test suite for the registries and the routing-graph validator,
   plus end-to-end integration tests for the `EN-L1-DN` configuration
   and for `Trainer` (with dummy encoders/decoders/fusion — see
@@ -63,12 +73,13 @@ This is an initial scaffold, not a finished framework. What's built:
 
 What's deliberately **not** built yet, and why (see `NOTE.md` in each
 directory): concrete image encoders/decoders, the MoE/concat_mlp/
-cross-attention fusion strategies, and the data pipeline (out of this
-framework's scope by design; the person building on it owns their own
-data loading). Each of these either depends on an open question
-flagged in spec §11 that hasn't been decided yet, or is simply the
-next not-yet-reached milestone — per spec §12, an open question is a
-reason to ask, not to guess.
+cross-attention fusion strategies, an image-comparison reconstruction
+plot (needs an image decoder to exist first), and the data pipeline
+(out of this framework's scope by design; the person building on it
+owns their own data loading). Each of these either depends on an open
+question flagged in spec §11 that hasn't been decided yet, or is
+simply the next not-yet-reached milestone — per spec §12, an open
+question is a reason to ask, not to guess.
 
 ## Setup
 

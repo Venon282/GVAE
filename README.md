@@ -78,6 +78,20 @@ This is an initial scaffold, not a finished framework. What's built:
   --dataloader-factory ...`), with model/data construction supplied as
   your own factory functions rather than hardcoded. See
   `docs/adr/0010-evaluation.md`.
+- Config management (spec §10): `global_vae/config/` is a Hydra-driven, dataclass-validated
+  config layer covering the model, data, and training domains
+  (`ModelConfig`, `DataConfig`, `TrainingConfig`, composed into one
+  `ExperimentConfig`). `buildModelFromConfig`/`buildTrainerFromConfig`/
+  `buildDataloadersFromConfig` turn a validated config into a real
+  `GlobalVae`/`Trainer`/dataloaders; `DataConfig` is a schema-only
+  contract (paths, batch size, split, named transforms, and a
+  `loader_factory` reference to your own data-loading callable), never
+  a dataset implementation, matching this framework's data-pipeline
+  scope boundary. `scripts/train.py` is the Hydra CLI entry point
+  (`python scripts/train.py data.train_path=... data.loader_factory=...`),
+  running `configs/experiment/signal_vae.yaml` (the spec §6.1
+  milestone 1 single-modality signal VAE) by default. See
+  `docs/adr/0011-hydra-config-layer.md`.
 - A unit-test suite for the registries and the routing-graph validator,
   plus end-to-end integration tests for the `EN-L1-DN` configuration
   and for `Trainer` (with dummy encoders/decoders/fusion — see
@@ -100,6 +114,20 @@ question is a reason to ask, not to guess.
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
+
+## Running the signal-VAE milestone (spec §6.1 milestone 1)
+
+```bash
+python scripts/train.py \
+    data.train_path=/path/to/your/data \
+    data.loader_factory=my_project.data:buildSignalDataloaders
+```
+
+`data.loader_factory` must point at your own `(DataConfig) -> DataloaderBundle`
+callable (spec: data loading stays your own responsibility). See
+`configs/experiment/signal_vae.yaml` for the full default config and
+`global_vae/config/data.py` for the exact contract. Override any hyperparameter from
+the command line, e.g. `training.num_epochs=50 training.optimizer.kwargs.lr=0.0003`.
 
 ## Running checks
 

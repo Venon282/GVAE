@@ -1,0 +1,36 @@
+# Single-modality signal VAE (spec §6.1 milestone 1): `signal -> z -> signal`, no
+# fusion strategy since exactly one encoder feeds the single latent space (spec §4).
+# Validated against global_vae.config.model.ModelConfig
+# (see src/global_vae/config/model.py).
+name: global_vae_signal_single_latent
+latent_mode: single
+
+modalities:
+  signal:
+    encoder:
+      name: 1d_cnn_encoder_v1
+      kwargs:
+        hidden_channels: [8, 16, 32, 64, 128]
+        kernel_sizes: 5
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: 1d_cnn_decoder_v1
+      kwargs:
+        # output_length must match configs/data/signal.yaml's sequence_length. With
+        # this framework's default conv_transpose doubling (seed_length=8, kernel_size
+        # 4/stride 2/padding 1), 5 hidden_channels entries give 5 transitions:
+        # 8 -> 16 -> 32 -> 64 -> 128 -> 256. Use
+        # OneDCnnDecoder.computeOutputLength(...) to verify any configuration before
+        # committing to it.
+        output_length: 256
+        hidden_channels: [128, 64, 32, 16, 8]
+        upsample_modes: conv_transpose
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

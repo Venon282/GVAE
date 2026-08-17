@@ -1,0 +1,16 @@
+# @package _global_
+# Full experiment for the signal-VAE milestone (spec §6.1 milestone 1): assembles
+# model + data + training into one composed, validated global_vae.config.experiment.ExperimentConfig.
+# Run with: python scripts/train.py
+# Override anything from the command line, e.g.:
+#   python scripts/train.py data.train_path=/path/to/data data.loader_factory=my_project.data:build \
+#       training.num_epochs=50 training.optimizer.kwargs.lr=0.0003
+defaults:
+  - /model: signal_single_latent
+  - /data: signal
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/signal_vae

@@ -287,8 +287,97 @@ versioning follows [Semantic Versioning](https://semver.org/).
   holds the CLI test's model/dataloader factories, named outside pytest's own
   `test_*.py` discovery pattern (see `test_checkpoint.py`'s module docstring for why).
 - `docs/adr/0010-evaluation.md` documenting the above.
+- `global_vae/config/`: a Hydra-driven, dataclass-validated config layer (spec §10
+  "Config management"). `config/model.py`: `ModelConfig` (+ `EncoderConfig`/
+  `DecoderConfig`/`ModalityConfig`/`FusionConfig`/`RegularizerConfig`/
+  `SingleLatentConfig`) and `buildModelFromConfig`, a thin wrapper around
+  `GlobalVae.createSingleLatent` covering the `EN-L1-DN`/single-modality case (spec
+  §6.1 milestone 1, ADR 0001); auto-fills `latent_dim` into every encoder/decoder's
+  kwargs from `single_latent.dim` unless explicitly overridden, so it never has to be
+  repeated. `latent_mode: "several"` is accepted by the schema but raises
+  `NotImplementedError` (a general `RoutingGraph` config is a documented future
+  extension, not built now, per spec §6.1's build order). `config/data.py`:
+  `DataConfig` (paths, batch size, split, named transforms) and `DataloaderBundle`, a
+  schema-only contract, never a dataset implementation (matching this project's
+  data-pipeline scope decision); `buildDataloadersFromConfig` resolves and calls a
+  user-supplied `loader_factory` (`"module.path:function_name"`) and nothing else.
+  `config/training.py`: `TrainingConfig` (+ `OptimizerConfig`/`BetaScheduleConfig`/
+  `LoggerEntryConfig`/`CheckpointConfig`) and `buildTrainerFromConfig`/
+  `buildBetaSchedules`/`buildCallbacksFromConfig`, resolving every registry-backed
+  field (beta schedules, loggers) through this project's own existing registries, with
+  a small name-lookup for the two PyTorch built-ins (optimizer, reconstruction loss)
+  that are not one of this project's own pluggable strategies. `config/experiment.py`:
+  `ExperimentConfig` (composes `model`/`data`/`training`) and `loadExperimentConfig`,
+  which composes via Hydra's `compose()` then validates/materializes via
+  `OmegaConf.merge(OmegaConf.structured(ExperimentConfig), ...)`, so composition
+  (which files Hydra merges) and validation (does the result match the schema) stay
+  two separately-reasoned-about steps. `config/__init__.py` registers every schema
+  with Hydra's `ConfigStore`, mirroring this project's existing self-registration
+  pattern. See `docs/adr/0011-hydra-config-layer.md`.
+- `configs/model/signal_single_latent.yaml`: the schema-valid, buildable config for the
+  spec §6.1 milestone 1 single-modality signal VAE. `configs/data/signal.yaml`: the
+  matching data contract (`loader_factory`/`train_path` left as Hydra's `???`
+  required-value marker). `configs/training/default.yaml`: a new config group (not in
+  spec §8's illustrative tree, a deliberate, documented extension of it) covering
+  optimizer/beta-schedule/logger/checkpoint defaults, using `${output_dir}`
+  interpolation against the composing experiment config so a run's own directory only
+  has to be set once. `configs/experiment/signal_vae.yaml`: composes all three via a
+  `defaults` list (needs `# @package _global_` so the composed result lands at the
+  config root, verified empirically). `configs/model/default.yaml` rewritten to match
+  the new `ModelConfig` schema (the old shape predated any config-consuming code and
+  no longer matched it); now schema-valid as a two-modality signal+image illustrative
+  example for spec §6.1 milestone 2, but intentionally not yet buildable (no image
+  encoder/decoder is registered).
+- `scripts/train.py`: the Hydra CLI entry point for the signal-VAE milestone,
+  `@hydra.main`-decorated, running `configs/experiment/signal_vae.yaml` by default,
+  overridable via Hydra's dotlist syntax on the command line. Composes + validates the
+  same way `loadExperimentConfig` does, then calls `buildModelFromConfig`/
+  `buildDataloadersFromConfig`/`buildTrainerFromConfig` and `trainer.fit(...)`.
+- `global_vae/utils/imports.py`: `importCallable`, extracted from
+  `scripts/evaluate.py`'s previously-private `_importCallable` so `scripts/train.py`
+  and `global_vae/config/data.py` share the exact same `"module.path:function_name"`
+  dynamic-import behavior instead of duplicating it.
+- `tests/integration/test_config.py`: composition/validation (interpolation, CLI-style
+  overrides, `MissingMandatoryValue`/`MissingConfigException` error paths),
+  `buildModelFromConfig` (real forward pass, `latent_dim` auto-fill/override,
+  `NotImplementedError`/`ValueError`/`KeyError` paths), `buildDataloadersFromConfig`,
+  every `training.py` builder/lookup function, and a full config-to-trained-model
+  `Trainer.fit` run using the real `1d_cnn_encoder_v1`/`1d_cnn_decoder_v1`
+  implementations (not dummies, unlike most other integration tests in this suite).
+  `tests/integration/test_train_script.py`: runs `scripts/train.py` as a real
+  subprocess (its `@hydra.main`-decorated `main` owns global process state not safe to
+  exercise twice in one interpreter), covering a successful run, logger/checkpoint file
+  output, a reloadable checkpoint, hyperparameter overrides actually taking effect, and
+  the missing-required-field/invalid-`loader_factory`-spec error paths.
+  `tests/integration/_train_script_fixtures.py` holds the dummy in-memory
+  `loader_factory` both test files share, named outside pytest's own `test_*.py`
+  discovery pattern (see `test_checkpoint.py`'s module docstring for why).
+- `docs/adr/0011-hydra-config-layer.md` documenting all of the above.
 
 ### Changed
+
+- `encoders/__init__.py`, `decoders/__init__.py`, `fusion/__init__.py` now import
+  every concrete implementation they contain (`OneDCnnEncoder`, `OneDCnnDecoder`,
+  `ProductOfExperts`) for the registration side effect, matching the pattern already
+  used by `assemblers/__init__.py`, `losses/regularizers/__init__.py`,
+  `training/beta_schedules/__init__.py`, and `training/loggers/__init__.py` (spec §10).
+  Previously these three were plain docstrings; `getEncoderClass("1d_cnn_encoder_v1")`
+  (and the decoder/fusion equivalents) raised `KeyError` after only `import
+  global_vae.encoders`, silently depending on some unrelated import elsewhere in the
+  process having already imported the concrete submodule first. See "Fixed" below and
+  `docs/adr/0011-hydra-config-layer.md`.
+- `scripts/evaluate.py`'s private `_importCallable` is now
+  `global_vae.utils.imports.importCallable`, imported back under the old private name
+  for backward compatibility with `test_evaluate_script.py`'s existing tests (which
+  call it directly on the loaded script module). Pure DRY extraction; behavior
+  unchanged.
+- `configs/model/default.yaml` rewritten to match `global_vae.config.model.ModelConfig`'s
+  actual field names/shape (see "Added" above); its previous shape predated any
+  config-consuming code and was already flagged by its own header comment as "not yet
+  consumed by the code".
+- `configs/data/NOTE.md` and `configs/experiment/NOTE.md` updated: the config schema
+  and an illustrative signal-VAE experiment now exist; only concrete dataset/transform
+  *code* remains deferred, unchanged from the original scope decision.
 
 - `CheckpointCallback`'s docstring rewritten to state its actual,
   narrower purpose (resuming an interrupted training run) explicitly,
@@ -361,6 +450,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
   decoupled from the beta-schedule work described above.
 
 ### Fixed
+- `encoders/__init__.py`, `decoders/__init__.py`, `fusion/__init__.py` not registering
+  their built-in implementations (`OneDCnnEncoder`, `OneDCnnDecoder`,
+  `ProductOfExperts`) on import alone: `getEncoderClass("1d_cnn_encoder_v1")` (and the
+  decoder/fusion equivalents) raised `KeyError` after only `import global_vae.encoders`,
+  silently depending on some unrelated import elsewhere in the process having already
+  imported the concrete submodule first, unlike every other registry-based subpackage
+  in this codebase. A real, latent bug independent of the config work that surfaced it
+  (`global_vae.config.model.buildModelFromConfig` needs every registry lookup to
+  succeed from nothing more than `import global_vae.config`). See
+  `docs/adr/0011-hydra-config-layer.md`.
 - `evaluation/visual_export.py`'s `exportEvaluationFigures` contained a dead
   `... if False else ...` branch left over from an interrupted earlier attempt at
   passing a `title` to `plotReconstructionGrid`, a parameter that function did not

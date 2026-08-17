@@ -1,0 +1,46 @@
+# Default training configuration for the signal-VAE milestone (spec §6.1 milestone 1).
+# Validated against global_vae.config.training.TrainingConfig
+# (see src/global_vae/config/training.py). `${output_dir}` interpolates against the
+# composing experiment config's own `output_dir` (see configs/experiment/signal_vae.yaml).
+num_epochs: 200
+
+optimizer:
+  name: adam
+  kwargs:
+    lr: 0.001
+
+reconstruction_loss: mse
+reconstruction_weight: 1.0
+
+# A single scalar beta would risk posterior collapse this early (mu -> 0, logvar -> 0
+# is a trivial way to drive KL to zero before the decoder learns to use z); linear
+# warm-up is the standard mitigation (docs/adr/0004-pluggable-beta-schedules.md).
+beta: 1.0
+beta_schedules:
+  z_fused:
+    strategy: linear_warmup
+    kwargs:
+      warmup_steps: 1000
+      start_value: 0.0
+      end_value: 1.0
+
+modality_dropout_p: 0.0 # single modality: nothing to drop (spec §5)
+grad_clip_norm: null
+device: null # null auto-detects cuda, falling back to cpu
+log_every_n_steps: 50
+
+loggers:
+  - name: csv
+    kwargs:
+      path: ${output_dir}/metrics.csv
+  - name: tensorboard
+    kwargs:
+      log_dir: ${output_dir}/tensorboard
+
+checkpoint:
+  directory: ${output_dir}/checkpoints
+  every_n_epochs: 10
+  keep_last_n: 3
+  best_path: ${output_dir}/checkpoints/best.pt
+  best_monitor: val/loss/total
+  best_mode: min

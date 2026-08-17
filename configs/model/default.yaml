@@ -1,23 +1,39 @@
-# Illustrative model config (spec §9). Not yet consumed by the code:
-# GlobalVae is currently built directly in Python (see
-# models/global_vae.py and tests/integration/). Wiring this file up via
-# Hydra + structured dataclasses/Pydantic (spec §10, §11) is a deferred
-# decision, not yet made.
-model:
-  name: global_vae
-  modalities:
-    signal:
-      encoder: 1d_cnn_encoder_v1
-      decoder: 1d_cnn_encoder_v1
-    image:
-      encoder: resnet_encoder_v1
-      decoder: resnet_decoder_v1
-  latent:
-    mode: single # single | several
-    dim: 128
-    fusion: # only meaningful because this latent space is fed by more than one encoder
-      strategy: poe # poe | moe | concat_mlp | cross_attention
-      residual: true
-  training:
-    beta_schedule: linear_warmup
-    modality_dropout_p: 0.15 # trains robustness to missing modalities
+# Illustrative two-modality (signal + image) model config for the future spec §6.1
+# milestone 2 (paired signal+image, exercising Fusion for the first time). Schema-valid
+# against global_vae.config.model.ModelConfig, but NOT buildable yet: no image
+# encoder/decoder is registered (see encoders/decoders NOTE.md, README's "What's
+# deliberately not built yet"). buildModelFromConfig raises KeyError on
+# "resnet_encoder_v1"/"resnet_decoder_v1" until one exists. Use
+# `signal_single_latent.yaml` for the current milestone 1 (single-modality signal VAE).
+name: global_vae_signal_image
+latent_mode: single
+
+modalities:
+  signal:
+    encoder:
+      name: 1d_cnn_encoder_v1
+      kwargs:
+        hidden_channels: [32, 64, 128]
+    decoder:
+      name: 1d_cnn_decoder_v1
+      kwargs:
+        output_length: 256
+        hidden_channels: [128, 64, 32, 16, 8]
+        upsample_modes: conv_transpose
+  image:
+    encoder:
+      name: resnet_encoder_v1 # not yet implemented
+      kwargs: {}
+    decoder:
+      name: resnet_decoder_v1 # not yet implemented
+      kwargs: {}
+
+single_latent:
+  dim: 128
+  name: z_fused
+  # fusion is required here: more than one encoder feeds the single latent space
+  # (spec §4).
+  fusion:
+    strategy: poe
+  regularizer:
+    strategy: kl_standard_normal

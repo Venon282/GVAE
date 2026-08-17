@@ -33,7 +33,6 @@ Run `python scripts/evaluate.py --help` for the full option list.
 """
 
 import argparse
-import importlib
 import logging
 import sys
 from pathlib import Path
@@ -44,29 +43,9 @@ from global_vae.evaluation.evaluate import evaluate
 from global_vae.evaluation.visual_export import exportEvaluationFigures
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
+from global_vae.utils.imports import importCallable as _importCallable
 
 logger = logging.getLogger("global_vae.scripts.evaluate")
-
-
-def _importCallable(spec: str) -> object:
-    """Import and return the callable named by `"module.path:function_name"`.
-
-    Args:
-        spec: A string of the form `"module.path:function_name"`.
-
-    Returns:
-        The imported callable.
-
-    Raises:
-        ValueError: If `spec` does not contain exactly one `:` separator.
-        ModuleNotFoundError: If `module.path` cannot be imported.
-        AttributeError: If `function_name` does not exist on that module.
-    """
-    if spec.count(":") != 1:
-        raise ValueError(f"Expected 'module.path:function_name', got '{spec}'.")
-    module_path, function_name = spec.split(":", 1)
-    module = importlib.import_module(module_path)
-    return getattr(module, function_name)
 
 
 def _buildArgumentParser() -> argparse.ArgumentParser:

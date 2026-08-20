@@ -80,3 +80,15 @@ def buildDataloaderForScript() -> list[dict[str, torch.Tensor]]:
     """Dataloader factory referenced by `--dataloader-factory` in the CLI test."""
     torch.manual_seed(0)
     return [{"signal": torch.randn(BATCH_SIZE, INPUT_DIM)} for _ in range(2)]
+
+
+def buildLabeledDataloaderForScript() -> list[dict[str, torch.Tensor]]:
+    """Like `buildDataloaderForScript`, plus a "label" batch key the model never
+    consumes (not one of its modality names): exercises
+    `scripts/visualize_latent.py`'s `--label-key` coloring option.
+    """
+    torch.manual_seed(0)
+    return [
+        {"signal": torch.randn(BATCH_SIZE, INPUT_DIM), "label": torch.arange(BATCH_SIZE) % 2}
+        for _ in range(2)
+    ]

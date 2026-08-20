@@ -353,6 +353,34 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `loader_factory` both test files share, named outside pytest's own `test_*.py`
   discovery pattern (see `test_checkpoint.py`'s module docstring for why).
 - `docs/adr/0011-hydra-config-layer.md` documenting all of the above.
+- `scripts/visualize_latent.py`: a standalone CLI, distinct from `scripts/evaluate.py`'s
+  own figure export (`exportEvaluationFigures`, part of a full metrics report), for
+  quickly inspecting just the latent space and training curves from a checkpoint. Loads
+  a checkpoint into a model built by a user-supplied factory function (the exact same
+  `"module.path:function_name"` convention as `scripts/evaluate.py`, sharing
+  `global_vae.utils.imports.importCallable`), runs it over a user-supplied dataloader
+  factory function, and saves a latent-space scatter plot and a per-dimension KL bar
+  chart per latent space (`visualization.latent_plot.plotLatentSpace`/
+  `plotPerDimensionKl`), plus a training-curve plot
+  (`visualization.loss_curves.plotLossCurves`) whenever the loaded checkpoint carries a
+  non-empty `history` (spec §6.1 milestone 1: "the ability to inspect training curves
+  and visualize the latent space"). Adds a few capabilities `exportEvaluationFigures`
+  does not: `--label-key` colors the scatter plot by an arbitrary batch field the model
+  never consumes as a modality input (collected in lockstep with `(mu, logvar)` via a
+  script-local helper, `_collectLatentParamsAndLabels`, rather than two separate passes
+  that could desynchronize sample ordering from label ordering); `--latent-names`
+  restricts which latent spaces get plotted; `--use-samples` plots a reparameterized
+  sample instead of the posterior mean. `--output-dir` defaults to
+  `<checkpoint's parent directory>/visualizations` if not given.
+- `tests/integration/test_visualize_latent_script.py` covering the above end to end
+  (latent/KL/history figure output, the history-present/history-absent and
+  `--skip-kl`/`--skip-history` cases, `--label-key` including its missing-key error
+  path, `--use-samples`, `--latent-names` including its unknown-name error path,
+  `--max-samples`, the default-output-dir behavior, and the missing-checkpoint/
+  missing-required-argument error paths), reusing `tests/integration/_script_fixtures.py`
+  (gaining `buildLabeledDataloaderForScript`, a purely additive sibling of the existing
+  `buildDataloaderForScript`).
+
 
 ### Changed
 

@@ -92,6 +92,15 @@ This is an initial scaffold, not a finished framework. What's built:
   running `configs/experiment/signal_vae.yaml` (the spec §6.1
   milestone 1 single-modality signal VAE) by default. See
   `docs/adr/0011-hydra-config-layer.md`.
+- `scripts/visualize_latent.py`: a standalone CLI for quickly inspecting a checkpoint's
+  latent space and training curves without running a full evaluation pass, distinct
+  from `scripts/evaluate.py`'s own figure export. Saves a latent-space scatter plot and
+  a per-dimension KL bar chart per latent space, plus a training-curve plot whenever
+  the checkpoint carries one. Supports coloring the scatter plot by an arbitrary batch
+  field (`--label-key`), restricting which latent spaces get plotted
+  (`--latent-names`), and plotting realized samples instead of the posterior mean
+  (`--use-samples`). Model/dataloader construction supplied as your own factory
+  functions, the same convention as `scripts/evaluate.py`.
 - A unit-test suite for the registries and the routing-graph validator,
   plus end-to-end integration tests for the `EN-L1-DN` configuration
   and for `Trainer` (with dummy encoders/decoders/fusion — see
@@ -128,6 +137,21 @@ callable (spec: data loading stays your own responsibility). See
 `configs/experiment/signal_vae.yaml` for the full default config and
 `global_vae/config/data.py` for the exact contract. Override any hyperparameter from
 the command line, e.g. `training.num_epochs=50 training.optimizer.kwargs.lr=0.0003`.
+
+Inspect the result once trained:
+
+```bash
+python scripts/visualize_latent.py \
+    --checkpoint outputs/signal_vae/checkpoints/best.pt \
+    --model-factory my_project.data:buildSignalModel \
+    --dataloader-factory my_project.data:buildSignalDataloaders
+
+python scripts/evaluate.py \
+    --checkpoint outputs/signal_vae/checkpoints/best.pt \
+    --model-factory my_project.data:buildSignalModel \
+    --dataloader-factory my_project.data:buildSignalTestDataloader \
+    --output-dir results/
+```
 
 ## Running checks
 

@@ -90,6 +90,7 @@ The weight applied to a latent space's regularization term (`beta`) is likewise 
 - **Assembler**: combines several already-realized *latent vectors* into one decoder input (`concat`, `sum`, `average`, `weighted_sum`, `attention`, ...). Distinct from Fusion: Fusion acts on distribution parameters before sampling; the Assembler acts on realized vectors after.
 - **Routing graph**: the bipartite wiring {encoders -> latent spaces} and {latent spaces -> decoders}, set via config, that determines connectivity whenever there is more than one latent space.
 - **Decoder**: network mapping latent(s) back to a modality-specific reconstruction.
+- **Transform**: a generic, invertible tensor operation applied as preprocessing/postprocessing (`log`, `standardize`, `resample`, §6.2). Distinct from an Encoder/Decoder: a transform never has learnable parameters and knows nothing about latent spaces; distinct from a Dataset/DataModule: a transform is a pure function of a tensor, with no knowledge of files, pairing, or splits.
 - **Configuration**: the tuple {encoder cardinality, latent cardinality, decoder cardinality, routing graph, per-latent-space fusion strategy, per-decoder assembler strategy, residual flag} that fully determines a model instance.
 
 
@@ -138,6 +139,55 @@ The genericity described above (§1, §6) is a design constraint on the architec
 2. **A paired signal + image setup.** Two datasets (signal, image) that are currently separate get associated into (signal, image) pairs. The exact pairing mechanism (matching by filename/sample-ID convention, or otherwise) is still open (§11). This is what exercises Fusion (§4) and the `EN-L1-DN` default (§2.1) for the first time.
 3. Everything else in the roadmap table above (further modalities, richer latent topologies) comes after milestones 1 and 2 are working end to end.
 Future Claude conversations should default to whichever milestone is currently active, rather than jumping straight to the fully general multimodal machinery.
+
+### 6.2 Generic data transforms
+
+Spec §6 already anticipated that preprocessing differs per dataset/modality
+while the architecture does not ("SAXS-specific preprocessing... belongs in
+transforms, not in the encoder"; other signal sources "should slot into the
+same... family later, with only preprocessing differing"). `data/transforms/`
+is where the framework draws the line between the two:
+
+- **Dataset loading, matching/pairing samples across modalities, and
+  train/val/test splitting stay entirely the caller's own responsibility**
+  (`DataConfig.loader_factory`, §9), permanently, not merely pending an open
+  question. There is no reusable structure to extract from this: how to read
+  a file, how to associate a signal with an image, how to split — all of it
+  is inherently specific to one dataset/user, and a framework-provided
+  `datamodule.py` would either be a no-op wrapper or would have to guess at
+  dataset-specific behavior. `datamodule.py` therefore does not exist and is
+  not planned.
+- **Generic, invertible tensor operations belong in the framework**, because
+  they carry no dataset-specific structure at all: an elementwise log, a
+  normalization by known statistics, a resampling to a fixed grid, are the
+  same operation whether applied to a SAXS curve, a sensor reading, or a
+  pixel value. `data/transforms/` holds exactly these, following the same
+  `AbstractTransform` + registry pattern as every other pluggable strategy in
+  this codebase (`apply`/`inverse`, self-registered via
+  `@registerTransform(name)`, e.g. `log`, `standardize`, `resample`), plus
+  `ComposeTransform` for chaining several into one invertible pipeline.
+  `DataConfig.transforms` (§9) is a list of these, by registry name;
+  `config.data.buildTransformPipeline` resolves it into a single composed
+  callable, whose `.inverse` is what
+  `visualization.reconstruction_plot`'s own `inverse_transform` hook expects.
+  Nothing in this framework calls `buildTransformPipeline` automatically —
+  a caller's `loader_factory` may use it, or preprocess data its own way
+  entirely; the framework only provides the reusable operation.
+
+**Hard requirement: every transform in `data/transforms/` must be fully
+generic across dimensionality.** Data in this framework can be 1D, 2D, 3D,
+multi-channel, or anything else; a transform's behavior with respect to
+shape is expressed only through explicit, caller-supplied parameters (e.g.
+`ResampleTransform`'s `num_spatial_dims`), never by hardcoding a
+dimensionality (no separate "1D version" / "2D version" of a transform) or
+by encoding anything specific to one dataset or modality (no "SAXS",
+no modality name, anywhere in this subpackage). A transform whose logic
+cannot be written this way does not belong in `data/transforms/`; it belongs
+in the caller's own data pipeline, exactly like dataset loading already does.
+This mirrors, and is held to the same standard as, the existing
+architecture-level rule that adding a modality's Encoder/Decoder must never
+require touching the core (§10, §12) — here applied to preprocessing instead
+of model architecture.
 
 ---
 
@@ -208,8 +258,8 @@ global-vae/
 │       │       ├── registry.py
 │       │       └── kl_standard_normal.py  # default strategy
 │       ├── data/
-│       │   ├── datamodule.py
-│       │   └── transforms/
+│       │   ├── datamodule.py    # NOT built, and not planned: see §6.2 (permanent scope boundary)
+│       │   └── transforms/      # AbstractTransform interface + registry: log, standardize, resample (§6.2)
 │       ├── training/
 │       │   └── trainer.py       # raw PyTorch loop for now (see §10); Lightning/Fabric later
 │       └── utils/
@@ -313,8 +363,24 @@ model:
 ```
  
 `signal` feeds both `z_shared` (through Fusion, combined with `image`) and its own `z_signal_private`. This is the encoder fan-out case from §2.2: the `signal` encoder produces one `(mu, logvar)` pair, and the `head: linear` on the `z_signal_private` edge adapts that shared output down to this latent space's own dimensionality (128 -> 32), so the two latent spaces stay genuinely independent instead of accidentally sharing the same values.
+
+**Data preprocessing pipeline** (§6.2, `DataConfig.transforms`, resolved by `config.data.buildTransformPipeline`):
+
+```yaml
+data:
+  loader_factory: my_project.data:buildSignalDataloaders
+  train_path: data/raw/train
+  transforms:
+    - name: log                 # data.transforms registry key
+      kwargs:
+        eps: 1.0e-6
+    - name: standardize
+      kwargs:
+        mean: 0.42               # computed from the caller's own training split;
+        std: 1.13                # never guessed by this framework (see StandardizeTransform)
+```
  
-All three examples are illustrative, not final: the actual schema still needs validation logic and a Hydra/dataclass binding (§11).
+All of these examples are illustrative, not final: the actual schema still needs validation logic and a Hydra/dataclass binding (§11).
  
 ---
 
@@ -331,14 +397,21 @@ All three examples are illustrative, not final: the actual schema still needs va
 - **Typography:** no em dashes (`—`) and in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead. This is a house style rule, not a technical one, so there is no linter for it; review for it like any other style note. Same for the arrows (`→`) you can use `->` instead
 - **Typing:** type hints mandatory everywhere; `mypy` run in CI.
 - **Docstrings:** Google-style, mandatory on every public class/function: purpose, `Args`, `Returns`, `Raises`.
-- **Modularity:** one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers/heads/regularizers. No god-files: a base class, its registry, and every concrete strategy each get their own file (see `fusion/`, `assemblers/`, `heads/`, `losses/regularizers/`).
-- **Interfaces:** `AbstractEncoder`, `AbstractDecoder`, `AbstractFusion`, `AbstractAssembler`, `AbstractLatentHead`, `AbstractLatentRegularizer` as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (`@registerEncoder("signal")`); this is what makes "add a modality without touching the core" actually true, not just aspirational.
+- **Modularity:** one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers/heads/regularizers/transforms. No god-files: a base class, its registry, and every concrete strategy each get their own file (see `fusion/`, `assemblers/`, `heads/`, `losses/regularizers/`, `data/transforms/`).
+- **Interfaces:** `AbstractEncoder`, `AbstractDecoder`, `AbstractFusion`, `AbstractAssembler`, `AbstractLatentHead`, `AbstractLatentRegularizer`, `AbstractTransform` as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (`@registerEncoder("signal")`); this is what makes "add a modality without touching the core" actually true, not just aspirational.
 - **Registry population:** a class decorated with `@registerX(...)` is only registered once its module has actually been imported. Each registry-based subpackage's `__init__.py` must import every concrete implementation for that side effect (`import global_vae.assemblers.concat  # noqa: F401`, one line per file), or `getXClass(name)` raises `KeyError` even though the file exists on disk.
 - **Routing graph validation:** `validateRoutingGraph` (`latent/base.py`) must run at model-construction time for every configuration, not just the Phase-1 default. It rejects orphan latent spaces, rejects a decoder that consumes more than one latent space without an assigned assembler, checks dimensional compatibility for `sum`/`average` assemblers, and rejects an encoder -> latent edge whose `head` output dimension does not match the target latent space's declared `dim`.
 - **Latent regularization:** never hardcode `LatentSpace.klDivergence` (or an equivalent KL-only computation) as the only regularization path inside the model class; route it through the `AbstractLatentRegularizer` registry (§2.3) so alternative strategies (MMD, free-bits, learned priors) can be swapped in via config.
+- **Data transforms:** never hardcode a preprocessing step (log, normalization, resampling) inline in an encoder, a decoder, or the data pipeline; route it through the `AbstractTransform` registry (`data/transforms/`, §6.2) instead, and keep every transform fully generic across dimensionality (§6.2's hard requirement).
 - **Training loop:** a raw PyTorch loop (`training/trainer.py`) for now, favoring transparency while the architecture (routing graph, registries) is still actively changing; migrate to PyTorch Lightning (or `Lightning Fabric` as an intermediate step) once the model design stabilizes and multi-GPU/scaling needs become concrete.
 - **Config management:** Hydra + structured dataclasses (or Pydantic) for validated, composable configs. No magic strings/dicts scattered through the code.
-- **Testing:** `pytest`. Unit tests per module, plus an integration test that instantiates **each of the 8 architecture combinations** end-to-end on dummy tensors (shape and gradient sanity checks). Coverage should target core logic (fusion math, loss correctness, forward/backward pass), not a vanity percentage.
+- **Testing:** `pytest`. Unit tests per module, plus an integration test that instantiates **each of the 8 architecture combinations** end-to-end on dummy tensors (shape and gradient sanity checks). Coverage should target core logic (fusion math, loss correctness, forward/backward pass), not a vanity percentage. This includes, at minimum :
+  - Unit tests for every self-registration registry (encoders, decoders, fusion, assemblers, regularizers, beta schedules, **data transforms**), covering registration, lookup, and the duplicate/unknown-name error paths.
+  - Unit tests for the beta-schedule strategies' value correctness (constant, linear warm-up, cyclical annealing, and any further schedule).
+  - Unit tests for the data transforms (§6.2), **notably their invertibility**: `apply` then `inverse` must round-trip to floating-point precision for exact transforms (`log`, `standardize`, any composition of them via `ComposeTransform`), and to a documented, tested tolerance for lossy ones (`resample`); exercised across more than one dimensionality per transform, per §6.2's genericity requirement.
+  - **No test is required for `datamodule.py`**: per §6.2, it is a permanent scope boundary, not deferred code, so there is nothing to test.
+  - A **smoke test for the trainer**: a handful of optimizer steps on dummy (non-real) data, verifying that the loss decreases over that short run and that no parameter's gradient is left `None` after a step.
+  - An **integration test with the real modules** for spec §6.1 milestone 1 specifically: `OneDCnnEncoder` + `OneDCnnDecoder`, assembled via `GlobalVae.createSingleLatent` with no fusion strategy (single modality), covering forward-pass shapes, gradient flow, and a short trained-end-to-end run where the loss decreases. This is distinct from, and in addition to, the dummy-encoder/decoder `EN-L1-DN` integration test already required above: dummy modules validate the assembly/routing machinery, this test validates that the actual Phase-1-milestone modules work together correctly.
 - **Experiment tracking:** Weights & Biases or MLflow, logging losses, latent-space visualizations, and reconstructions per run.
 - **Reproducibility:** global seed management, deterministic-mode flag documented, config snapshotted with every run.
 - **Logging:** standard `logging` module, no bare `print`.
@@ -355,19 +428,22 @@ All three examples are illustrative, not final: the actual schema still needs va
 - Exact schema (YAML/dataclass) for expressing the routing graph, the Latent Head assignments, and the regularizer/beta configuration . §2.2, §2.3, and §9 are illustrative, not final; the validation logic (`validateRoutingGraph` and its Hydra/Pydantic binding, §10) still needs to be written.
 - Which assembler operators to implement first: `concat`, `sum`, `average`, `weighted_sum`, and `attention` are all wanted (§2.2) . order of implementation is open, but none is deferred indefinitely.
 - Which regularizer strategies to implement beyond the default `kl_standard_normal` (§2.3) . MMD and free-bits KL are candidates; not needed immediately, but the registry should stay open.
-- Exact pairing mechanism for the first paired signal+image dataset (§6.1) . matching by filename/sample-ID convention is the likely approach, but the concrete scheme isn't decided yet.
+- Exact pairing mechanism for the first paired signal+image dataset (§6.1) . matching by filename/sample-ID convention is the likely approach, but the concrete scheme isn't decided yet. (Note: this is a *pairing* question, i.e. a `loader_factory` concern, distinct from and not blocking §6.2's generic transforms, which are already implemented and do not depend on how pairing is eventually done.)
 - Precise β schedule hyperparameters (warm-up length, cyclical period, per-space values) . the mechanism supports all of this (§2.3); only the actual numbers are still to be tuned empirically once training starts.
 - Concrete production/serving target (API serving, batch inference, edge deployment, ...) . in scope longer-term (§1), but sequenced after the model is functionally complete; specific requirements aren't known yet.
+
+**Resolved, no longer open:** whether any part of the data pipeline belongs inside the framework (§6.2). Generic, invertible preprocessing (`data/transforms/`) does; dataset loading, pairing, and splitting (`datamodule.py`) permanently does not, for the reasons given in §6.2. This was previously bundled as one deferred item; it is now a settled design decision, not an open question.
 
 ---
 
 ## 12. How future Claude conversations should use this document
 
 - Treat the terminology in §3 as canonical: don't invent new names for the same concepts.
-- Any new component (encoder, decoder, fusion strategy, assembler, latent head, regularizer) must follow the registry pattern in §10, not be hardcoded into the model class, and must be added to its subpackage's `__init__.py` imports so it actually registers.
+- Any new component (encoder, decoder, fusion strategy, assembler, latent head, regularizer, **data transform**) must follow the registry pattern in §10, not be hardcoded into the model class (or, for transforms, into an encoder/decoder or the data pipeline), and must be added to its subpackage's `__init__.py` imports so it actually registers.
 - Latent spaces are independent by construction: never hardcode a shared/private split as *the* meaning of "several latent spaces"; always go through the routing graph (§2.2). Fusion is chosen per latent space, not once for the whole model.
 - Encoder fan-out to several latent spaces goes through a Latent Head (§2.2), never by giving `AbstractEncoder` multiple output heads or duplicating the encoder.
 - Regularization is never hardcoded to KL-to-standard-normal inside the model class; it goes through the `AbstractLatentRegularizer` registry (§2.3).
+- Data transforms (`data/transforms/`, §6.2) must stay fully generic across dimensionality (1D/2D/3D/other) and must never encode anything specific to one dataset or modality (e.g. SAXS); modality-specific preprocessing decisions (which transforms, in what order, with what parameters) stay in the caller's own data pipeline, exactly as they always have. `datamodule.py` is a permanent scope boundary (§6.2), not a pending milestone: do not build it, and do not treat its absence as a gap to fill.
 - Build routing graphs through `RoutingGraph` directly or through a preset in `latent/` (`single.py`, `shared_private.py`, or a new one); never re-derive the same construction inline in a model class.
 - Respect the milestone order in §6.1: don't build the fully general multimodal machinery before the single-modality signal VAE (encoder -> latent -> decoder, training + latent visualization) actually works end to end.
 - If a request would violate the "no fixed fusion strategy" or "no fixed modality set" principles, flag it rather than silently narrowing the design.

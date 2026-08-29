@@ -31,6 +31,15 @@ This is an initial scaffold, not a finished framework. What's built:
   `kl_standard_normal`, `free_bits_kl`, `mmd`) and pluggable
   beta-weighting schedules (`training/beta_schedules/`: `constant`,
   `linear_warmup`, `cyclical_annealing`), both spec §2.3.
+- Generic, invertible data transforms (`data/transforms/`, spec §6.2):
+  `log`/`standardize`/`resample`, each fully generic across
+  dimensionality (a single `ResampleTransform` handles 1D/2D/3D data
+  through a `num_spatial_dims` parameter, no per-dimensionality
+  subclasses), plus `ComposeTransform` for chaining several into one
+  invertible pipeline. `DataConfig.transforms` (`config/data.py`) is a
+  list of these, resolved by `buildTransformPipeline`; dataset loading,
+  pairing, and splitting remain entirely out of scope, permanently
+  (`data/NOTE.md`). See `docs/adr/0012-generic-data-transforms.md`.
 - `training/trainer.py`: `Trainer`, a raw PyTorch training loop
   (forward, reconstruction + regularization loss, backward, optimizer
   step, device placement, optional modality dropout, per-step/per-epoch
@@ -59,7 +68,9 @@ This is an initial scaffold, not a finished framework. What's built:
   latent-space projection and scatter plots (`"pca"`/`"tsne"`/`"umap"`),
   a per-dimension KL bar chart for spotting posterior collapse,
   reconstruction overlay plots with an `inverse_transform` hook for
-  the caller's own preprocessing, and loss/step/beta-schedule curves.
+  the caller's own preprocessing (now directly fillable with
+  `buildTransformPipeline(...).inverse`, see above), and
+  loss/step/beta-schedule curves.
   Requires the `visualization` extra (`pip install -e ".[visualization]"`).
   Every function returns a plain `matplotlib.figure.Figure`; nothing
   displays, saves, or logs it, so it composes directly with
@@ -84,7 +95,7 @@ This is an initial scaffold, not a finished framework. What's built:
   `ExperimentConfig`). `buildModelFromConfig`/`buildTrainerFromConfig`/
   `buildDataloadersFromConfig` turn a validated config into a real
   `GlobalVae`/`Trainer`/dataloaders; `DataConfig` is a schema-only
-  contract (paths, batch size, split, named transforms, and a
+  contract (paths, batch size, split, a generic transform pipeline, and a
   `loader_factory` reference to your own data-loading callable), never
   a dataset implementation, matching this framework's data-pipeline
   scope boundary. `scripts/train.py` is the Hydra CLI entry point
@@ -103,19 +114,29 @@ This is an initial scaffold, not a finished framework. What's built:
   functions, the same convention as `scripts/evaluate.py`.
 - A unit-test suite for the registries and the routing-graph validator,
   plus end-to-end integration tests for the `EN-L1-DN` configuration
-  and for `Trainer` (with dummy encoders/decoders/fusion — see
+  (with dummy encoders/decoders/fusion, see
   `docs/adr/0001-phase1-default-configuration.md` for why `EN-L1-DN`
-  first).
+  first) and for `Trainer`; a dedicated real-module integration test for
+  spec §6.1 milestone 1 (`OneDCnnEncoder`/`OneDCnnDecoder` via
+  `GlobalVae.createSingleLatent`, no fusion,
+  `tests/integration/test_signal_vae_milestone.py`); a small trainer
+  smoke test (`tests/integration/test_trainer_smoke.py`); and
+  invertibility tests for the generic data transforms
+  (`tests/integration/test_transforms.py`). See spec §10's Testing
+  bullet (checklist item **C11**) for the full requirement list.
 
 What's deliberately **not** built yet, and why (see `NOTE.md` in each
 directory): concrete image encoders/decoders, the MoE/concat_mlp/
 cross-attention fusion strategies, an image-comparison reconstruction
-plot (needs an image decoder to exist first), and the data pipeline
-(out of this framework's scope by design; the person building on it
-owns their own data loading). Each of these either depends on an open
-question flagged in spec §11 that hasn't been decided yet, or is
-simply the next not-yet-reached milestone — per spec §12, an open
-question is a reason to ask, not to guess.
+plot (needs an image decoder to exist first), and the dataset-loading half
+of the data pipeline — `datamodule.py`, i.e. reading files, matching/
+pairing samples, and splitting — which is out of this framework's scope
+by permanent design (spec §6.2; the person building on this framework
+owns their own data loading). Generic preprocessing (`data/transforms/`)
+is *not* in this list: it is implemented, see above. Each remaining item
+either depends on an open question flagged in spec §11 that hasn't been
+decided yet, or is simply the next not-yet-reached milestone — per spec
+§12, an open question is a reason to ask, not to guess.
 
 ## Setup
 
@@ -135,8 +156,11 @@ python scripts/train.py \
 `data.loader_factory` must point at your own `(DataConfig) -> DataloaderBundle`
 callable (spec: data loading stays your own responsibility). See
 `configs/experiment/signal_vae.yaml` for the full default config and
-`global_vae/config/data.py` for the exact contract. Override any hyperparameter from
-the command line, e.g. `training.num_epochs=50 training.optimizer.kwargs.lr=0.0003`.
+`global_vae/config/data.py` for the exact contract, including the generic
+`transforms` pipeline (`log`/`standardize`/`resample`, spec §6.2) your own
+`loader_factory` can call via `buildTransformPipeline(config.data)` if it
+wants to. Override any hyperparameter from the command line, e.g.
+`training.num_epochs=50 training.optimizer.kwargs.lr=0.0003`.
 
 Inspect the result once trained:
 
@@ -196,16 +220,18 @@ No core framework file should need to change. If it does, that's a
 signal the registry pattern is being bypassed somewhere — flag it
 rather than special-casing the new modality into `GlobalVae`.
 
-## Adding a new fusion or assembler strategy
+## Adding a new fusion, assembler, or data transform strategy
 
-Same pattern: subclass `AbstractFusion` (`fusion/`) or
-`AbstractAssembler` (`latent/assembler.py`), register with
-`@registerFusion("name")` / `@registerAssembler("name")`.
+Same pattern: subclass `AbstractFusion` (`fusion/`), `AbstractAssembler`
+(`assemblers/`), or `AbstractTransform` (`data/transforms/`), register with
+`@registerFusion("name")` / `@registerAssembler("name")` /
+`@registerTransform("name")`. A new transform must stay fully generic
+across dimensionality (spec §6.2): no per-modality or per-dataset logic.
 
 ## Extending beyond `EN-L1-DN`
 
-The routing-graph machinery (`latent/base.py`, `latent/single.py`,
-`latent/factorized.py`) already supports arbitrary encoder-latent-decoder
+The routing-graph machinery (`latent/base.py`, `latent/routing_graph_builders/`)
+already supports arbitrary encoder-latent-decoder
 topologies, including multiple independent latent spaces. `GlobalVae`
 currently only *drives* the single-fused-latent case end-to-end; growing
 it (or introducing sibling model classes) to cover the other 7

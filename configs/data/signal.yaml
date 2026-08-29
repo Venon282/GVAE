@@ -1,6 +1,6 @@
 # Data contract for the signal-VAE milestone (spec §6.1 milestone 1). Framework-agnostic
-# on purpose: no dataset/transform code lives here or anywhere in this framework
-# (data/NOTE.md); `loader_factory` must point at your own
+# on purpose: no dataset/transform *code* is written for one specific dataset anywhere in
+# this framework (data/NOTE.md); `loader_factory` must point at your own
 # "module.path:function_name" returning a global_vae.config.data.DataloaderBundle.
 # `train_path`/`loader_factory` below are left as required (`???`, Hydra's MISSING
 # marker): fill them in, or override on the command line
@@ -16,17 +16,27 @@ val_split: 0.1
 test_split: 0.1
 shuffle_train: true
 
-# Named preprocessing steps your own pipeline applies, in order (spec §6: e.g.
-# log-scale SAXS intensity is standard). Names only: this framework has no built-in
-# transform implementations (see visualization.reconstruction_plot's own
-# inverse_transform docstring for the same "framework/data boundary" reasoning).
+# Generic, invertible preprocessing steps (spec §6.2), resolved through the
+# `data.transforms` registry (src/global_vae/data/transforms/) and composable via
+# global_vae.config.data.buildTransformPipeline. Nothing here is called
+# automatically: your own `loader_factory` decides whether/how to apply it. The
+# values below are placeholders (an identity `standardize`); replace `mean`/`std`
+# with statistics computed from your own training split before using this for real
+# (this framework deliberately never computes them for you, see StandardizeTransform's
+# own docstring). Add a `resample` step here too if your data needs resampling to a
+# common grid before batching (see `sequence_length` below).
 transforms:
-  - log_intensity
-  - standardize
+  - name: log
+    kwargs:
+      eps: 1.0e-6
+  - name: standardize
+    kwargs:
+      mean: 0.0
+      std: 1.0
 
-# Target fixed length after resampling to a common q-grid, if applicable (spec §6.1's
+# Target fixed length after resampling to a common grid, if applicable (spec §6.1's
 # decision A2: interpolation to a shared grid is near-lossless when only resolution
-# differs; needed if your curves' *q*-domains genuinely differ). Must match
+# differs; needed if your curves' domains genuinely differ). Must match
 # configs/model/signal_single_latent.yaml's decoder.kwargs.output_length.
 sequence_length: 256
 

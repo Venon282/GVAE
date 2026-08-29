@@ -8,6 +8,80 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `data/transforms/`: a small library of generic, invertible data transforms (spec
+  §6.2), resolving the previously-deferred half of `data/NOTE.md`'s scope decision.
+  `AbstractTransform` (a plain `ABC`, not an `nn.Module`, mirroring
+  `AbstractBetaSchedule`'s own reasoning) with `apply`/`inverse`, self-registered via
+  `@registerTransform(name)` and its own registry
+  (`registerTransform`/`getTransformClass`/`listRegisteredTransforms`, mirroring
+  every other pluggable strategy in this codebase). Three built-in strategies:
+  `LogTransform` (`log`: `log(x + eps)` / `exp(y) - eps`, exact up to floating-point
+  error, raises instead of silently returning `-inf`/`nan` if the domain constraint
+  is violated), `StandardizeTransform` (`standardize`: `(x - mean) / std` /
+  `y * std + mean`, exact; `mean`/`std` are always supplied explicitly, a `float` or
+  a broadcastable `torch.Tensor`, never computed from the data passed in, so this
+  transform never silently couples itself to one dataset/split), and
+  `ResampleTransform` (`resample`: resamples the trailing `num_spatial_dims` axes of
+  a tensor to a fixed size via `torch.nn.functional.interpolate`; unlike the two
+  above, this is not an exact bijection, so `inverse` is a best-effort
+  reconstruction at an explicitly supplied `source_size`, raising a clear error if
+  `source_size` was never given rather than guessing). `ComposeTransform` chains
+  several transforms into one, applying in order and inverting in reverse order;
+  deliberately not itself registered, the same reasoning that keeps
+  `Trainer.callbacks` a plain list rather than a registry-selected entry. **Every
+  transform here is fully generic across dimensionality**: one `ResampleTransform`
+  implementation covers 1D/2D/3D data through its `num_spatial_dims` parameter (no
+  separate per-dimensionality subclasses), and nothing in this subpackage is named
+  after, or contains logic specific to, one dataset or modality (no "SAXS"
+  anywhere here).
+- `global_vae.config.data.TransformConfig` and `DataConfig.transforms:
+  list[TransformConfig]` (replacing the previous, purely decorative
+  `list[str]`), plus `buildTransformPipeline(config) -> ComposeTransform`,
+  resolving every configured step through the `data.transforms` registry. Nothing
+  in this framework calls it automatically (the data pipeline stays the caller's
+  own responsibility, unchanged); the caller's `loader_factory` may call it, and
+  its `.inverse` is directly usable as `visualization.reconstruction_plot`'s own
+  `inverse_transform` hook or `evaluation.visual_export`'s `inverse_transforms`
+  dict, without hand-writing an inverse function.
+- `configs/data/signal.yaml` updated to the new `transforms` schema, shipping a
+  working `log` + `standardize` example pipeline (`standardize`'s `mean`/`std` are
+  placeholder identity values with a comment pointing at computing real statistics
+  from the user's own training split).
+- `docs/adr/0012-generic-data-transforms.md` documenting the above, including the
+  scope split this decision makes explicit: generic preprocessing belongs in the
+  framework (`data/transforms/`), dataset loading/pairing/splitting permanently
+  does not (`datamodule.py`, unchanged from before, now stated as a permanent
+  boundary rather than an open question).
+- `docs/global-vae-project-specification.md` gained a new §6.2 ("Generic data
+  transforms") documenting the `AbstractTransform` pattern, the framework/
+  data-pipeline boundary, and the hard genericity-across-dimensionality
+  requirement; §8's repository tree, §9's config examples, §10's Testing bullet
+  (the full **C11** checklist, see below), §11's open questions, and §12's
+  guidance were all updated to match.
+- `tests/integration/test_transforms.py`: the registry pattern (registration,
+  lookup, duplicate/unknown-name error paths, mirroring every other registry's own
+  test file), value correctness and invertibility for `log`/`standardize` (exact,
+  to floating-point tolerance) and `resample` (approximate, documented tolerance,
+  plus the shape round-trip and the no-`source_size`-raises path),
+  `ComposeTransform` (step ordering, reverse-ordering on inverse, an empty
+  pipeline as the identity), and `global_vae.config.data.buildTransformPipeline`
+  (including an end-to-end check against the real, shipped
+  `configs/data/signal.yaml`). Every transform is exercised at three different
+  dimensionalities (a 1D vector, a 2D image-shaped tensor, a 3D volume-shaped
+  tensor) with the exact same class/arguments each time, to make the "no
+  dimensionality-specific code" rule (spec §6.2) a checked property.
+- `tests/integration/test_trainer_smoke.py` (**C11**): a small, self-contained
+  smoke test for `Trainer`, independent of `test_trainer.py`'s larger suite — a
+  handful of optimizer steps on dummy (non-real) data, verifying the loss
+  decreases over that short run and that no parameter's gradient is left `None`
+  after a step, checked at more than one point in the run.
+- `tests/integration/test_signal_vae_milestone.py` (**C11**): the real-module
+  integration test `test_en_l1_dn_default.py`'s dummy-only coverage left missing.
+  Builds spec §6.1 milestone 1 exactly — the real `OneDCnnEncoder`/
+  `OneDCnnDecoder`, assembled via `GlobalVae.createSingleLatent` with no fusion
+  strategy (single modality) — and covers model assembly (real classes used, no
+  fusion module built), forward-pass shapes, gradient flow into every parameter,
+  and a short `Trainer.fit` run where the loss decreases end to end.
 - Initial project scaffold: repository structure per spec §8.
 - `AbstractEncoder`, `AbstractDecoder`, `AbstractFusion`, `AbstractAssembler`
   interfaces, each with a self-registration registry (`registerEncoder`,
@@ -297,7 +371,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
   repeated. `latent_mode: "several"` is accepted by the schema but raises
   `NotImplementedError` (a general `RoutingGraph` config is a documented future
   extension, not built now, per spec §6.1's build order). `config/data.py`:
-  `DataConfig` (paths, batch size, split, named transforms) and `DataloaderBundle`, a
+  `DataConfig` (paths, batch size, split, transform pipeline) and `DataloaderBundle`, a
   schema-only contract, never a dataset implementation (matching this project's
   data-pipeline scope decision); `buildDataloadersFromConfig` resolves and calls a
   user-supplied `loader_factory` (`"module.path:function_name"`) and nothing else.
@@ -384,6 +458,11 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `config/data.py`: `DataConfig.transforms` changed from a purely decorative
+  `list[str]` to `list[TransformConfig]` (name + kwargs), resolved through the new
+  `data.transforms` registry via `buildTransformPipeline`. `configs/data/signal.yaml`
+  updated to the new schema. See "Added" above and
+  `docs/adr/0012-generic-data-transforms.md`.
 - `encoders/__init__.py`, `decoders/__init__.py`, `fusion/__init__.py` now import
   every concrete implementation they contain (`OneDCnnEncoder`, `OneDCnnDecoder`,
   `ProductOfExperts`) for the registration side effect, matching the pattern already

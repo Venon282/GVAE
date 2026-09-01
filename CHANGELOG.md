@@ -6,8 +6,99 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-08-29
+
+First release of the framework. Covers spec §6.1 milestone 1 end to end (a
+single-modality signal VAE — encoder, one latent space, decoder, no fusion —
+trained, checkpointed, evaluated, and visualized), the `EN-L1-DN` Phase-1
+default (spec §2.1), pluggable fusion/regularization/beta-schedule/logger/
+transform strategies throughout, a Hydra-driven config layer, and a
+first runnable example (`examples/01_signal_vae_pipeline.py`) that exercises
+the whole pipeline on synthetic data with no external dataset required.
+
+Two decisions checklist items **B1** and **A3** ask about were both made
+earlier in this log, and are confirmed here as part of this release rather
+than getting new ADRs of their own (nothing about either decision changed
+since it was made; writing a new ADR now would misrepresent an already-settled
+decision as a fresh one, which spec §10's own "an old ADR is superseded, not
+edited in place" rule argues against just as much as it argues against
+silently editing one):
+- **B1** (pluggable regularizer retrofit): `docs/adr/0003-pluggable-latent-regularization.md`.
+- **A3** (raw training loop vs. PyTorch Lightning): `docs/adr/0005-training-loop.md`,
+  which resolves it in favor of a raw loop for now, migrating to Lightning (or
+  Lightning Fabric as an intermediate step) once the architecture stabilizes,
+  exactly matching spec §10's own "Training loop" bullet.
+
 ### Added
 
+- `examples/`: runnable, self-contained pipeline walkthroughs on synthetic data,
+  distinct from `scripts/` (which need a user-supplied factory/config) and
+  `notebooks/` (interactive exploration). `01_signal_vae_pipeline.py`: the full
+  spec §6.1 milestone 1 pipeline end to end on simple synthetic 1D
+  signals — the only configuration this framework fully supports today.
+  Generates each curve on its own deliberately irregular, per-sample grid,
+  resamples every curve onto one common grid by *position*
+  (`ResampleTransform(interpolation="scipy")`, spec §6.2, see below) rather
+  than merely by point count, then runs the rest of the pipeline exactly as
+  it would on any fixed-length signal dataset: a `log` + `standardize`
+  preprocessing pipeline (statistics computed from the training split only),
+  model assembly (`GlobalVae.createSingleLatent`, real `OneDCnnEncoder`/
+  `OneDCnnDecoder`, no fusion), training (`Trainer`, a linear warm-up beta
+  schedule, a CSV logger, `BestCheckpointCallback`), evaluation
+  (`evaluation.evaluate`, console summary and JSON report), and visualization
+  (latent-space scatter, per-dimension KL, a reconstruction grid shown back in
+  original units via the preprocessing pipeline's own `.inverse`, and loss
+  curves). Runs in a few seconds on CPU with no external dataset.
+- `ResampleTransform` gained a second backend, `interpolation="scipy"`
+  (`docs/adr/0013-coordinate-aware-resampling.md`), fixing a real gap in the
+  first version (`docs/adr/0012-generic-data-transforms.md`): resampling to
+  the same *point count* does not put two samples measured at different
+  *positions* on the same grid, since the original `interpolation="torch"`
+  path has no notion of position at all. The new mode accepts explicit
+  `source_coords`/`target_coords`, given once at construction (a shared grid)
+  or per call to `apply`/`inverse` (positions that differ per sample, the
+  case a shared grid cannot express, resolved from the caller's own
+  per-sample loading code before batching), and a choice of interpolation
+  method (`scipy_kind`: any `scipy.interpolate.interp1d` kind, or the
+  `"cubic_spline"`/`"pchip"`/`"akima"` spline families — `"pchip"`, which
+  never overshoots between points, is the safer default for noisy,
+  irregularly-sampled data than an unconstrained cubic spline, a lesson
+  surfaced while building the example above and documented in both the ADR
+  and the example's own comments). Resampling onto positions outside the
+  source range raises by default (`extrapolate=False`) instead of silently
+  extrapolating or returning `nan`. `scipy` is a soft dependency of this mode
+  only (lazily imported, mirroring the `tensorboard`/`scikit-learn`/
+  `umap-learn` pattern already used elsewhere); `interpolation="torch"` (the
+  default) and every other transform in `data/transforms/` need nothing
+  beyond torch. Coordinate-aware resampling is implemented for
+  `num_spatial_dims=1` only; combining `interpolation="scipy"` with a
+  different `num_spatial_dims` raises `NotImplementedError` rather than
+  resampling incorrectly (a fully general N-D scattered/rectilinear grid is a
+  materially larger, not-yet-built extension).
+- `pyproject.toml` gained an `interpolation` extra (`scipy>=1.10`), also
+  listed under `dev` so the test suite exercises `ResampleTransform`'s scipy
+  backend for real, matching the existing `tensorboard`/`visualization`/
+  `tsne`/`umap` extras' own pattern. A `[[tool.mypy.overrides]]` entry
+  ignores missing `scipy.*` stubs, mirroring the existing `sklearn.*`/
+  `umap.*` overrides.
+- `tests/integration/test_transforms.py` gained
+  `TestResampleTransformCoordinateAware`: shared and per-call coordinates
+  (including the exact motivating case, two curves on different grids
+  resampled onto one shared grid and found to agree once aligned), every
+  `scipy_kind`, the out-of-range error path and its explicit `extrapolate=True`
+  opt-in, batched resampling under one shared grid, the
+  `num_spatial_dims != 1` `NotImplementedError`, the missing-`scipy`-package
+  `ImportError` path, and the inverse round-trip and its own missing-
+  coordinates error path. Every pre-existing `interpolation="torch"` test
+  keeps passing unchanged.
+- `docs/adr/0013-coordinate-aware-resampling.md` documenting the above.
+- `docs/global-vae-project-specification.md` §6.2 gained a paragraph on
+  coordinate-aware resampling and its current one-axis-at-a-time scope; §8's
+  repository tree gained `examples/`; §9's data-transforms config example
+  gained a note on why a per-sample-varying `resample` step is not expressible
+  as a flat config list entry the way `log`/`standardize` are.
 - `data/transforms/`: a small library of generic, invertible data transforms (spec
   §6.2), resolving the previously-deferred half of `data/NOTE.md`'s scope decision.
   `AbstractTransform` (a plain `ABC`, not an `nn.Module`, mirroring

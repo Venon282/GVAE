@@ -240,6 +240,161 @@ class TestResampleTransform:
             ResampleTransform(target_size=8, num_spatial_dims=4)
 
 
+class TestResampleTransformCoordinateAware:
+    """`interpolation="scipy"`: resampling onto explicit x-positions, including
+    positions that differ per sample (spec §6.2). This is what makes resampling
+    two curves recorded on genuinely different grids land on the *same* physical
+    positions, which point-count-only resampling (the `"torch"` backend) cannot
+    express at all.
+    """
+
+    def test_shared_source_coords_given_at_construction(self) -> None:
+        # A dense enough source grid that even the default linear interpolation
+        # stays close to the true function between knots.
+        source_q = torch.linspace(0.0, 4.0, 41)
+        values = torch.sin(source_q)
+        target_q = torch.tensor([0.5, 1.5, 2.5, 3.5])
+        transform = ResampleTransform(
+            target_coords=target_q, source_coords=source_q, interpolation="scipy"
+        )
+        result = transform.apply(values)
+        assert result.shape == target_q.shape
+        assert torch.allclose(result, torch.sin(target_q), atol=0.01)
+
+    def test_per_sample_source_coords_align_two_different_grids(self) -> None:
+        """The exact motivating case: curve A and curve B were measured at different
+        positions; resampled onto the same common_q, index n now means the same
+        position for both, which naive index-based resampling cannot guarantee."""
+
+        def f(q: torch.Tensor) -> torch.Tensor:
+            return torch.sin(q) + 2.0
+
+        q_a = torch.tensor([0.5, 1.0, 1.8, 2.6, 3.2])
+        q_b = torch.tensor([0.6, 1.1, 1.9, 2.5, 3.0, 3.3])
+        common_q = torch.linspace(0.7, 3.0, 6)
+
+        transform = ResampleTransform(
+            target_coords=common_q, interpolation="scipy", scipy_kind="cubic_spline"
+        )
+        resampled_a = transform.apply(f(q_a), source_coords=q_a)
+        resampled_b = transform.apply(f(q_b), source_coords=q_b)
+
+        assert resampled_a.shape == common_q.shape
+        assert resampled_b.shape == common_q.shape
+        # Both curves are the same underlying function, just measured at different
+        # positions: once resampled onto the same common_q they must closely agree.
+        assert torch.allclose(resampled_a, resampled_b, atol=0.05)
+        assert torch.allclose(resampled_a, f(common_q), atol=0.05)
+
+    @pytest.mark.parametrize(
+        "kind", ["linear", "nearest", "cubic", "pchip", "akima", "cubic_spline"]
+    )
+    def test_every_scipy_kind_produces_finite_output(self, kind: str) -> None:
+        source_q = torch.tensor([0.0, 0.5, 1.0, 2.0, 4.0])
+        values = torch.sin(source_q) + 2.0
+        target_q = torch.linspace(0.5, 3.5, 8)
+        transform = ResampleTransform(
+            target_coords=target_q, interpolation="scipy", scipy_kind=kind
+        )
+        result = transform.apply(values, source_coords=source_q)
+        assert result.shape == target_q.shape
+        assert torch.isfinite(result).all()
+
+    def test_unknown_scipy_kind_raises(self) -> None:
+        with pytest.raises(ValueError, match="scipy_kind"):
+            ResampleTransform(target_size=4, interpolation="scipy", scipy_kind="does_not_exist")
+
+    def test_out_of_range_target_raises_without_extrapolate(self) -> None:
+        source_q = torch.tensor([0.0, 1.0, 2.0])
+        values = torch.tensor([0.0, 1.0, 0.0])
+        transform = ResampleTransform(target_coords=torch.tensor([5.0]), interpolation="scipy")
+        with pytest.raises(ValueError, match="outside the source positions"):
+            transform.apply(values, source_coords=source_q)
+
+    def test_extrapolate_true_allows_out_of_range_target(self) -> None:
+        source_q = torch.tensor([0.0, 1.0, 2.0])
+        values = torch.tensor([0.0, 1.0, 2.0])
+        transform = ResampleTransform(
+            target_coords=torch.tensor([5.0]),
+            interpolation="scipy",
+            scipy_kind="linear",
+            extrapolate=True,
+        )
+        result = transform.apply(values, source_coords=source_q)
+        assert torch.isfinite(result).all()
+
+    def test_batched_input_with_one_shared_grid(self) -> None:
+        source_q = torch.tensor([0.0, 1.0, 2.0, 3.0])
+        batch = torch.stack([torch.sin(source_q), torch.cos(source_q)])
+        transform = ResampleTransform(
+            target_coords=torch.linspace(0.5, 2.5, 5),
+            source_coords=source_q,
+            interpolation="scipy",
+        )
+        result = transform.apply(batch)
+        assert result.shape == (2, 5)
+
+    def test_default_target_coords_span_the_source_range(self) -> None:
+        source_q = torch.tensor([1.0, 2.0, 5.0])
+        values = torch.tensor([0.0, 1.0, 4.0])
+        transform = ResampleTransform(target_size=4, interpolation="scipy")
+        result = transform.apply(values, source_coords=source_q)
+        assert result.shape == (4,)
+
+    def test_inverse_round_trips_approximately(self) -> None:
+        source_q = torch.tensor([0.0, 0.5, 1.0, 2.0, 4.0])
+        values = torch.sin(source_q) + 2.0
+        target_q = torch.linspace(0.5, 3.5, 8)
+        transform = ResampleTransform(
+            target_coords=target_q,
+            source_coords=source_q,
+            interpolation="scipy",
+            scipy_kind="cubic_spline",
+            extrapolate=True,
+        )
+        forward = transform.apply(values)
+        restored = transform.inverse(forward)
+        assert restored.shape == values.shape
+
+    def test_inverse_without_any_source_coords_raises(self) -> None:
+        transform = ResampleTransform(target_size=4, interpolation="scipy")
+        with pytest.raises(ValueError, match="source_coords"):
+            transform.inverse(torch.rand(4), target_coords=torch.linspace(0.0, 1.0, 4))
+
+    def test_torch_backend_rejects_explicit_coords(self) -> None:
+        with pytest.raises(ValueError, match="interpolation='scipy'"):
+            ResampleTransform(target_size=8, source_coords=[0.0, 1.0, 2.0])
+
+    def test_scipy_backend_rejects_multi_dimensional_resampling(self) -> None:
+        with pytest.raises(NotImplementedError, match="num_spatial_dims"):
+            ResampleTransform(target_size=8, num_spatial_dims=2, interpolation="scipy")
+
+    def test_missing_target_size_and_target_coords_raises(self) -> None:
+        with pytest.raises(ValueError, match="target_size"):
+            ResampleTransform()
+
+    def test_unknown_interpolation_backend_raises(self) -> None:
+        with pytest.raises(ValueError, match="interpolation"):
+            ResampleTransform(target_size=8, interpolation="does_not_exist")
+
+    def test_missing_scipy_package_raises_clear_import_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "scipy" or name.startswith("scipy."):
+                raise ImportError("simulated missing scipy")
+            return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(builtins, "__import__", _fake_import)
+        transform = ResampleTransform(target_size=4, interpolation="scipy")
+        with pytest.raises(ImportError, match="scipy"):
+            transform.apply(torch.rand(6), source_coords=torch.arange(6, dtype=torch.float32))
+
+
 class TestComposeTransform:
     def test_applies_steps_in_order(self) -> None:
         doubling = _makeDummyTransform(lambda x: x * 2, lambda y: y / 2)

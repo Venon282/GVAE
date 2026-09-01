@@ -213,6 +213,9 @@ global-vae/
 │   ├── model/
 │   ├── data/
 │   └── experiment/
+├── examples/                     # runnable, self-contained pipeline walkthroughs on
+│   │                             # synthetic data (distinct from scripts/, which need a
+│   │                             # user-supplied factory/config; see examples/README.md)
 ├── src/
 │   └── global_vae/
 │       ├── encoders/

@@ -1,13 +1,34 @@
 # Global Multimodal VAE
 
+**Current release: v0.1.0 (2026-08-29)** — see `CHANGELOG.md` for the full release
+notes. This is the framework's first release: spec §6.1 milestone 1 (a
+single-modality signal VAE, trained/checkpointed/evaluated/visualized end to end)
+works, along with everything else described below. It is not, and does not claim to
+be, a finished framework (see "What's deliberately not built yet").
+
 A modular, extensible multimodal Variational Autoencoder framework.
 Ground truth for the project's architecture and decisions is
 `global-vae-project-specification.md` (kept alongside this repo) — read
 it first if anything below is unclear.
 
+Want to see it work before reading further? `python examples/01_signal_vae_pipeline.py`
+runs the entire pipeline (data, transforms, model, training, evaluation,
+visualization) end to end on synthetic data, no setup required beyond
+`pip install -e ".[dev]"`. See `examples/README.md`.
+
 ## Status
 
-This is an initial scaffold, not a finished framework. What's built:
+This is an initial scaffold, not a finished framework, but the training loop and
+generic data-preprocessing pipeline described in earlier drafts of this document as
+"differed" are **both implemented as of this release**, not pending: `training/
+trainer.py`'s raw PyTorch loop was a formally decided question (checklist item A3,
+`docs/adr/0005-training-loop.md`), and `data/transforms/`'s generic transforms
+(checklist item covered by `docs/adr/0012-generic-data-transforms.md` and
+`docs/adr/0013-coordinate-aware-resampling.md`) are real, tested code, not a
+placeholder. The only part of the data pipeline still out of scope,
+**permanently, not temporarily**, is dataset loading/pairing/splitting itself
+(`datamodule.py`, spec §6.2) — see "What's deliberately not built yet" below for
+exactly what that boundary does and does not cover. What's built:
 
 - The extension points: `AbstractEncoder`, `AbstractDecoder`,
   `AbstractFusion`, `AbstractAssembler`, each with a self-registration
@@ -36,10 +57,16 @@ This is an initial scaffold, not a finished framework. What's built:
   dimensionality (a single `ResampleTransform` handles 1D/2D/3D data
   through a `num_spatial_dims` parameter, no per-dimensionality
   subclasses), plus `ComposeTransform` for chaining several into one
-  invertible pipeline. `DataConfig.transforms` (`config/data.py`) is a
-  list of these, resolved by `buildTransformPipeline`; dataset loading,
-  pairing, and splitting remain entirely out of scope, permanently
-  (`data/NOTE.md`). See `docs/adr/0012-generic-data-transforms.md`.
+  invertible pipeline. `resample` additionally supports coordinate-aware
+  resampling (`interpolation="scipy"`): explicit `source_coords`/
+  `target_coords`, shared or per-sample, and a choice of interpolation
+  method beyond evenly-spaced grids (`scipy.interpolate`'s `interp1d`
+  kinds, plus `cubic_spline`/`pchip`/`akima` splines) — see
+  `docs/adr/0013-coordinate-aware-resampling.md`. `DataConfig.transforms`
+  (`config/data.py`) is a list of these, resolved by
+  `buildTransformPipeline`; dataset loading, pairing, and splitting
+  remain entirely out of scope, permanently (`data/NOTE.md`). See
+  `docs/adr/0012-generic-data-transforms.md`.
 - `training/trainer.py`: `Trainer`, a raw PyTorch training loop
   (forward, reconstruction + regularization loss, backward, optimizer
   step, device placement, optional modality dropout, per-step/per-epoch

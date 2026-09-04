@@ -14,7 +14,9 @@ it first if anything below is unclear.
 Want to see it work before reading further? `python examples/01_signal_vae_pipeline.py`
 runs the entire pipeline (data, transforms, model, training, evaluation,
 visualization) end to end on synthetic data, no setup required beyond
-`pip install -e ".[dev]"`. See `examples/README.md`.
+`pip install -e ".[dev]"`. `examples/02_config_driven_pipeline.py` runs the same
+pipeline driven entirely from `configs/` YAML instead, training and comparing two
+named experiment variants side by side. See `examples/README.md`.
 
 ## Status
 

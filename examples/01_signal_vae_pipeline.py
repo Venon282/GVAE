@@ -77,9 +77,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from _synthetic_signal_data import (
-    NUM_TEST,
-    NUM_TRAIN,
-    NUM_VAL,
     buildResampleTransform,
     buildSyntheticDataset,
     computeCommonGrid,
@@ -114,13 +111,16 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / "01_signal_vae_pipeli
 
 SEED = 0
 COMMON_GRID_LENGTH = 128  # the fixed length every curve is resampled to (step 2)
-LATENT_DIM = 6
+NUM_TRAIN, NUM_VAL, NUM_TEST = 24000, 3000, 3000
+
+LATENT_DIM = 16
 BATCH_SIZE = 16
-NUM_EPOCHS = 150
+NUM_EPOCHS = 30
 LEARNING_RATE = 2e-3
 FREE_BITS = 1.0  # per-dimension KL budget; see "On regularization" above
 WARMUP_STEPS = 1500  # beta warm-up length, in optimizer steps, not epochs
-
+ENCODER_CHANNELS = (32, 64, 128)
+DECODER_CHANNELS = (128, 64, 32)
 
 def _modelKwargs(latent_dim: int, output_length: int) -> dict[str, Any]:
     """Shared encoder/decoder construction arguments (used both for training and for
@@ -137,12 +137,12 @@ def _modelKwargs(latent_dim: int, output_length: int) -> dict[str, Any]:
         `GlobalVae.createSingleLatent`.
     """
     return {
-        "encoder_kwargs": {"signal": {"latent_dim": latent_dim, "hidden_channels": (16, 32, 64)}},
+        "encoder_kwargs": {"signal": {"latent_dim": latent_dim, "hidden_channels": ENCODER_CHANNELS}},
         "decoder_kwargs": {
             "signal": {
                 "latent_dim": latent_dim,
                 "output_length": output_length,
-                "hidden_channels": (64, 32, 16),
+                "hidden_channels": DECODER_CHANNELS,
                 "seed_length": 16,
                 "upsample_modes": "conv_transpose",
             }

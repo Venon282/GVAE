@@ -6,7 +6,162 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing yet.
+Documentation catch-up for the last pre-0.1.0 iteration
+(`examples/02_config_driven_pipeline.py`, `plotLossCurves`/`plotStepCurves`'s
+`twin_metrics`, and the regularization/checkpoint-monitor choices baked into
+`examples/01_signal_vae_pipeline.py`), which had already landed in code and in the
+`[0.1.0]` entry's high-level description, but not with the level of detail below.
+Also fixes real issues found while writing this entry and, separately, while a user
+ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults (see
+"Fixed").
+
+### Added
+
+- `examples/02_config_driven_pipeline.py`: the same spec §6.1 milestone 1 pipeline as
+  `01_signal_vae_pipeline.py`, assembled entirely from the `configs/` YAML files (spec
+  §9, §10 "Config management") instead of hand-written Python kwargs: the exact files
+  `scripts/train.py` composes by default (`configs/experiment/signal_vae.yaml`), with
+  a synthetic, in-memory `loader_factory`
+  (`examples/_synthetic_signal_data.buildSyntheticSignalDataloaders`, see below)
+  standing in for a real dataset. Demonstrates something the first example cannot show
+  on its own: versioned, comparable experiment runs. Two named variants of the shipped
+  config (`EXPERIMENT_VARIANTS`) are composed and trained back to back, each expressed
+  as nothing but a short list of Hydra dotlist overrides on top of the same baseline:
+  `"baseline"` (the config exactly as shipped: `kl_standard_normal`, the stock beta
+  warm-up) and `"tuned"` (switches the regularizer to `free_bits_kl`, slows the beta
+  warm-up, and monitors `val/loss/reconstruction` for best-checkpoint selection, the
+  same choices documented for `01_signal_vae_pipeline.py` below, now expressed as
+  config overrides instead of Python kwargs). Each variant gets its own `output_dir`,
+  so its checkpoint, config snapshot, CSV/TensorBoard logs, and figures never overwrite
+  the other's (a plain, filesystem-level form of run versioning any config-driven
+  workflow gets close to for free) and its own evaluation report; `main()` prints both
+  variants' test-set reconstruction metrics side by side, so the value of driving
+  hyperparameters from config is visible in the numbers, not only asserted.
+- `examples/_synthetic_signal_data.py`: the synthetic-curve generation, common-grid
+  computation, and coordinate-aware-resampling helpers factored out of
+  `01_signal_vae_pipeline.py` (unchanged behavior) so `02_config_driven_pipeline.py`
+  can reuse the exact same data through its own `loader_factory`
+  (`buildSyntheticSignalDataloaders`) without duplicating any of it. Not itself an
+  example: the leading underscore marks it as shared scaffolding, mirroring
+  `tests/integration/_script_fixtures.py`'s own naming convention and the reason
+  behind it (pytest's test discovery, and here a reader browsing `examples/`, should
+  not mistake it for a third, independently runnable example).
+- `visualization.loss_curves.plotLossCurves` and `plotStepCurves` gained an optional
+  `twin_metrics` parameter (plus `twin_log_scale`/`twin_ylabel`): a second group of
+  metric keys plotted on a secondary, independently-scaled y-axis (`ax.twinx()`)
+  instead of the primary one. Fixes a real readability gap, not a cosmetic one: this
+  framework's own reconstruction and regularization losses routinely live one to
+  several orders of magnitude apart (especially with `free_bits_kl` or a light beta),
+  and sharing one axis (even a log-scaled one) still visually crushes whichever group
+  is smaller, since matplotlib autoscales to the larger group's range alone.
+  `twin_metrics=None` (the default) draws everything on one axis exactly as before, so
+  every existing call site (including every test in `test_loss_curves.py` predating
+  this change) is unaffected. Both examples' own final loss-curve plot now uses this
+  to put reconstruction/total loss on the left axis and regularization on the right.
+
+### Changed
+
+- `examples/01_signal_vae_pipeline.py` regularizes its single latent space with
+  `free_bits_kl` (`FREE_BITS = 1.0`) rather than the framework's own default,
+  `kl_standard_normal`, and its `BestCheckpointCallback` monitors
+  `"val/loss/reconstruction"` rather than that callback's own default,
+  `"val/loss/total"`. Both choices were already part of the script when the `[0.1.0]`
+  entry below was written; that entry only described the pipeline's stages, not these
+  specific decisions or the reasoning behind them, which this entry now records:
+  - An earlier version of this example used `kl_standard_normal` with a short beta
+    warm-up, and reconstruction quality stayed poor (test-set R^2 around 0.3) no
+    matter how much model capacity or data was added: the signature of posterior
+    collapse, not underfitting. `beta` reaching full weight before the decoder has
+    learned to rely on `z` lets the encoder cheaply satisfy the KL term by pushing
+    every dimension's posterior toward the prior, after which extra capacity is never
+    used either. `free_bits_kl` (spec §2.3) exists specifically for this: it gives
+    every latent dimension a small KL budget it is never penalized for using, which
+    alone raised this example's test-set R^2 from ~0.3 to ~0.97. Documented directly
+    in the script's own module docstring ("On regularization") so the lesson stays
+    visible to anyone reading it, not only recoverable from git history.
+  - `free_bits_kl` holds the regularization term close to a constant per-dimension
+    floor (`latent_dim * free_bits`), which dominates the *magnitude* of
+    `"val/loss/total"` without being what actually distinguishes a better epoch from a
+    worse one here; monitoring the dominated total would pick checkpoints essentially
+    at random with respect to reconstruction quality. `BestCheckpointCallback` itself
+    needed no code change for this: `monitor` was already a constructor parameter
+    (`docs/adr/0007-best-checkpoint-callback.md`). This is a usage lesson specific to
+    pairing it with `free_bits_kl`, not a bug fix.
+  - The example's final loss-curve plot now uses `plotLossCurves`'s new
+    `twin_metrics` (see "Added" above) instead of one shared axis.
+- `examples/README.md` gained a section for `02_config_driven_pipeline.py`, and its
+  `01_signal_vae_pipeline.py` section now mentions the `free_bits_kl` choice above.
+  `README.md`'s own "Want to see it work" pointer now also mentions the second
+  example.
+
+### Fixed
+
+- `examples/02_config_driven_pipeline.py` read `DataloaderBundle.test` (via
+  `_saveVariantFigures`'s `list(bundle.test)` and `runVariant`'s
+  `evaluate(best_model, dataloaders.test, ...)`) as if it were never `None`. Its
+  declared type is `Iterable[dict[str, torch.Tensor]] | None`
+  (`global_vae/config/data.py`: a caller's `loader_factory` is not required to
+  provide a test split), so both call sites failed `mypy --strict`: `list` and
+  `evaluate` both require a non-`None` `Iterable` argument, even though this
+  example's own `loader_factory` always populates `test` in practice. Fixed with the
+  same `assert ... is not None` pattern this file already used for
+  `cfg.training.checkpoint.best_path` (and `tests/integration/test_config.py`
+  already used for `DataloaderBundle.val`), not by loosening either callee's
+  signature: a genuinely optional test split is the correct type for the general
+  `DataloaderBundle` contract, and this example's own factory is simply the one
+  place that always happens to satisfy it.
+- `examples/_synthetic_signal_data.py`'s `resampleOntoCommonGrid` cast each curve's
+  positions to `float32` (`torch.from_numpy(positions).float()`) before handing them
+  to `ResampleTransform` as `source_coords`. At the shipped dataset size
+  (240/30/30 train/val/test curves) this went unnoticed; a user scaling the same
+  script up to tens of thousands of curves hit `scipy`'s own
+  `ValueError: x must be strictly increasing sequence.` from deep inside its
+  `PchipInterpolator`. Root cause: two of a curve's
+  ~50-90 positions, drawn from a continuous `rng.uniform`, are always distinct at
+  `float64` precision, but can legitimately land close enough together that
+  rounding both to `float32` (~7 significant digits) collapses them to the exact
+  same value, which breaks the strictly-increasing input every `scipy` spline class
+  (`pchip` included) requires. This is a probability-of-collision issue, not a
+  one-off bug that only affects one input: rare enough at a few hundred curves to
+  never trigger, reliably hit by at least one curve once there are tens of
+  thousands. Fixed by passing `positions` at its own native `float64` precision
+  instead (`values`, the curve's y-data, is still downcast to `float32`; only
+  x-positions are precision-sensitive here). `computeCommonGrid`'s target grid is
+  now also built at `float64` (`torch.linspace(..., dtype=torch.float64)` instead of
+  that function's own `float32` default) for the same reason, even though it was
+  not the one that actually crashed in this report: `ResampleTransform` always
+  upcasts `target_coords` to `float64` internally anyway, so building it at
+  `float32` first only ever loses precision for no benefit, and could in principle
+  round a target endpoint fractionally outside the tightest curve's own range and
+  trip the `extrapolate=False` check for no real reason.
+
+### Added
+
+- `ResampleTransform(interpolation="scipy")` now validates that the resolved
+  `source_coords` are strictly increasing *before* calling into `scipy`, raising a
+  clear `ValueError` that names the likely cause (unsorted/duplicate positions, or
+  precision loss from a lower-precision dtype such as `float32` upstream, exactly
+  the bug above) instead of letting `scipy`'s own generic "`x` must be strictly
+  increasing sequence" surface several stack frames down with no context. Covered
+  by three new tests in `tests/integration/test_transforms.py`
+  (`TestResampleTransformCoordinateAware`): an unsorted case, a duplicate-value
+  case, and a direct regression test for the `float32`-collision scenario above
+  (verified numerically before being written: `0.30000001` and `0.30000002` are
+  distinct `float64` values but round to the identical `float32` one).
+- `examples/02_config_driven_pipeline.py` now logs, at run time, exactly which
+  `configs/*.yaml` files it composes and how many Hydra overrides are layered on
+  top for the current variant, plus a couple of values actually resolved from that
+  composed config (regularizer strategy, best-checkpoint monitor, learning rate).
+  Prompted by a user reading the script and not finding it obvious that YAML config
+  files were involved at all, since everything in the code body is plain Python
+  (`EXPERIMENT_VARIANTS`'s dotlist override strings, `loadExperimentConfig(...)`
+  calls) with no literal `.yaml` path in sight. The composition was already real
+  (`loadExperimentConfig()` defaults to `config_name="experiment/signal_vae"`,
+  genuinely reading and merging `configs/experiment/signal_vae.yaml` and, through
+  its own `defaults:` list, `configs/model/signal_single_latent.yaml`,
+  `configs/data/signal.yaml`, and `configs/training/default.yaml`, from disk via
+  Hydra); this only makes it visible without having to already know that. The
+  module docstring gained a paragraph spelling out the same thing.
 
 ## [0.1.0] - 2026-08-29
 

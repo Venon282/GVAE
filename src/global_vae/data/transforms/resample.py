@@ -264,9 +264,10 @@ class ResampleTransform(AbstractTransform):
         Raises:
             ValueError: If `x` has fewer than `num_spatial_dims`
                 dimensions; if a coordinate-aware call is missing
-                coordinates it needs to resolve a target grid; or if the
-                resolved target range falls outside the source range and
-                `extrapolate=False`.
+                coordinates it needs to resolve a target grid; if the
+                resolved `source_coords` is not strictly increasing
+                (`interpolation="scipy"` only); or if the resolved target
+                range falls outside the source range and `extrapolate=False`.
         """
         if self.interpolation == "torch":
             return self._resampleUniform(x, self._resolveUniformSize(self.target_size))
@@ -300,8 +301,8 @@ class ResampleTransform(AbstractTransform):
         Raises:
             ValueError: If neither `source_size` nor `source_coords` (at
                 construction or per-call) was ever given, so there is
-                nothing to invert back to; or the same range/shape errors
-                as `apply`.
+                nothing to invert back to; or the same monotonicity/range/shape
+                errors as `apply`.
         """
         if self.interpolation == "torch":
             if self.source_size is None:
@@ -402,6 +403,44 @@ class ResampleTransform(AbstractTransform):
 
         return resampled.reshape(*leading_shape, *resolved_size).to(x.dtype)
 
+    @staticmethod
+    def _requireStrictlyIncreasing(coords: np.ndarray, name: str) -> None:
+        """Validate that `coords` is strictly increasing, with an actionable error if not.
+
+        `scipy`'s own spline classes (`CubicSpline`/`PchipInterpolator`/
+        `Akima1DInterpolator`) already reject a non-strictly-increasing `x` with
+        their own `ValueError`, and `interp1d` silently produces undefined results
+        for one instead of raising at all; this check runs before either happens, so
+        every `scipy_kind` fails the same way, with a message that points at *why*
+        this tends to happen rather than scipy's own generic wording.
+
+        Args:
+            coords: The resolved (already `float64`) coordinate array to check.
+            name: Which argument this array came from, for the error message
+                (`"source_coords"` or `"target_coords"`).
+
+        Raises:
+            ValueError: If any element of `coords` is not strictly smaller than the
+                element right after it. Arrays with fewer than 2 points are always
+                considered valid (nothing to compare).
+        """
+        if coords.shape[0] < 2:
+            return
+        offending = np.flatnonzero(np.diff(coords) <= 0)
+        if offending.size == 0:
+            return
+        first = int(offending[0])
+        raise ValueError(
+            f"{name} must be strictly increasing for interpolation='scipy', but position "
+            f"{first} ({coords[first]!r}) is not smaller than position {first + 1} "
+            f"({coords[first + 1]!r}). This is usually either genuinely unsorted or "
+            f"duplicate positions, or precision loss from casting positions through a "
+            f"lower-precision dtype (e.g. float32) before they reach this transform: two "
+            f"distinct, sorted float64 positions that are already very close together can "
+            f"round to the exact same float32 value. Pass source_coords/target_coords at "
+            f"their original float64 precision to avoid the latter."
+        )
+
     def _resampleWithCoords(
         self,
         x: torch.Tensor,
@@ -422,8 +461,9 @@ class ResampleTransform(AbstractTransform):
             The resampled tensor, dtype preserved.
 
         Raises:
-            ValueError: If `x` has fewer than 1 dimension; if the resolved
-                target range falls outside the resolved source range and
+            ValueError: If `x` has fewer than 1 dimension; if `source_coords` is not
+                strictly increasing (see `_requireStrictlyIncreasing`); if the
+                resolved target range falls outside the resolved source range and
                 `self.extrapolate` is `False`.
             ImportError: If `scipy` is not installed.
         """
@@ -446,6 +486,7 @@ class ResampleTransform(AbstractTransform):
                 f"source_coords has {resolved_source.shape[0]} position(s) but the input's "
                 f"resampled axis has length {length}."
             )
+        self._requireStrictlyIncreasing(resolved_source, "source_coords")
 
         if target_coords is not None:
             resolved_target = target_coords

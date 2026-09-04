@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 """The same spec §6.1 milestone 1 pipeline as `01_signal_vae_pipeline.py`, but
 assembled entirely from the `configs/` YAML files (spec §9, §10 "Config management")
-instead of hand-written Python kwargs — the same files `scripts/train.py` composes by
+instead of hand-written Python kwargs: the same files `scripts/train.py` composes by
 default (`configs/experiment/signal_vae.yaml`), with a synthetic, in-memory
 `loader_factory` (`_synthetic_signal_data.buildSyntheticSignalDataloaders`) standing in
 for a real dataset, so this still runs with no external data.
+
+To be explicit about what "config-driven" means here, since it is easy to miss just by
+skimming the code below: `loadExperimentConfig()` is called with no `config_name`
+argument, so it defaults to `"experiment/signal_vae"` and genuinely reads and merges
+`configs/experiment/signal_vae.yaml` (plus, via that file's own `defaults:` list,
+`configs/model/signal_single_latent.yaml`, `configs/data/signal.yaml`, and
+`configs/training/default.yaml`) from disk through Hydra, exactly like
+`scripts/train.py` does. `EXPERIMENT_VARIANTS`'s dotlist strings below are overrides
+layered on top of those YAML files, not a second, Python-side definition of the
+config; `runVariant` also logs the exact override list and a few of the values it
+resolves to, so this is visible at run time too, not only in this docstring.
 
 Besides "the same pipeline, config-driven", this script demonstrates something
 `01_signal_vae_pipeline.py` cannot show at all: **versioned, comparable experiment
@@ -17,12 +28,12 @@ same `configs/experiment/signal_vae.yaml`:
   (`configs/model/signal_single_latent.yaml`) with a beta warm-up tuned for a generic
   first attempt (`configs/training/default.yaml`).
 - `"tuned"`: the same config, with a handful of overrides switching to `free_bits_kl`
-  and a slower beta warm-up — the exact fix `01_signal_vae_pipeline.py`'s own module
+  and a slower beta warm-up: the exact fix `01_signal_vae_pipeline.py`'s own module
   docstring documents for the posterior-collapse failure mode plain KL-to-standard-
   normal is prone to.
 
 Each variant gets its own `output_dir` (so its checkpoint, config snapshot, CSV/
-TensorBoard logs, and figures never overwrite the other's — a plain, filesystem-level
+TensorBoard logs, and figures never overwrite the other's: a plain, filesystem-level
 form of run versioning any config-driven workflow gets close to for free) and its own
 evaluation report. The two are compared side by side at the end, so the value of
 driving hyperparameters from config (easy to vary, easy to keep every variant's exact
@@ -105,6 +116,7 @@ def _saveVariantFigures(
         history: `Trainer.history` for this variant's run.
     """
     bundle, pipeline, common_grid = _buildSyntheticSignalArtifacts(cfg.data)
+    assert bundle.test is not None  # _buildSyntheticSignalArtifacts always populates it
     test_batches = list(bundle.test)
 
     mu, logvar = collectLatentParams(best_model, test_batches, "z_fused", device="cpu")
@@ -161,6 +173,14 @@ def runVariant(name: str, extra_overrides: list[str]) -> EvaluationResults:
     """
     variant_dir = OUTPUT_ROOT / name
     logger.info("--- Variant '%s' ---", name)
+    logger.info(
+        "  composing configs/experiment/signal_vae.yaml (itself pulling in "
+        "configs/model/signal_single_latent.yaml, configs/data/signal.yaml, and "
+        "configs/training/default.yaml, per that file's own `defaults:` list) with "
+        "%d Hydra override(s) on top: %s",
+        len(extra_overrides),
+        extra_overrides if extra_overrides else "(none: this is the baseline, exactly as shipped)",
+    )
 
     cfg = loadExperimentConfig(
         overrides=[
@@ -170,6 +190,17 @@ def runVariant(name: str, extra_overrides: list[str]) -> EvaluationResults:
             f"training.num_epochs={NUM_EPOCHS}",
             *extra_overrides,
         ]
+    )
+    regularizer_strategy = (
+        cfg.model.single_latent.regularizer.strategy
+        if cfg.model.single_latent is not None
+        else None
+    )
+    logger.info(
+        "  resolved from that composed config: regularizer=%s, best-checkpoint monitor=%s, lr=%s.",
+        regularizer_strategy,
+        cfg.training.checkpoint.best_monitor,
+        cfg.training.optimizer.kwargs.get("lr"),
     )
     setGlobalSeed(cfg.seed, deterministic=cfg.deterministic)
 
@@ -192,6 +223,7 @@ def runVariant(name: str, extra_overrides: list[str]) -> EvaluationResults:
     assert cfg.training.checkpoint.best_path is not None  # every variant sets one
     loadCheckpoint(Path(cfg.training.checkpoint.best_path), model=best_model)
 
+    assert dataloaders.test is not None  # this example's loader_factory always populates it
     results = evaluate(best_model, dataloaders.test, device=trainer.device)
     print(f"\n[{name}]\n{results.summary()}\n")
     results.save(variant_dir / "evaluation.json")

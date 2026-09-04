@@ -94,7 +94,14 @@ def computeCommonGrid(curves: list[tuple[np.ndarray, np.ndarray]], length: int) 
     """
     common_min = max(positions.min() for positions, _ in curves)
     common_max = min(positions.max() for positions, _ in curves)
-    return torch.linspace(float(common_min), float(common_max), length)
+    # dtype=torch.float64, not torch.linspace's default float32: this grid is only
+    # ever consumed as ResampleTransform's target_coords, which is stored (and
+    # compared against source_coords) at float64 precision internally anyway
+    # (resample.py's _toCoordsArray always upcasts). Building it at float32 first
+    # would round every endpoint by up to ~1e-7, which can push it fractionally
+    # outside the tightest curve's own range and trip the extrapolate=False check
+    # for no real reason.
+    return torch.linspace(float(common_min), float(common_max), length, dtype=torch.float64)
 
 
 def buildResampleTransform(common_grid: torch.Tensor) -> ResampleTransform:
@@ -135,10 +142,24 @@ def resampleOntoCommonGrid(
 
     Returns:
         A single tensor, shape `(len(curves), common_grid_length)`.
+
+    Note:
+        `source_coords` is passed at `positions`' own native float64 precision, not
+        downcast to float32 (`values`, the y-data, is downcast; only x-positions are
+        precision-sensitive here). Two of a curve's ~50-90 positions can legitimately
+        land extremely close together under `rng.uniform`, and float32 has just
+        ~7 significant digits: rounding two already-close, genuinely distinct float64
+        positions to float32 can collapse them to the exact same value, which breaks
+        `np.sort`'s strictly-increasing guarantee and makes `scipy`'s spline
+        interpolators (`pchip` included) raise `ValueError: x must be strictly
+        increasing sequence.`. This is a probability-of-collision issue, not a
+        one-off: it is rare enough at a few hundred curves to go unnoticed, but with
+        enough curves (tens of thousands) it reliably happens for at least one of
+        them.
     """
     resampled = [
         resample_transform.apply(
-            torch.from_numpy(values).float(), source_coords=torch.from_numpy(positions).float()
+            torch.from_numpy(values).float(), source_coords=torch.from_numpy(positions)
         )
         for positions, values in curves
     ]

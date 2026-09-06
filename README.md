@@ -48,7 +48,12 @@ exactly what that boundary does and does not cover. What's built:
   milestone 1), which needs no fusion strategy at all.
 - Concrete implementations: `OneDCnnEncoder`/`OneDCnnDecoder`
   (`1d_cnn_encoder_v1`/`1d_cnn_decoder_v1`, spec §6's 1D signal
-  modality, length-agnostic on the encoder side via adaptive pooling)
+  modality, length-agnostic on the encoder side via adaptive pooling),
+  `OneDCnnResidualEncoder`/`OneDCnnResidualDecoder` (`1d_cnn_resnet_encoder_v1`/
+  `1d_cnn_resnet_decoder_v1`, spec §7's "scaling toward larger backbones":
+  the same 1D signal modality, built from configurable-depth residual
+  blocks instead of plain conv stages, see
+  `docs/adr/0014-residual-1d-encoder-decoder.md`),
   and `ProductOfExperts` (`poe`, spec §4's MVAE-style fusion strategy).
 - Pluggable latent regularization (`losses/regularizers/`:
   `kl_standard_normal`, `free_bits_kl`, `mmd`) and pluggable

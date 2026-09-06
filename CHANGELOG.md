@@ -17,6 +17,43 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
 
 ### Added
 
+- `encoders/OneDCnnResidualEncoder.py` (`1d_cnn_resnet_encoder_v1`) and
+  `decoders/OneDCnnResidualDecoder.py` (`1d_cnn_resnet_decoder_v1`): ResNet-style 1D
+  encoder/decoder built from `utils/conv_blocks.py`'s new `Residual1DBlock`/
+  `Residual1DUpBlock` (spec §7, "scaling toward larger backbones"). Each stage's
+  residual block has its own configurable depth (`block_depths`, per stage or
+  shared, e.g. `(3, 4)` for a first stage with 3 internal layers before its
+  shortcut and a deeper second stage with 4), and both classes are otherwise as
+  permissive as `OneDCnnEncoder`/`OneDCnnDecoder` (per-stage kernel/stride/
+  padding/dilation/pooling/activation/normalization, both decoder upsample
+  modes, exact-output-length verification instead of resizing). A shortcut's
+  hyperparameters are verified at construction time to reach the exact same
+  output length as its main path for every input length (not just one example
+  length), via two new pure helpers in `utils/conv_math.py`
+  (`computeConv1dLengthOffset`/`computeConvTranspose1dLengthOffset`); a mismatch
+  raises `ValueError` naming both offsets and how to fix them, matching this
+  codebase's existing "verify, don't silently resize" convention. Deliberately
+  does not attempt U-Net-style encoder-to-decoder skip connections: see
+  `docs/adr/0014-residual-1d-encoder-decoder.md` for why that would give the
+  decoder a deterministic, unregularized path around `z` (posterior collapse via
+  skip paths, and loss of generation from the prior), and what the
+  framework-consistent alternative would be instead.
+- `utils/conv_math.py` gained `computeConv1dLengthOffset`, `isLengthPreservingConv1d`,
+  `computeConvTranspose1dLengthOffset`, and `computeUpsampleStackOutputLength` (the
+  last relocated, unchanged, from `OneDCnnDecoder.py`'s private
+  `_computeLengthFromResolved`, now shared by both decoders; see "Changed" below).
+- `tests/integration/test_conv_blocks.py`,
+  `tests/integration/test_residual_signal_encoder.py`, and
+  `tests/integration/test_residual_signal_decoder.py` covering the above: shapes
+  across depth/stride/projection combinations, the flexible-depth case itself,
+  gradient flow, both decoder upsample modes, the decoder's last-transition
+  unconstrained-output guarantee (and that it does not also suppress an earlier
+  internal layer's normalization/activation in a deep last-stage block), and every
+  documented error path (non-positive depth, an even `kernel_size` with a
+  multi-layer block, and an offset-mismatched shortcut).
+- `docs/adr/0014-residual-1d-encoder-decoder.md` documenting the above, including
+  the U-Net-skip-connections analysis and why it was rejected for this framework.
+
 - `examples/02_config_driven_pipeline.py`: the same spec §6.1 milestone 1 pipeline as
   `01_signal_vae_pipeline.py`, assembled entirely from the `configs/` YAML files (spec
   §9, §10 "Config management") instead of hand-written Python kwargs: the exact files
@@ -93,6 +130,18 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
   `01_signal_vae_pipeline.py` section now mentions the `free_bits_kl` choice above.
   `README.md`'s own "Want to see it work" pointer now also mentions the second
   example.
+- `decoders/OneDCnnDecoder.py`'s private `_computeLengthFromResolved` is now
+  `utils.conv_math.computeUpsampleStackOutputLength` (imported back under its old
+  private name at the one call site, so nothing else in this file changes),
+  relocated so `OneDResidualDecoder` can share the exact same per-transition
+  length-chaining logic instead of duplicating it (see "Added" above and
+  `docs/adr/0014-residual-1d-encoder-decoder.md`). Pure relocation, verified
+  behavior-preserving by `test_signal_decoder.py`'s full existing suite passing
+  unchanged. Also gained an explicit `upsample_modes_: tuple[str, ...]`
+  annotation (a pre-existing `mypy --strict` gap this refactor's own new code
+  would otherwise have repeated): mypy cannot always infer
+  `broadcastPerStage`'s `TypeVar` through a `str | Sequence[str]`-typed
+  argument without help; no behavior change.
 
 ### Fixed
 

@@ -8,67 +8,15 @@ from torch import nn
 
 from global_vae.decoders.base import AbstractDecoder
 from global_vae.decoders.registry import registerDecoder
-from global_vae.utils.stage_config import broadcastPerStage
 from global_vae.utils.builders import build1DUpSampleStage
 from global_vae.utils.conv_math import (
-    computeConvTranspose1dOutputLength,
-    computeUpsampleThenConv1dOutputLength,
+    computeUpsampleStackOutputLength as _computeLengthFromResolved,
+)
+from global_vae.utils.conv_math import (
     solveConvTranspose1dOutputPadding,
 )
+from global_vae.utils.stage_config import broadcastPerStage
 
-def _computeLengthFromResolved(
-    seed_length: int,
-    kernel_sizes: tuple[int, ...],
-    strides: tuple[int, ...],
-    paddings: tuple[int, ...],
-    output_paddings: tuple[int, ...],
-    dilations: tuple[int, ...],
-    upsample_modes: tuple[str, ...],
-) -> int:
-    """Chain the per-transition length formula across an already-resolved stack.
-
-    Args:
-        seed_length: Length before any transition is applied.
-        kernel_sizes: Per-transition kernel sizes.
-        strides: Per-transition strides.
-        paddings: Per-transition paddings.
-        output_paddings: Per-transition `ConvTranspose1d` output
-            paddings. Ignored (but must still be a same-length tuple)
-            if `upsample_mode` is `"interpolate_conv"`.
-        dilations: Per-transition dilations.
-        upsample_modes: `"conv_transpose"` or `"interpolate_conv"`.
-
-    Returns:
-        The length after every transition.
-
-    Raises:
-        ValueError: If `upsample_mode` is not recognized.
-    """
-    length = seed_length
-    for stage in range(len(kernel_sizes)):
-        if upsample_modes[stage] == "conv_transpose":
-            length = computeConvTranspose1dOutputLength(
-                length,
-                kernel_sizes[stage],
-                strides[stage],
-                paddings[stage],
-                output_paddings[stage],
-                dilations[stage],
-            )
-        elif upsample_modes[stage] == "interpolate_conv":
-            length = computeUpsampleThenConv1dOutputLength(
-                length,
-                strides[stage],
-                kernel_sizes[stage],
-                paddings[stage],
-                dilations[stage],
-            )
-        else:
-            raise ValueError(
-                f"Unknown upsample_mode '{upsample_modes[stage]}'. Expected 'conv_transpose' or "
-                f"'interpolate_conv'."
-            )
-    return length
 
 @registerDecoder("1d_cnn_decoder_v1")
 class OneDCnnDecoder(AbstractDecoder):
@@ -189,7 +137,9 @@ class OneDCnnDecoder(AbstractDecoder):
         dilations_ = broadcastPerStage(dilations, num_transitions, "dilations")
         activations_ = broadcastPerStage(activations, num_transitions, "activations")
         normalizations_ = broadcastPerStage(normalizations, num_transitions, "normalizations")
-        upsample_modes_ = broadcastPerStage(upsample_modes, num_transitions, "upsample_modes")
+        upsample_modes_: tuple[str, ...] = broadcastPerStage(
+            upsample_modes, num_transitions, "upsample_modes"
+        )
 
         if output_paddings is not None:
             output_paddings_ = broadcastPerStage(

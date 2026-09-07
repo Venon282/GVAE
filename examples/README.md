@@ -41,26 +41,38 @@ on CPU.
 ## `02_config_driven_pipeline.py`
 
 The same pipeline as above, but assembled entirely from the `configs/` YAML files
-(spec §9, §10 "Config management") instead of hand-written Python kwargs: the exact
-files `scripts/train.py` composes by default (`configs/experiment/signal_vae.yaml`),
-with a synthetic, in-memory `loader_factory` (`_synthetic_signal_data`'s own
+(spec §9, §10 "Config management") instead of hand-written Python kwargs, with a
+synthetic, in-memory `loader_factory` (`_synthetic_signal_data`'s own
 `buildSyntheticSignalDataloaders`) standing in for a real dataset. Also demonstrates
 something the first example cannot show on its own: **versioned, comparable
-experiment runs**. Two named variants of the shipped config are composed and trained
-back to back, each expressed as nothing but a short list of Hydra dotlist overrides on
-top of the same baseline: `"baseline"` (the config exactly as shipped) and `"tuned"`
-(switches the regularizer to `free_bits_kl`, slows the beta warm-up, and monitors
+experiment runs**. Two named variants of the composed config are trained back to
+back, each expressed as nothing but a short list of Hydra dotlist overrides on top of
+the same base config: `"baseline"` (no overrides) and `"tuned"` (switches the
+regularizer to `free_bits_kl`, slows the beta warm-up, and monitors
 `val/loss/reconstruction` for best-checkpoint selection, mirroring
 `01_signal_vae_pipeline.py`'s own choices above). Each variant gets its own
 `output_dir` (so its checkpoint, config snapshot, logs, and figures never collide with
-the other's) and its own evaluation report; the two are compared side by side at the
-end.
+the other's) and its own evaluation report; every selected variant is compared side by
+side at the end.
+
+By default this composes `configs/experiment/signal_resnet_vae.yaml`, the residual
+("ResNet-style") 1D encoder/decoder (spec §7, `docs/adr/0014-residual-1d-encoder-
+decoder.md`) instead of the plain conv one. **Choosing which configs to use, and a
+handful of other important parameters, is itself part of what this script
+demonstrates**, via a real CLI:
 
 ```bash
 pip install -e ".[dev]"
-python examples/02_config_driven_pipeline.py
+python examples/02_config_driven_pipeline.py                      # default: residual encoder/decoder
+python examples/02_config_driven_pipeline.py --model-config signal_single_latent  # compare against the plain conv one
+python examples/02_config_driven_pipeline.py --experiment-config experiment/signal_vae  # a whole different experiment file
+python examples/02_config_driven_pipeline.py --variants baseline --num-epochs 5   # quick one-variant smoke check
+python examples/02_config_driven_pipeline.py --override training.optimizer.kwargs.lr=0.01  # repeatable, arbitrary Hydra overrides
+python examples/02_config_driven_pipeline.py --help                # every option
 ```
 
-Every output is written to `examples/outputs/02_config_driven_pipeline/<variant>/`
-(git-ignored, same pattern as above). Trains two variants of 100 epochs each back to
-back, so budget noticeably more time on CPU than `01_signal_vae_pipeline.py` alone.
+Every output is written to `<output-root>/<variant>/` (default
+`examples/outputs/02_config_driven_pipeline/<variant>/`, git-ignored, same pattern as
+above). Two variants of 100 epochs each (this script's own defaults) take noticeably
+longer on CPU than `01_signal_vae_pipeline.py` alone; use `--variants`/`--num-epochs`
+for a faster check.

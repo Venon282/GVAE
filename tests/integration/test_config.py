@@ -204,6 +204,108 @@ class TestBuildModelFromConfig:
             buildModelFromConfig(config)
 
 
+class TestSignalResnetVaeExperiment:
+    """`configs/model/signal_resnet_single_latent.yaml` and
+    `configs/experiment/signal_resnet_vae.yaml` (spec §7, `docs/adr/
+    0014-residual-1d-encoder-decoder.md`): the same spec §6.1 milestone 1 shape as
+    `signal_vae.yaml`/`signal_single_latent.yaml`, but composing the residual
+    encoder/decoder instead of the plain conv stack. Selectable either as its own
+    named experiment file, or as a `model=...` override on top of the existing
+    `signal_vae.yaml` (both ways are exercised below, since both are documented as
+    supported entry points).
+    """
+
+    def test_dedicated_experiment_file_selects_the_resnet_model(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_resnet_vae", overrides=_BASE_OVERRIDES
+        )
+        assert cfg.model.name == "global_vae_signal_resnet_single_latent"
+        assert cfg.model.modalities["signal"].encoder.name == "1d_cnn_resnet_encoder_v1"
+        assert cfg.model.modalities["signal"].decoder.name == "1d_cnn_resnet_decoder_v1"
+
+    def test_model_group_override_selects_the_same_resnet_model(self) -> None:
+        """The second documented way to reach the same model: overriding the `model`
+        config group directly on top of the default experiment file, exactly like
+        `test_two_modality_config_needs_a_fusion_strategy` already does for
+        `model=default`."""
+        cfg = _loadSignalVaeConfig(overrides=["model=signal_resnet_single_latent"])
+        assert cfg.model.name == "global_vae_signal_resnet_single_latent"
+
+    def test_builds_the_real_residual_encoder_and_decoder(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_resnet_vae", overrides=_BASE_OVERRIDES
+        )
+        model = buildModelFromConfig(cfg.model)
+        assert type(model.encoders["signal"]).__name__ == "OneDCnnResidualEncoder"
+        assert type(model.decoders["signal"]).__name__ == "OneDCnnResidualDecoder"
+        assert "z_fused" not in model.fusions  # single encoder: no fusion module built
+
+    def test_forward_pass_shapes_match_configured_dims(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_resnet_vae", overrides=_BASE_OVERRIDES
+        )
+        model = buildModelFromConfig(cfg.model)
+        output = model({"signal": torch.randn(3, 256)})
+        assert output["reconstructions"]["signal"].shape == (3, 256)
+        mu, logvar = output["latent_params"]["z_fused"]
+        assert mu.shape == (3, 16)
+        assert logvar.shape == (3, 16)
+
+    def test_per_stage_block_depths_reach_the_model(self) -> None:
+        """The whole point of the residual variant: block_depths must actually reach
+        the constructed modules, not just be schema-valid."""
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_resnet_vae", overrides=_BASE_OVERRIDES
+        )
+        assert cfg.model.modalities["signal"].encoder.kwargs["block_depths"] == [2, 2, 3, 3, 2]
+        model = buildModelFromConfig(cfg.model)
+        # 5 stages configured -> 5 residual blocks in the encoder's conv stack
+        # (each stage contributes exactly one Residual1DBlock plus, optionally, one
+        # pooling layer; block_depths controls each block's own internal layer count,
+        # not how many blocks exist).
+        residual_blocks = [
+            module
+            for module in model.encoders["signal"].conv
+            if type(module).__name__ == "Residual1DBlock"
+        ]
+        assert len(residual_blocks) == 5
+
+    def test_gradients_flow_through_the_residual_stack(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_resnet_vae", overrides=_BASE_OVERRIDES
+        )
+        model = buildModelFromConfig(cfg.model)
+        output = model({"signal": torch.randn(2, 256)})
+        reconstruction_loss = output["reconstructions"]["signal"].pow(2).mean()
+        regularization_loss = model.computeRegularizationLoss(output["latent_params"])
+        (reconstruction_loss + regularization_loss).backward()
+        for name, param in model.named_parameters():
+            assert param.grad is not None, f"parameter '{name}' got no gradient"
+
+    def test_full_fit_run_end_to_end(self, tmp_path: Path) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_resnet_vae",
+            overrides=[
+                *_BASE_OVERRIDES,
+                f"output_dir={tmp_path}",
+                "training.num_epochs=2",
+                "training.beta_schedules.z_fused.kwargs.warmup_steps=5",
+            ],
+        )
+        model = buildModelFromConfig(cfg.model)
+        dataloaders = buildDataloadersFromConfig(cfg.data)
+        trainer = buildTrainerFromConfig(model, cfg.training, config_snapshot=cfg)
+
+        history = trainer.fit(
+            dataloaders.train, num_epochs=cfg.training.num_epochs, val_dataloader=dataloaders.val
+        )
+
+        assert len(history) == 2
+        for entry in history:
+            assert torch.isfinite(torch.tensor(entry["train/loss/total"]))
+        assert (tmp_path / "checkpoints" / "best.pt").exists()
+
+
 class TestDataConfig:
     def test_build_dataloaders_from_config_resolves_and_calls_the_factory(self) -> None:
         cfg = _loadSignalVaeConfig()

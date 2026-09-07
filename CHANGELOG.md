@@ -56,24 +56,68 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
 
 - `examples/02_config_driven_pipeline.py`: the same spec §6.1 milestone 1 pipeline as
   `01_signal_vae_pipeline.py`, assembled entirely from the `configs/` YAML files (spec
-  §9, §10 "Config management") instead of hand-written Python kwargs: the exact files
-  `scripts/train.py` composes by default (`configs/experiment/signal_vae.yaml`), with
-  a synthetic, in-memory `loader_factory`
+  §9, §10 "Config management") instead of hand-written Python kwargs, with a
+  synthetic, in-memory `loader_factory`
   (`examples/_synthetic_signal_data.buildSyntheticSignalDataloaders`, see below)
   standing in for a real dataset. Demonstrates something the first example cannot show
-  on its own: versioned, comparable experiment runs. Two named variants of the shipped
-  config (`EXPERIMENT_VARIANTS`) are composed and trained back to back, each expressed
-  as nothing but a short list of Hydra dotlist overrides on top of the same baseline:
-  `"baseline"` (the config exactly as shipped: `kl_standard_normal`, the stock beta
-  warm-up) and `"tuned"` (switches the regularizer to `free_bits_kl`, slows the beta
-  warm-up, and monitors `val/loss/reconstruction` for best-checkpoint selection, the
-  same choices documented for `01_signal_vae_pipeline.py` below, now expressed as
-  config overrides instead of Python kwargs). Each variant gets its own `output_dir`,
-  so its checkpoint, config snapshot, CSV/TensorBoard logs, and figures never overwrite
-  the other's (a plain, filesystem-level form of run versioning any config-driven
-  workflow gets close to for free) and its own evaluation report; `main()` prints both
-  variants' test-set reconstruction metrics side by side, so the value of driving
-  hyperparameters from config is visible in the numbers, not only asserted.
+  on its own: versioned, comparable experiment runs. Two named variants of the
+  composed config (`EXPERIMENT_VARIANTS`) are composed and trained back to back, each
+  expressed as nothing but a short list of Hydra dotlist overrides on top of the same
+  base config: `"baseline"` (no overrides beyond wiring in the synthetic loader
+  factory: `kl_standard_normal`, the stock beta warm-up) and `"tuned"` (switches the
+  regularizer to `free_bits_kl`, slows the beta warm-up, and monitors
+  `val/loss/reconstruction` for best-checkpoint selection, the same choices documented
+  for `01_signal_vae_pipeline.py` below, now expressed as config overrides instead of
+  Python kwargs, and model-architecture-agnostic so they apply identically whichever
+  model config is selected). Each variant gets its own `output_dir`, so its
+  checkpoint, config snapshot, CSV/TensorBoard logs, and figures never overwrite the
+  other's (a plain, filesystem-level form of run versioning any config-driven
+  workflow gets close to for free) and its own evaluation report; `main()` prints
+  every selected variant's test-set reconstruction metrics side by side, so the value
+  of driving hyperparameters from config is visible in the numbers, not only
+  asserted.
+  By default, composes `configs/experiment/signal_resnet_vae.yaml` (spec §7's residual
+  encoder/decoder, see `docs/adr/0014-residual-1d-encoder-decoder.md`), added
+  alongside `configs/model/signal_resnet_single_latent.yaml` in this same unreleased
+  version (see the residual-encoder/decoder entry above): both are new, so this
+  script's own default changing to use them is not itself a later "Changed" against a
+  previously-released behavior. Which config groups (and which raw Hydra dotlist
+  overrides) get composed is now a real, argparse-driven CLI (`_buildArgumentParser`),
+  not a hardcoded Python constant, since choosing which configs to use is itself part
+  of what this script demonstrates: `--experiment-config` (which
+  `configs/experiment/*.yaml` to start from), `--model-config`/`--data-config`/
+  `--training-config` (override one config group at a time on top of it, e.g.
+  `--model-config signal_single_latent` to compare against the plain conv encoder/
+  decoder instead), `--variants` (run a subset of `EXPERIMENT_VARIANTS` instead of
+  every one, for a quick check), `--num-epochs`/`--seed`/`--output-root`, and
+  `--override KEY=VALUE` (repeatable: arbitrary further raw Hydra dotlist overrides,
+  the same mechanism `scripts/train.py` exposes directly on its own command line, for
+  anything the named flags do not cover). `main(argv: list[str] | None = None)`
+  mirrors `scripts/evaluate.py`/`scripts/visualize_latent.py`'s own plain-argparse
+  convention (not `@hydra.main`, since this script composes and trains several
+  variants back to back within one process, which an `@hydra.main`-decorated
+  entry point cannot do safely, see `docs/adr/0011-hydra-config-layer.md`).
+- `tests/integration/test_config_driven_pipeline_example.py`: covers the CLI above as
+  a real subprocess (mirroring `test_train_script.py`'s own reasoning: this script's
+  `from _synthetic_signal_data import ...` sibling import only resolves when
+  `examples/` itself is on `sys.path`, which an in-process `importlib`-loaded module
+  does not get for free) — the default resnet config, `--model-config`/
+  `--experiment-config` switching to the plain conv model, `--override` reaching the
+  composed config, `--variants` actually restricting which variant directories get
+  written, and the invalid-variant-name argparse error path.
+- `configs/model/signal_resnet_single_latent.yaml` and
+  `configs/experiment/signal_resnet_vae.yaml`: the residual encoder/decoder's own
+  model and experiment config, mirroring `signal_single_latent.yaml`/`signal_vae.yaml`
+  exactly (same `signal -> z -> signal` shape, no fusion strategy, `output_length: 256`
+  matching `configs/data/signal.yaml`'s `sequence_length`), with a per-stage
+  `block_depths` example (`[2, 2, 3, 3, 2]` encoder, `[2, 3, 3, 2, 2]` decoder)
+  demonstrating the residual classes' own flexible-depth feature. Selectable either as
+  its own named experiment file or as a `model=signal_resnet_single_latent` override
+  on top of `signal_vae.yaml`, both documented and both covered by
+  `tests/integration/test_config.py`'s new `TestSignalResnetVaeExperiment` (composition,
+  the real registered classes actually being built, forward-pass shapes,
+  `block_depths` actually reaching the constructed modules, gradient flow, and a full
+  `Trainer.fit` run end to end) and by a real `scripts/train.py` subprocess smoke run.
 - `examples/_synthetic_signal_data.py`: the synthetic-curve generation, common-grid
   computation, and coordinate-aware-resampling helpers factored out of
   `01_signal_vae_pipeline.py` (unchanged behavior) so `02_config_driven_pipeline.py`
@@ -133,7 +177,7 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
 - `decoders/OneDCnnDecoder.py`'s private `_computeLengthFromResolved` is now
   `utils.conv_math.computeUpsampleStackOutputLength` (imported back under its old
   private name at the one call site, so nothing else in this file changes),
-  relocated so `OneDResidualDecoder` can share the exact same per-transition
+  relocated so `OneDCnnResidualDecoder` can share the exact same per-transition
   length-chaining logic instead of duplicating it (see "Added" above and
   `docs/adr/0014-residual-1d-encoder-decoder.md`). Pure relocation, verified
   behavior-preserving by `test_signal_decoder.py`'s full existing suite passing

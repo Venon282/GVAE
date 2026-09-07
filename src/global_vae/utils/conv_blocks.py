@@ -1,6 +1,6 @@
 """Reusable 1D residual building blocks (spec §6, §7, §12).
 
-Shared by `encoders.OneDResidualEncoder` and `decoders.OneDResidualDecoder`:
+Shared by `encoders.OneDCnnResidualEncoder` and `decoders.OneDCnnResidualDecoder`:
 a residual block stacks `depth` convolutional layers (`depth >= 1`,
 independently configurable per stage, e.g. "3 layers before the connection,
 then 4" for a deeper second stage) and adds a shortcut connection from the
@@ -18,8 +18,8 @@ well-defined (rather than one per internal layer) and, just as importantly,
 is what makes the block's contribution to the surrounding encoder's/
 decoder's overall length bookkeeping identical to a plain (non-residual)
 stage in `OneDCnnEncoder`/`OneDCnnDecoder`: the *whole* block changes length
-exactly the way its first layer alone would, so `OneDResidualEncoder`/
-`OneDResidualDecoder` can reuse the exact same length-solving machinery
+exactly the way its first layer alone would, so `OneDCnnResidualEncoder`/
+`OneDCnnResidualDecoder` can reuse the exact same length-solving machinery
 (`utils/conv_math.py`) that the non-residual classes already use, per
 stage, unmodified.
 
@@ -203,7 +203,10 @@ class Residual1DBlock(nn.Module):
         self.needs_projection = in_channels != out_channels or stride != 1
         if self.needs_projection:
             main_offset = computeConv1dLengthOffset(kernel_size, resolved_padding, dilation)
-            shortcut_padding = dilation * 0 + 1 * (shortcut_kernel_size // 2)  # dilation=1
+            # The shortcut's own dilation is always fixed at 1 (a single un-dilated
+            # projection layer, the standard ResNet choice), so its "same"-style padding
+            # only ever depends on its own kernel_size, not on this block's `dilation`.
+            shortcut_padding = shortcut_kernel_size // 2
             shortcut_offset = computeConv1dLengthOffset(shortcut_kernel_size, shortcut_padding, 1)
             if main_offset != shortcut_offset:
                 raise ValueError(
@@ -333,7 +336,7 @@ class Residual1DUpBlock(nn.Module):
                 last layer (the one immediately feeding the residual
                 addition, on both the main and shortcut paths) skips
                 normalization even if `normalization` is given.
-                `OneDResidualDecoder` passes `False` for its final
+                `OneDCnnResidualDecoder` passes `False` for its final
                 transition only, matching `OneDCnnDecoder`'s own
                 convention that the last transition must be free to
                 produce values at any scale; every earlier layer inside
@@ -343,7 +346,7 @@ class Residual1DUpBlock(nn.Module):
                 reconstruction is read out.
             apply_output_activation: As `apply_output_normalization`,
                 but for the activation applied after the residual
-                addition itself (`OneDResidualDecoder`'s final
+                addition itself (`OneDCnnResidualDecoder`'s final
                 transition must produce unconstrained reconstruction
                 values, exactly like `OneDCnnDecoder`'s own last
                 transition).
@@ -409,7 +412,10 @@ class Residual1DUpBlock(nn.Module):
                 main_offset = computeConvTranspose1dLengthOffset(
                     kernel_size, padding, output_padding, dilation
                 )
-                shortcut_padding = 1 * (shortcut_kernel_size // 2)  # dilation=1 for the shortcut
+                # The shortcut's own dilation is always fixed at 1, so its "same"-style
+                # padding only depends on its own kernel_size (see Residual1DBlock's
+                # identical comment).
+                shortcut_padding = shortcut_kernel_size // 2
                 shortcut_output_padding = (
                     main_offset + 2 * shortcut_padding - (shortcut_kernel_size - 1)
                 )
@@ -435,7 +441,7 @@ class Residual1DUpBlock(nn.Module):
                 )
             else:
                 main_offset = computeConv1dLengthOffset(kernel_size, padding, dilation)
-                shortcut_padding = 1 * (shortcut_kernel_size // 2)
+                shortcut_padding = shortcut_kernel_size // 2  # shortcut dilation fixed at 1
                 shortcut_offset = computeConv1dLengthOffset(
                     shortcut_kernel_size, shortcut_padding, 1
                 )

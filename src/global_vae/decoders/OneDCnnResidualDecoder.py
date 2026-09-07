@@ -21,7 +21,7 @@ class OneDCnnResidualDecoder(AbstractDecoder):
 
     A stack of residual up-blocks (`utils.conv_blocks.Residual1DUpBlock`,
     spec §7's "scaling toward larger backbones"), the decoder-side
-    counterpart to `OneDResidualEncoder`. As in `OneDCnnDecoder`, only the
+    counterpart to `OneDCnnResidualEncoder`. As in `OneDCnnDecoder`, only the
     first layer of each transition changes length (here: the residual
     block's own upsampling first layer); this is what lets this class reuse
     `OneDCnnDecoder`'s exact length-solving machinery
@@ -36,7 +36,7 @@ class OneDCnnResidualDecoder(AbstractDecoder):
     `paddings`, `output_paddings`, `dilations`, `upsample_modes`,
     `activations`, `normalizations`, all via
     `utils.stage_config.broadcastPerStage`), plus the same two additions
-    `OneDResidualEncoder` gets: `block_depths` (per transition, e.g. `(3,
+    `OneDCnnResidualEncoder` gets: `block_depths` (per transition, e.g. `(3,
     4)` for a shallower first transition and a deeper second one) and
     `shortcut_kernel_sizes`.
 

@@ -1,0 +1,49 @@
+# Single-modality signal VAE (spec §6.1 milestone 1), using the residual
+# ("ResNet-style") 1D encoder/decoder instead of the plain conv stack (spec §7:
+# "scaling toward larger backbones") in place of signal_single_latent.yaml's
+# 1d_cnn_encoder_v1/1d_cnn_decoder_v1. Same signal -> z -> signal shape, no fusion
+# strategy (spec §4: a single encoder needs none). Validated against
+# global_vae.config.model.ModelConfig (see src/global_vae/config/model.py). See
+# docs/adr/0014-residual-1d-encoder-decoder.md for the residual encoder/decoder
+# themselves, including why block_depths needs an odd kernel_sizes wherever it is
+# greater than 1.
+name: global_vae_signal_resnet_single_latent
+latent_mode: single
+
+modalities:
+  signal:
+    encoder:
+      name: 1d_cnn_resnet_encoder_v1
+      kwargs:
+        hidden_channels: [8, 16, 32, 64, 128]
+        kernel_sizes: 3
+        # How many internal conv layers each stage's residual block has before its
+        # own shortcut, per stage: shallower at the extremes, deeper in the middle,
+        # the "3 layers here, 4 layers there" flexibility this encoder adds over
+        # 1d_cnn_encoder_v1's plain per-stage single layer.
+        block_depths: [2, 2, 3, 3, 2]
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: 1d_cnn_resnet_decoder_v1
+      kwargs:
+        # output_length must match configs/data/signal.yaml's sequence_length.
+        # OneDCnnResidualDecoder's own bare defaults (kernel_sizes=3, strides=2,
+        # paddings=1, upsample_modes="interpolate_conv") already double the length at
+        # every transition (unlike 1d_cnn_decoder_v1's own defaults, tuned for
+        # upsample_modes="conv_transpose" instead; see OneDCnnResidualDecoder's own
+        # docstring for why), so 5 hidden_channels entries give 5 transitions with no
+        # upsample_modes/kernel_sizes override needed: 8 -> 16 -> 32 -> 64 -> 128 ->
+        # 256. Use OneDCnnResidualDecoder.computeOutputLength(...) to verify any
+        # configuration before committing to it.
+        output_length: 256
+        hidden_channels: [128, 64, 32, 16, 8]
+        block_depths: [2, 3, 3, 2, 2]
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

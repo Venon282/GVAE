@@ -35,7 +35,9 @@ def test_output_shape_matches_the_natural_default_length() -> None:
 
 def test_compute_output_length_matches_default_construction() -> None:
     """The whole point: a caller can verify a config before ever constructing the class."""
-    computed = OneDCnnResidualDecoder.computeOutputLength(seed_length=8, hidden_channels=(128, 64, 32))
+    computed = OneDCnnResidualDecoder.computeOutputLength(
+        seed_length=8, hidden_channels=(128, 64, 32)
+    )
     assert computed == _DEFAULT_NATURAL_LENGTH
 
 

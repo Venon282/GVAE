@@ -1,0 +1,22 @@
+# @package _global_
+# Same spec §6.1 milestone 1 experiment as signal_vae.yaml, but composing
+# signal_resnet_single_latent (the residual "ResNet-style" 1D encoder/decoder,
+# spec §7) instead of signal_single_latent. Assembles model + data + training into
+# one composed, validated global_vae.config.experiment.ExperimentConfig.
+# Run with: python scripts/train.py --config-name experiment/signal_resnet_vae
+# Or, to compare against the plain conv model without a second experiment file at
+# all, override the model group directly on top of signal_vae.yaml instead:
+#   python scripts/train.py model=signal_resnet_single_latent ...
+# Override anything else from the command line exactly as with signal_vae.yaml, e.g.:
+#   python scripts/train.py --config-name experiment/signal_resnet_vae \
+#       data.train_path=/path/to/data data.loader_factory=my_project.data:build \
+#       model.single_latent.dim=32 training.num_epochs=50
+defaults:
+  - /model: signal_resnet_single_latent
+  - /data: signal
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/signal_resnet_vae

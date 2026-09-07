@@ -1,7 +1,7 @@
 """encoders subpackage of global_vae.
 
 Importing this package registers every built-in encoder implementation
-(`1d_cnn_encoder_v1`, `1d_resnet_encoder_v1`) via each module's own
+(`1d_cnn_encoder_v1`, `1d_cnn_resnet_encoder_v1`) via each module's own
 `@registerEncoder` decorator. A `@registerX(...)` decorator only runs once
 its module is imported; without these imports, `getEncoderClass(...)`
 would raise `KeyError` even though the corresponding file exists on disk.

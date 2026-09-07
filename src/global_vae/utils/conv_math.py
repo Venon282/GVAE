@@ -233,7 +233,7 @@ def computeUpsampleStackOutputLength(
 ) -> int:
     """Chain the per-transition upsampling length formula across an already-resolved stack.
 
-    Shared by `OneDCnnDecoder` and `OneDResidualDecoder` (spec §6, §12:
+    Shared by `OneDCnnDecoder` and `OneDCnnResidualDecoder` (spec §6, §12:
     the two decoders' transitions differ in what happens *between* each
     length change, plain layers versus a residual block, but the length
     arithmetic that gets a series from `seed_length` to the final

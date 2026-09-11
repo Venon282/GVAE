@@ -72,9 +72,12 @@ exactly what that boundary does and does not cover. What's built:
   method beyond evenly-spaced grids (`scipy.interpolate`'s `interp1d`
   kinds, plus `cubic_spline`/`pchip`/`akima` splines) — see
   `docs/adr/0013-coordinate-aware-resampling.md`. `DataConfig.transforms`
-  (`config/data.py`) is a list of these, resolved by
-  `buildTransformPipeline`; dataset loading, pairing, and splitting
-  remain entirely out of scope, permanently (`data/NOTE.md`). See
+  (`config/data.py`) is a **per-modality** mapping (modality name -> a list
+  of these), resolved by `buildTransformPipeline` into one pipeline per
+  modality (`docs/adr/0015-per-modality-data-transforms.md`), so two
+  modalities/datasets never have to share one pipeline or one set of
+  statistics; dataset loading, pairing, and splitting remain entirely out
+  of scope, permanently (`data/NOTE.md`). See
   `docs/adr/0012-generic-data-transforms.md`.
 - `training/trainer.py`: `Trainer`, a raw PyTorch training loop
   (forward, reconstruction + regularization loss, backward, optimizer
@@ -131,8 +134,9 @@ exactly what that boundary does and does not cover. What's built:
   `ExperimentConfig`). `buildModelFromConfig`/`buildTrainerFromConfig`/
   `buildDataloadersFromConfig` turn a validated config into a real
   `GlobalVae`/`Trainer`/dataloaders; `DataConfig` is a schema-only
-  contract (paths, batch size, split, a generic transform pipeline, and a
-  `loader_factory` reference to your own data-loading callable), never
+  contract (paths, batch size, split, a generic per-modality transform
+  pipeline, and a `loader_factory` reference to your own data-loading
+  callable), never
   a dataset implementation, matching this framework's data-pipeline
   scope boundary. `scripts/train.py` is the Hydra CLI entry point
   (`python scripts/train.py data.train_path=... data.loader_factory=...`),
@@ -193,9 +197,11 @@ python scripts/train.py \
 callable (spec: data loading stays your own responsibility). See
 `configs/experiment/signal_vae.yaml` for the full default config and
 `global_vae/config/data.py` for the exact contract, including the generic
-`transforms` pipeline (`log`/`standardize`/`resample`, spec §6.2) your own
-`loader_factory` can call via `buildTransformPipeline(config.data)` if it
-wants to. Override any hyperparameter from the command line, e.g.
+per-modality `transforms` pipeline (`log`/`standardize`/`resample`, spec §6.2,
+keyed by modality name so a second signal dataset never has to share the
+first's steps/statistics) your own `loader_factory` can call via
+`buildTransformPipeline(config.data)` if it wants to. Override any
+hyperparameter from the command line, e.g.
 `training.num_epochs=50 training.optimizer.kwargs.lr=0.0003`.
 
 Inspect the result once trained:

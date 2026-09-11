@@ -18,26 +18,34 @@ shuffle_train: true
 
 # Generic, invertible preprocessing steps (spec §6.2), resolved through the
 # `data.transforms` registry (src/global_vae/data/transforms/) and composable via
-# global_vae.config.data.buildTransformPipeline. Nothing here is called
-# automatically: your own `loader_factory` decides whether/how to apply it. The
-# values below are placeholders (an identity `standardize`); replace `mean`/`std`
-# with statistics computed from your own training split before using this for real
-# (this framework deliberately never computes them for you, see StandardizeTransform's
-# own docstring). Add a `resample` step here too if your data needs resampling to a
-# common grid before batching (see `sequence_length` below).
+# global_vae.config.data.buildTransformPipeline. Keyed per modality (spec §6.2,
+# docs/adr/0015-per-modality-data-transforms.md): this file configures only the
+# "signal" modality's own pipeline, since that is the only modality spec §6.1
+# milestone 1 uses; a second modality/dataset would get its own top-level key here,
+# with its own steps and statistics, never sharing this one's. Nothing here is
+# called automatically: your own `loader_factory` decides whether/how to apply it.
+# The values below are placeholders (an identity `standardize`); replace `mean`/
+# `std` with statistics computed from your own training split before using this
+# for real (this framework deliberately never computes them for you, see
+# StandardizeTransform's own docstring). Add a `resample` step here too if your
+# data needs resampling to a common grid before batching (see `sequence_length`
+# below).
 transforms:
-  - name: log
-    kwargs:
-      eps: 1.0e-6
-  - name: standardize
-    kwargs:
-      mean: 0.0
-      std: 1.0
+  signal:
+    - name: log
+      kwargs:
+        eps: 1.0e-6
+    - name: standardize
+      kwargs:
+        mean: 0.0
+        std: 1.0
 
 # Target fixed length after resampling to a common grid, if applicable (spec §6.1's
 # decision A2: interpolation to a shared grid is near-lossless when only resolution
-# differs; needed if your curves' domains genuinely differ). Must match
+# differs; needed if your curves' domains genuinely differ). Keyed per modality
+# (docs/adr/0015-per-modality-data-transforms.md): "signal" here must match
 # configs/model/signal_single_latent.yaml's decoder.kwargs.output_length.
-sequence_length: 256
+sequence_length:
+  signal: 256
 
 seed: 0

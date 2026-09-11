@@ -195,7 +195,7 @@ def _buildSyntheticSignalArtifacts(
     test_curves = buildSyntheticDataset(NUM_TEST, rng)
     all_curves = train_curves + val_curves + test_curves
 
-    length = config.sequence_length or DEFAULT_COMMON_GRID_LENGTH
+    length = (config.sequence_length or {}).get("signal", DEFAULT_COMMON_GRID_LENGTH)
     common_grid = computeCommonGrid(all_curves, length)
     resample_transform = buildResampleTransform(common_grid)
 
@@ -204,8 +204,12 @@ def _buildSyntheticSignalArtifacts(
     test_values = resampleOntoCommonGrid(test_curves, resample_transform)
 
     # Driven by config.transforms (spec §6.2), not hand-built: whatever the composed
-    # YAML says (log, standardize, ...), in whatever order, is what gets applied here.
-    pipeline = buildTransformPipeline(config)
+    # YAML says for the "signal" modality (log, standardize, ...), in whatever order,
+    # is what gets applied here. config.transforms is keyed per modality
+    # (docs/adr/0015-per-modality-data-transforms.md); this example only ever has one
+    # modality, so it looks up "signal" specifically, falling back to an identity
+    # pipeline if the composed config happened to configure none for it.
+    pipeline = buildTransformPipeline(config).get("signal", ComposeTransform([]))
     train_preprocessed = pipeline.apply(train_values)
     val_preprocessed = pipeline.apply(val_values)
     test_preprocessed = pipeline.apply(test_values)

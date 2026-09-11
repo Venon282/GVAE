@@ -166,12 +166,16 @@ is where the framework draws the line between the two:
   this codebase (`apply`/`inverse`, self-registered via
   `@registerTransform(name)`, e.g. `log`, `standardize`, `resample`), plus
   `ComposeTransform` for chaining several into one invertible pipeline.
-  `DataConfig.transforms` (§9) is a list of these, by registry name;
-  `config.data.buildTransformPipeline` resolves it into a single composed
-  callable, whose `.inverse` is what
-  `visualization.reconstruction_plot`'s own `inverse_transform` hook expects.
-  Nothing in this framework calls `buildTransformPipeline` automatically —
-  a caller's `loader_factory` may use it, or preprocess data its own way
+  `DataConfig.transforms` (§9) is a **per-modality** mapping — modality name
+  -> an ordered list of these, by registry name — since two modalities/
+  datasets in the same family (e.g. two different 1D-signal sources, see the
+  roadmap table above) can need entirely different steps and statistics;
+  `config.data.buildTransformPipeline` resolves it into one composed
+  callable per modality, each one's `.inverse` directly usable as
+  `visualization.reconstruction_plot`'s own `inverse_transform` hook.
+  `DataConfig.sequence_length` is keyed the same way, per modality. Nothing
+  in this framework calls `buildTransformPipeline` automatically — a
+  caller's `loader_factory` may use it, or preprocess data its own way
   entirely; the framework only provides the reusable operation.
 
 **Hard requirement: every transform in `data/transforms/` must be fully
@@ -367,20 +371,21 @@ model:
  
 `signal` feeds both `z_shared` (through Fusion, combined with `image`) and its own `z_signal_private`. This is the encoder fan-out case from §2.2: the `signal` encoder produces one `(mu, logvar)` pair, and the `head: linear` on the `z_signal_private` edge adapts that shared output down to this latent space's own dimensionality (128 -> 32), so the two latent spaces stay genuinely independent instead of accidentally sharing the same values.
 
-**Data preprocessing pipeline** (§6.2, `DataConfig.transforms`, resolved by `config.data.buildTransformPipeline`):
+**Data preprocessing pipeline** (§6.2, `DataConfig.transforms`, resolved by `config.data.buildTransformPipeline`; keyed per modality — docs/adr/0015-per-modality-data-transforms.md — so a second signal dataset never has to share the first's statistics):
 
 ```yaml
 data:
   loader_factory: my_project.data:buildSignalDataloaders
   train_path: data/raw/train
   transforms:
-    - name: log                 # data.transforms registry key
-      kwargs:
-        eps: 1.0e-6
-    - name: standardize
-      kwargs:
-        mean: 0.42               # computed from the caller's own training split;
-        std: 1.13                # never guessed by this framework (see StandardizeTransform)
+    signal:                       # modality name, matching model.modalities' own keys
+      - name: log                 # data.transforms registry key
+        kwargs:
+          eps: 1.0e-6
+      - name: standardize
+        kwargs:
+          mean: 0.42               # computed from the caller's own training split;
+          std: 1.13                # never guessed by this framework (see StandardizeTransform)
 ```
  
 All of these examples are illustrative, not final: the actual schema still needs validation logic and a Hydra/dataclass binding (§11).

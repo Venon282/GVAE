@@ -436,20 +436,23 @@ class TestComposeTransform:
 
 class TestBuildTransformPipelineFromConfig:
     """`global_vae.config.data.buildTransformPipeline`: the config-driven wiring
-    that makes `DataConfig.transforms` actually operable (spec §6.2), instead of
-    the purely decorative `list[str]` it used to be.
+    that makes `DataConfig.transforms` actually operable (spec §6.2), keyed per
+    modality (docs/adr/0015-per-modality-data-transforms.md) so two modalities/
+    datasets never have to share one pipeline or one set of statistics.
     """
 
     def test_resolves_each_step_by_registry_name_in_order(self) -> None:
         config = DataConfig(
             loader_factory="unused:unused",
             train_path="unused",
-            transforms=[
-                TransformConfig(name="log", kwargs={"eps": 1e-6}),
-                TransformConfig(name="standardize", kwargs={"mean": 0.0, "std": 2.0}),
-            ],
+            transforms={
+                "signal": [
+                    TransformConfig(name="log", kwargs={"eps": 1e-6}),
+                    TransformConfig(name="standardize", kwargs={"mean": 0.0, "std": 2.0}),
+                ]
+            },
         )
-        pipeline = buildTransformPipeline(config)
+        pipeline = buildTransformPipeline(config)["signal"]
         assert isinstance(pipeline.transforms[0], LogTransform)
         assert isinstance(pipeline.transforms[1], StandardizeTransform)
 
@@ -457,17 +460,56 @@ class TestBuildTransformPipelineFromConfig:
         recovered = pipeline.inverse(pipeline.apply(x))
         assert torch.allclose(x, recovered, atol=1e-4)
 
-    def test_empty_transforms_gives_an_identity_pipeline(self) -> None:
-        config = DataConfig(loader_factory="unused:unused", train_path="unused")
-        pipeline = buildTransformPipeline(config)
+    def test_two_modalities_get_independent_pipelines(self) -> None:
+        """The whole point of the per-modality shape: two datasets in the same
+        1D-signal family (spec §6) can have entirely different steps and
+        statistics without colliding."""
+        config = DataConfig(
+            loader_factory="unused:unused",
+            train_path="unused",
+            transforms={
+                "saxs": [
+                    TransformConfig(name="log", kwargs={"eps": 1e-6}),
+                    TransformConfig(name="standardize", kwargs={"mean": 0.42, "std": 1.13}),
+                ],
+                "les": [TransformConfig(name="standardize", kwargs={"mean": -3.0, "std": 0.5})],
+            },
+        )
+        pipelines = buildTransformPipeline(config)
+
+        assert set(pipelines) == {"saxs", "les"}
+        assert isinstance(pipelines["saxs"].transforms[0], LogTransform)
+        assert not any(isinstance(step, LogTransform) for step in pipelines["les"].transforms)
+
+        saxs_x = torch.rand(4, 8) * 3 + 0.1
+        les_x = torch.randn(4, 8)
+        assert torch.allclose(
+            pipelines["saxs"].inverse(pipelines["saxs"].apply(saxs_x)), saxs_x, atol=1e-4
+        )
+        assert torch.allclose(
+            pipelines["les"].inverse(pipelines["les"].apply(les_x)), les_x, atol=1e-4
+        )
+
+    def test_empty_step_list_gives_an_identity_pipeline_for_that_modality(self) -> None:
+        config = DataConfig(
+            loader_factory="unused:unused", train_path="unused", transforms={"signal": []}
+        )
+        pipeline = buildTransformPipeline(config)["signal"]
         x = torch.randn(3, 5)
         assert torch.equal(pipeline.apply(x), x)
+
+    def test_modality_absent_from_transforms_is_absent_from_the_result(self) -> None:
+        """`DataConfig` has no independent notion of which modalities exist (spec §9:
+        that list lives in `ModelConfig.modalities`), so an unconfigured modality is
+        simply not a key here, not an implicit identity entry."""
+        config = DataConfig(loader_factory="unused:unused", train_path="unused")
+        assert buildTransformPipeline(config) == {}
 
     def test_unknown_transform_name_raises_key_error(self) -> None:
         config = DataConfig(
             loader_factory="unused:unused",
             train_path="unused",
-            transforms=[TransformConfig(name="does_not_exist")],
+            transforms={"signal": [TransformConfig(name="does_not_exist")]},
         )
         with pytest.raises(KeyError, match="does_not_exist"):
             buildTransformPipeline(config)
@@ -478,24 +520,28 @@ class TestBuildTransformPipelineFromConfig:
         config = DataConfig(
             loader_factory="unused:unused",
             train_path="unused",
-            transforms=[TransformConfig(name="standardize", kwargs={"mean": 1.0, "std": 2.0})],
+            transforms={
+                "signal": [TransformConfig(name="standardize", kwargs={"mean": 1.0, "std": 2.0})]
+            },
         )
-        pipeline = buildTransformPipeline(config)
+        pipeline = buildTransformPipeline(config)["signal"]
         inverse_transform: Callable[[torch.Tensor], torch.Tensor] = pipeline.inverse
         x = torch.randn(4, 10)
         assert torch.allclose(inverse_transform(pipeline.apply(x)), x, atol=1e-5)
 
     def test_real_signal_yaml_config_wires_a_working_pipeline(self) -> None:
         """End-to-end: the shipped configs/data/signal.yaml, composed through
-        Hydra, actually produces a usable, invertible pipeline (spec §6.2)."""
+        Hydra, actually produces a usable, invertible per-modality pipeline
+        (spec §6.2)."""
         import global_vae.config  # noqa: F401  (registers structured configs)
         from global_vae.config.experiment import loadExperimentConfig
 
         cfg = loadExperimentConfig(
             overrides=["data.loader_factory=os.path:join", "data.train_path=/unused"]
         )
-        pipeline = buildTransformPipeline(cfg.data)
+        pipeline = buildTransformPipeline(cfg.data)["signal"]
         assert cfg.data.sequence_length is not None
-        x = torch.rand(2, cfg.data.sequence_length) * 3 + 0.1
+        length = cfg.data.sequence_length["signal"]
+        x = torch.rand(2, length) * 3 + 0.1
         recovered = pipeline.inverse(pipeline.apply(x))
         assert torch.allclose(x, recovered, atol=1e-4)

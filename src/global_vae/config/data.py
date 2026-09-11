@@ -12,17 +12,26 @@ reads a file, resamples a series, or builds a `torch.utils.data.Dataset`
 itself.
 
 Preprocessing (spec §6.2) is the one part of this boundary that *does* get
-real, reusable framework code: `DataConfig.transforms` is a list of
-`TransformConfig` entries (name + kwargs), resolved through the
-`data.transforms` registry exactly like every other pluggable strategy in
-this codebase, and `buildTransformPipeline` turns that list into a single
-composed, invertible `ComposeTransform`. Nothing here calls it automatically:
-a caller's own `loader_factory` may call `buildTransformPipeline(config)` and
-apply it while loading data, or ignore `config.transforms` entirely and do
-its own thing; either way, the *pipeline itself* is no longer purely
-decorative the way a plain `list[str]` was before spec §6.2. Because every
-`data.transforms` strategy is dimensionality-agnostic (`data/transforms/base.py`),
-this schema never needs a modality- or dimensionality-specific field either.
+real, reusable framework code: `DataConfig.transforms` is a **per-modality**
+mapping, modality name -> ordered list of `TransformConfig` entries (name +
+kwargs), each resolved through the `data.transforms` registry exactly like
+every other pluggable strategy in this codebase; `buildTransformPipeline`
+turns it into one composed, invertible `ComposeTransform` per modality.
+Per-modality, not one shared pipeline, because spec §6 is explicit that more
+than one dataset can share the 1D-signal encoder/decoder family "with only
+preprocessing differing, not the architecture": a second signal dataset (a
+different instrument, a different sensor) genuinely needs its own `log`/
+`standardize` statistics, its own choice of steps, and its own resampled
+length, independently of any other modality/dataset already configured, not
+a single pipeline reused (or, worse, silently misapplied) across all of them.
+Nothing here calls `buildTransformPipeline` automatically: a caller's own
+`loader_factory` may call it and apply the resulting per-modality pipelines
+while loading data, or ignore `config.transforms` entirely and do its own
+thing. Because every `data.transforms` strategy is itself dimensionality-
+agnostic (`data/transforms/base.py`), no transform *implementation* needs to
+know about modalities; the per-modality *mapping* lives here, one layer up,
+purely so two modalities/datasets can be configured independently. See
+`docs/adr/0015-per-modality-data-transforms.md`.
 
 The other piece of indirection that makes this config actually *usable* end
 to end without the framework owning any data-loading code is `loader_factory`:
@@ -48,7 +57,8 @@ from global_vae.utils.imports import importCallable
 
 @dataclass
 class TransformConfig:
-    """One preprocessing step in `DataConfig.transforms` (spec §6.2, §9).
+    """One preprocessing step in one modality's entry of `DataConfig.transforms`
+    (spec §6.2, §9).
 
     Attributes:
         name: `data.transforms` registry key, e.g. `"log"`,
@@ -97,25 +107,39 @@ class DataConfig:
             per epoch. Recorded here so it is part of the snapshotted
             config (spec §10) even though this framework never
             shuffles anything itself.
-        transforms: Ordered list of generic, invertible preprocessing
-            steps (spec §6.2), resolved through the `data.transforms`
-            registry (`log`, `standardize`, `resample`, or any further
-            strategy registered there). `buildTransformPipeline(config)`
-            turns this into one composed `ComposeTransform`; nothing in
-            this framework applies it automatically (see the module
-            docstring). Empty (default) means no preprocessing pipeline
-            is configured here (a caller may still preprocess data
-            however it likes inside its own `loader_factory`).
-        sequence_length: Target fixed length after any resampling the
-            caller's own pipeline performs, if signals are resampled
-            to a common grid before being batched (typically via a
-            `"resample"` entry in `transforms` above). `None` if not
-            applicable (e.g. images, or signals already fixed-length).
+        transforms: Modality name -> ordered list of generic,
+            invertible preprocessing steps for that modality (spec
+            §6.2), each resolved through the `data.transforms` registry
+            (`log`, `standardize`, `resample`, or any further strategy
+            registered there). `buildTransformPipeline(config)` turns
+            this into one composed `ComposeTransform` per modality;
+            nothing in this framework applies any of them automatically
+            (see the module docstring). A modality absent from this
+            dict simply has no configured pipeline here (a caller may
+            still preprocess it however it likes inside its own
+            `loader_factory`; see `buildTransformPipeline`'s own
+            docstring for the exact "absent" contract). Keyed per
+            modality, not a flat list, so two modalities/datasets --
+            e.g. two different 1D-signal-family datasets, spec §6's own
+            example of "only preprocessing differing" -- can each have
+            their own steps and statistics without colliding. See
+            `__post_init__` for a Hydra/OmegaConf-specific detail: this
+            field's leaf entries are repaired into real `TransformConfig`
+            instances there, since `OmegaConf.to_object()` does not do so
+            itself for a dataclass nested this deep.
+        sequence_length: Modality name -> target fixed length after any
+            resampling that modality's own `loader_factory` pipeline
+            performs, if that modality's signals are resampled to a
+            common grid before being batched (typically via a
+            `"resample"` entry in that modality's own `transforms` list
+            above). A modality absent from this dict, or this field
+            left `None` entirely, means "not applicable" for that
+            modality (e.g. images, or a modality already fixed-length).
             Purely informational here: a decoder's own `output_length`
             (`configs/model/*.yaml`) must still be set to match this
-            value by hand, since `config/model.py` deliberately knows
-            nothing about the data domain (see that module's
-            docstring).
+            value by hand, for that same modality, since
+            `config/model.py` deliberately knows nothing about the data
+            domain (see that module's docstring).
         seed: Seed for any train/val/test split randomization the
             caller's own `loader_factory` performs. Kept separate from
             `ExperimentConfig.seed` (spec §10's global seed) so a data
@@ -132,9 +156,42 @@ class DataConfig:
     val_split: float | None = None
     test_split: float | None = None
     shuffle_train: bool = True
-    transforms: list[TransformConfig] = field(default_factory=list)
-    sequence_length: int | None = None
+    transforms: dict[str, list[TransformConfig]] = field(default_factory=dict)
+    sequence_length: dict[str, int] | None = None
     seed: int = 0
+
+    def __post_init__(self) -> None:
+        """Repair `self.transforms`' leaf entries after Hydra/OmegaConf composition.
+
+        `OmegaConf.to_object()` (used by
+        `global_vae.config.experiment.loadExperimentConfig`) does not
+        reconstruct a real dataclass instance for a value nested two
+        containers deep: `transforms`'s modality-level `dict` and each
+        modality's own `list` are both correctly materialized, but each
+        individual step inside that list comes back as a plain `dict`
+        (`{"name": ..., "kwargs": {...}}`) instead of a `TransformConfig`.
+        This is a known limitation of `OmegaConf.to_object()` with
+        dataclasses nested inside `Dict[str, List[...]]` (it does correctly
+        hydrate the single-nesting cases used elsewhere in this codebase,
+        e.g. `TrainingConfig.beta_schedules: dict[str, BetaScheduleConfig]`),
+        not a bug in the composed YAML or in this schema's own shape.
+
+        This hook repairs exactly that: any step that is not already a
+        `TransformConfig` is reconstructed as one from its own fields. A
+        caller constructing `DataConfig(transforms=...)` directly in Python
+        with real `TransformConfig` instances (every direct-construction
+        call site in this codebase, e.g. in tests) is unaffected: the
+        `isinstance` check makes this a no-op for them.
+        """
+        if not self.transforms:
+            return
+        self.transforms = {
+            modality_name: [
+                step if isinstance(step, TransformConfig) else TransformConfig(**step)
+                for step in steps
+            ]
+            for modality_name, steps in self.transforms.items()
+        }
 
 
 @dataclass
@@ -197,37 +254,53 @@ def buildDataloadersFromConfig(config: DataConfig) -> DataloaderBundle:
     return bundle
 
 
-def buildTransformPipeline(config: DataConfig) -> ComposeTransform:
-    """Resolve `config.transforms` into one composed, invertible pipeline (spec §6.2).
+def buildTransformPipeline(config: DataConfig) -> dict[str, ComposeTransform]:
+    """Resolve `config.transforms` into one composed, invertible pipeline per
+    modality (spec §6.2).
 
-    Every entry is instantiated via the `data.transforms` registry
-    (`getTransformClass`, mirroring how every other config-driven
-    strategy in this codebase is resolved) and chained, in order, into
-    a single `ComposeTransform`.
+    Every configured modality's step list is instantiated via the
+    `data.transforms` registry (`getTransformClass`, mirroring how every
+    other config-driven strategy in this codebase is resolved) and
+    chained, in order, into that modality's own `ComposeTransform`.
 
     This function is a convenience the caller's own `loader_factory`,
     or later evaluation/visualization code, *may* call; nothing in
     this framework calls it automatically (see the module docstring:
-    the data pipeline stays the caller's own responsibility). The
+    the data pipeline stays the caller's own responsibility). Each
     returned pipeline's `.apply`/`__call__` and, in particular,
-    `.inverse` are directly usable wherever this codebase already
+    `.inverse` is directly usable wherever this codebase already
     accepts a plain `Callable[[Tensor], Tensor]` for undoing
     preprocessing, e.g. `visualization.reconstruction_plot`'s own
-    `inverse_transform` parameter (pass `pipeline.inverse`) or
-    `evaluation.visual_export.exportEvaluationFigures`'s
-    `inverse_transforms` dict.
+    `inverse_transform` parameter (pass `pipelines["signal"].inverse`)
+    or `evaluation.visual_export.exportEvaluationFigures`'s
+    `inverse_transforms` dict (the returned dict is already keyed the
+    same way that parameter expects: by modality name).
 
     Args:
         config: A `DataConfig`.
 
     Returns:
-        A `ComposeTransform` chaining every configured step in order.
-        Empty `config.transforms` gives a `ComposeTransform` with zero
-        steps, whose `.apply`/`.inverse` are both the identity.
+        Modality name -> `ComposeTransform` chaining that modality's
+        configured steps in order. A modality with an empty step list
+        (`config.transforms[name] == []`) gets a `ComposeTransform`
+        with zero steps, whose `.apply`/`.inverse` are both the
+        identity. A modality entirely absent from `config.transforms`
+        is not a key of the returned dict at all, not an implicit
+        identity entry: `DataConfig` has no independent notion of
+        which modalities exist in the first place (that list lives in
+        `ModelConfig.modalities`, a separate config domain, spec §9),
+        so this function cannot invent a key for a modality it was
+        never told about. Callers wanting an explicit identity
+        fallback for an unconfigured modality do so themselves, e.g.
+        `pipelines.get(modality_name, ComposeTransform([]))`.
 
     Raises:
         KeyError: If any `TransformConfig.name` is not a registered
             `data.transforms` strategy.
     """
-    steps = [getTransformClass(step.name)(**step.kwargs) for step in config.transforms]
-    return ComposeTransform(steps)
+    return {
+        modality_name: ComposeTransform(
+            [getTransformClass(step.name)(**step.kwargs) for step in steps]
+        )
+        for modality_name, steps in config.transforms.items()
+    }

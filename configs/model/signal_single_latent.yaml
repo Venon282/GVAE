@@ -17,7 +17,7 @@ modalities:
     decoder:
       name: 1d_cnn_decoder_v1
       kwargs:
-        # output_length must match configs/data/signal.yaml's sequence_length. With
+        # output_length must match configs/data/signal.yaml's sequence_length.signal. With
         # this framework's default conv_transpose doubling (seed_length=8, kernel_size
         # 4/stride 2/padding 1), 5 hidden_channels entries give 5 transitions:
         # 8 -> 16 -> 32 -> 64 -> 128 -> 256. Use

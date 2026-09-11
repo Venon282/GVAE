@@ -27,7 +27,7 @@ modalities:
     decoder:
       name: 1d_cnn_resnet_decoder_v1
       kwargs:
-        # output_length must match configs/data/signal.yaml's sequence_length.
+        # output_length must match configs/data/signal.yaml's sequence_length.<modality-name>.
         # OneDCnnResidualDecoder's own bare defaults (kernel_sizes=3, strides=2,
         # paddings=1, upsample_modes="interpolate_conv") already double the length at
         # every transition (unlike 1d_cnn_decoder_v1's own defaults, tuned for

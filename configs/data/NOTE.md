@@ -4,12 +4,18 @@
 and `configs/data/signal.yaml` (an illustrative, schema-valid data config for the
 signal-VAE milestone, spec §6.1 milestone 1) exist, as before. As of spec §6.2 /
 `docs/adr/0012-generic-data-transforms.md`, `DataConfig.transforms` is no longer
-purely decorative: it is a list of `TransformConfig` entries (name + kwargs)
-resolved through the `data.transforms` registry (`log`, `standardize`, `resample`),
-and `global_vae.config.data.buildTransformPipeline(config)` turns it into a real,
-composed, invertible pipeline. `configs/data/signal.yaml` ships a working
-`log` + `standardize` example (see that file's own comments for how to fill in
-real statistics).
+purely decorative: it is a **per-modality** mapping, modality name -> ordered
+list of `TransformConfig` entries (name + kwargs), each resolved through the
+`data.transforms` registry (`log`, `standardize`, `resample`), and
+`global_vae.config.data.buildTransformPipeline(config)` turns it into one real,
+composed, invertible `ComposeTransform` per modality. `DataConfig.sequence_length`
+is keyed the same way (modality name -> target length). See
+`docs/adr/0015-per-modality-data-transforms.md` for why: a second 1D-signal-family
+dataset (spec §6's own "only preprocessing differing" example) needs its own
+steps, its own statistics, and its own resampled length, independently of any
+other modality already configured. `configs/data/signal.yaml` ships a working
+`log` + `standardize` example for its one `signal` modality (see that file's own
+comments for how to fill in real statistics).
 
 # Still deferred / permanent scope boundary
 

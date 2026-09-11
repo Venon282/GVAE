@@ -315,7 +315,7 @@ class TestDataConfig:
         assert bundle.val is not None and len(list(bundle.val)) == 1
 
     def test_sequence_length_reaches_the_dummy_factory(self) -> None:
-        cfg = _loadSignalVaeConfig(overrides=["data.sequence_length=64"])
+        cfg = _loadSignalVaeConfig(overrides=["data.sequence_length.signal=64"])
         bundle = buildDataloadersFromConfig(cfg.data)
         first_batch = next(iter(bundle.train))
         assert first_batch["signal"].shape[1] == 64

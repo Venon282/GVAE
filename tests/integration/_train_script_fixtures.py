@@ -22,7 +22,7 @@ def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
     `loader_factory` wiring, not any real data pipeline).
     """
     torch.manual_seed(config.seed)
-    length = config.sequence_length or 256
+    length = (config.sequence_length or {}).get("signal", 256)
 
     def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
         return [{"signal": torch.randn(BATCH_SIZE, length)} for _ in range(num_batches)]

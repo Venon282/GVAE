@@ -284,6 +284,48 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
   Hydra); this only makes it visible without having to already know that. The
   module docstring gained a paragraph spelling out the same thing.
 
+### Added
+
+- Cross-modal reconstruction reporting (spec §5: "the model can be trained and
+  queried with any subset of available modalities"), making a mechanism
+  `GlobalVae.forward` already implements (no code change to `GlobalVae` or any
+  encoder/decoder/fusion strategy) visible and systematic as a reporting tool
+  instead of something a caller had to reconstruct by hand for every input subset
+  it wanted to compare:
+  - `visualization/reconstruction_plot.py` gained `resolveDefaultInputSubsets`
+    (one singleton subset per encoder, plus the full set together, deliberately
+    not the whole power set), `collectCrossModalReconstructions` (runs the model
+    under several input-modality subsets and collects every resulting
+    `(original, reconstruction)` pair, ground truth always taken from the full,
+    unrestricted batch so a decoder is comparable against ground truth even when
+    its own modality was withheld from a given subset), and
+    `plotCrossModalReconstructionMatrix` (a grid of input-subset x decoder overlay
+    plots for one chosen example, reusing the module's existing `_plotOnePair`
+    helper).
+  - `evaluation/cross_modal.py` (new file): `computeCrossModalReconstructionMetrics`
+    (applies `evaluation.metrics`'s existing metric functions to every cell of a
+    collected cross-modal matrix, so "how much does reconstructing 'image' from
+    'signal' alone actually cost" has a number, not only a picture) and
+    `exportCrossModalFigures` (saves the matrix figure to disk, mirroring
+    `exportEvaluationFigures`'s own shape; a deliberate no-op, not an error, for
+    any model with fewer than two encoders, since there is nothing cross-modal to
+    report for a single-modality model).
+  - `scripts/evaluate.py` now calls `exportCrossModalFigures` unconditionally
+    alongside its existing `exportEvaluationFigures` call whenever `--output-dir`
+    is given: free (a no-op) for spec §6.1 milestone 1's single-modality model,
+    immediately useful once a second modality exists.
+  - `tests/integration/test_cross_modal_reconstruction.py` and
+    `tests/integration/test_cross_modal_evaluation.py`, plus a new
+    `TestCrossModalFigures` class in `tests/integration/test_evaluate_script.py`
+    (using two new, purely additive dummy fixtures in
+    `tests/integration/_script_fixtures.py`,
+    `buildTwoModalityModelForScript`/`buildTwoModalityDataloaderForScript`).
+    Exercises a three-modality dummy model as well as the two-modality case, since
+    nothing in this feature assumes exactly two.
+  - `docs/adr/0016-cross-modal-reconstruction-reporting.md` documenting the above,
+    including why the figure-export half lives in its own `evaluation/cross_modal.py`
+    rather than folded into `evaluate.py`/`visual_export.py`.
+
 ## [0.1.0] - 2026-08-29
 
 First release of the framework. Covers spec §6.1 milestone 1 end to end (a

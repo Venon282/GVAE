@@ -12,6 +12,15 @@ is explicit that preprocessing (e.g. log-scale SAXS intensity) lives in the call
 own data pipeline, entirely outside this framework's scope. This module therefore has
 no built-in transforms of its own to invert; it only ever accepts the caller's own
 inverse function as a plain callable, applied right before plotting.
+
+`resolveDefaultInputSubsets`/`collectCrossModalReconstructions`/
+`plotCrossModalReconstructionMatrix` extend this to the cross-modal case (spec §5:
+"the model can be trained and queried with any subset of available modalities"):
+running the same batch through several input-modality subsets and laying out what
+every decoder reconstructs under each, e.g. what an "image" decoder produces when
+only "signal" is fed in. No change to `GlobalVae.forward` was needed for this
+(`docs/adr/0016-cross-modal-reconstruction-reporting.md`); these three functions are
+purely a reporting layer over behavior the model already has.
 """
 
 from collections.abc import Callable, Iterable, Sequence
@@ -292,3 +301,315 @@ def collectReconstructions(
         originals_all = originals_all[:max_samples]
         reconstructions_all = reconstructions_all[:max_samples]
     return originals_all, reconstructions_all
+
+
+def resolveDefaultInputSubsets(model: GlobalVae) -> list[frozenset[str]]:
+    """Default input-modality subsets for `collectCrossModalReconstructions`.
+
+    One singleton subset per encoder (spec §5: the model can be queried with
+    any non-empty subset of its configured modalities), plus the full set of
+    every encoder together, since that "everything present" case is the
+    normal operating condition every partial subset is naturally compared
+    against.
+
+    Beyond singles and "everything", the space of partial subsets grows
+    combinatorially (`2**N - 1` non-empty subsets for `N` modalities)
+    without adding much that is independently informative as a *default*:
+    for the fusion strategies this framework ships (spec §4), a fused
+    posterior only depends on *which* encoders are active, not on any
+    further structure. A caller wanting a specific further combination
+    passes an explicit `input_subsets` to `collectCrossModalReconstructions`
+    instead, e.g. `itertools.combinations(model.encoders, 2)` for every pair.
+
+    Args:
+        model: A `GlobalVae` instance.
+
+    Returns:
+        One `frozenset[str]` per encoder name, plus (only if there is more
+        than one encoder, since it would otherwise exactly duplicate the
+        one singleton) a further `frozenset` containing every encoder name.
+        Empty if `model` has no encoders at all.
+    """
+    names = list(model.encoders)
+    subsets = [frozenset({name}) for name in names]
+    if len(names) > 1:
+        subsets.append(frozenset(names))
+    return subsets
+
+
+def collectCrossModalReconstructions(
+    model: GlobalVae,
+    dataloader: Iterable[dict[str, torch.Tensor]],
+    input_subsets: Iterable[Iterable[str]] | None = None,
+    device: str | torch.device | None = None,
+    use_mean: bool = True,
+    max_samples: int | None = None,
+) -> dict[frozenset[str], dict[str, tuple[torch.Tensor, torch.Tensor]]]:
+    """Run `model` under several input-modality subsets and collect every
+    resulting `(original, reconstruction)` pair (spec §5).
+
+    For every batch and every subset in `input_subsets`, only that subset of
+    the batch is fed to `model.forward` as `inputs`, mirroring
+    `Trainer._applyModalityDropout`'s own "restrict the encoder input, keep
+    the full batch as the reconstruction target" convention. Every decoder
+    that produces a reconstruction this pass is paired against that
+    decoder's own ground truth from the *full*, unrestricted batch, so a
+    decoder can be compared against ground truth even when its own modality
+    was withheld from this subset, e.g. reconstructing "image" from "signal"
+    alone. This is exactly the behavior `GlobalVae.forward` already has
+    (`docs/adr/0016-cross-modal-reconstruction-reporting.md`); this function
+    only runs it under several subsets and collects the results.
+
+    Args:
+        model: A `GlobalVae` instance. Does not call `model.eval()` itself;
+            the caller decides the mode.
+        dataloader: Yields `dict[str, torch.Tensor]` batches (modality name
+            -> raw tensor for the whole batch), the same convention
+            `Trainer` uses. Walked exactly once regardless of how many
+            subsets are requested (every subset is handled inside the same
+            per-batch loop), so any `Iterable` works, single-use iterators
+            included, unlike `evaluation.visual_export.exportEvaluationFigures`
+            (which needs a `list`: it walks its dataloader once per
+            modality/latent space).
+        input_subsets: Which modality subsets to feed as `inputs`, each an
+            iterable of modality names (a key of `model.encoders`). `None`
+            (default) resolves via `resolveDefaultInputSubsets`.
+        device: Batches are moved here before the forward pass. Defaults to
+            `model`'s own device.
+        use_mean: Forwarded to `GlobalVae.forward`. `True` (default,
+            matching `evaluation.evaluate`'s own default, unlike
+            `collectReconstructions`, which never sets it): deterministic
+            reconstructions from the posterior mean, so a difference
+            between two cells of the resulting matrix reflects which
+            modalities were available, not sampling noise.
+        max_samples: Stop collecting a given subset once it has at least
+            this many samples (the last batch may slightly overshoot before
+            being trimmed), tracked independently per subset. `None`
+            (default) collects the entire dataloader for every subset.
+
+    Returns:
+        Input subset (as `frozenset[str]`, matching the entries of
+        `input_subsets`) -> decoder name -> `(originals, reconstructions)`,
+        each shape `(N, ...)` matching that decoder's own tensor shape, on
+        CPU. A `(subset, decoder)` pair that never had both a reconstruction
+        and a matching ground-truth batch key across the whole dataloader is
+        simply absent from that subset's dict, not raised as an error,
+        mirroring `GlobalVae.forward`'s own "absent, not an error" handling
+        of a latent space or decoder with no available input this pass.
+
+    Raises:
+        ValueError: If `dataloader` yields no batches, if `input_subsets`
+            (or its default) resolves to no subsets at all, or if any given
+            subset is empty or references a name absent from
+            `model.encoders`.
+    """
+    resolved_subsets = (
+        [frozenset(subset) for subset in input_subsets]
+        if input_subsets is not None
+        else resolveDefaultInputSubsets(model)
+    )
+    if not resolved_subsets:
+        raise ValueError(
+            "collectCrossModalReconstructions requires at least one input subset, but "
+            "none were given: input_subsets was empty, or resolveDefaultInputSubsets(model) "
+            "produced none (model has no encoders)."
+        )
+    known_names = set(model.encoders)
+    for subset in resolved_subsets:
+        if not subset:
+            raise ValueError("collectCrossModalReconstructions received an empty subset.")
+        unknown = subset - known_names
+        if unknown:
+            raise ValueError(
+                f"input_subsets references unknown modality name(s) {sorted(unknown)}. "
+                f"Available: {sorted(known_names)}."
+            )
+
+    resolved_device = device if device is not None else next(model.parameters()).device
+    collected_originals: dict[frozenset[str], dict[str, list[torch.Tensor]]] = {
+        subset: {} for subset in resolved_subsets
+    }
+    collected_reconstructions: dict[frozenset[str], dict[str, list[torch.Tensor]]] = {
+        subset: {} for subset in resolved_subsets
+    }
+    totals: dict[frozenset[str], int] = dict.fromkeys(resolved_subsets, 0)
+    num_batches = 0
+
+    with torch.no_grad():
+        for raw_batch in dataloader:
+            batch = {name: tensor.to(resolved_device) for name, tensor in raw_batch.items()}
+            num_batches += 1
+
+            for subset in resolved_subsets:
+                if max_samples is not None and totals[subset] >= max_samples:
+                    continue
+                restricted = {name: tensor for name, tensor in batch.items() if name in subset}
+                if not restricted:
+                    continue
+                outputs = model(restricted, use_mean=use_mean)
+                for decoder_name, reconstruction in outputs["reconstructions"].items():
+                    if decoder_name not in batch:
+                        continue
+                    collected_originals[subset].setdefault(decoder_name, []).append(
+                        batch[decoder_name].cpu()
+                    )
+                    collected_reconstructions[subset].setdefault(decoder_name, []).append(
+                        reconstruction.cpu()
+                    )
+                totals[subset] += next(iter(restricted.values())).shape[0]
+
+            if max_samples is not None and all(
+                totals[subset] >= max_samples for subset in resolved_subsets
+            ):
+                break
+
+    if num_batches == 0:
+        raise ValueError(
+            "collectCrossModalReconstructions received an empty dataloader: at least "
+            "one batch is required."
+        )
+
+    result: dict[frozenset[str], dict[str, tuple[torch.Tensor, torch.Tensor]]] = {}
+    for subset in resolved_subsets:
+        per_decoder: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        for decoder_name, original_chunks in collected_originals[subset].items():
+            originals = torch.cat(original_chunks, dim=0)
+            reconstructions = torch.cat(collected_reconstructions[subset][decoder_name], dim=0)
+            if max_samples is not None:
+                originals = originals[:max_samples]
+                reconstructions = reconstructions[:max_samples]
+            per_decoder[decoder_name] = (originals, reconstructions)
+        result[subset] = per_decoder
+    return result
+
+
+def _formatSubsetLabel(subset: frozenset[str]) -> str:
+    """Human-readable label for an input-modality subset, e.g. `"image + signal"`.
+
+    Args:
+        subset: A non-empty set of modality names.
+
+    Returns:
+        Every name in `subset`, sorted, joined with `" + "`.
+    """
+    return " + ".join(sorted(subset))
+
+
+def plotCrossModalReconstructionMatrix(
+    collected: dict[frozenset[str], dict[str, tuple[torch.Tensor, torch.Tensor]]],
+    example_index: int = 0,
+    row_order: Sequence[frozenset[str]] | None = None,
+    column_order: Sequence[str] | None = None,
+    inverse_transform: dict[str, InverseTransform] | None = None,
+    x_values: dict[str, torch.Tensor] | None = None,
+    title: str | None = None,
+    original_label: str = "original",
+    reconstruction_label: str = "reconstruction",
+    xlabel: str = "index",
+    ylabel: str = "value",
+    figsize_per_plot: tuple[float, float] = (4.0, 2.5),
+) -> Figure:
+    """Lay out every (input subset, decoder) cell of `collected` as a grid of
+    original/reconstruction overlays (spec §5).
+
+    Rows are input-modality subsets (`collected`'s keys); columns are every
+    decoder name appearing in any of them. A cell is left blank (axis turned
+    off, matching `plotReconstructionGrid`'s own convention for unused grid
+    positions) wherever `collected[subset]` has no entry for that column's
+    decoder, e.g. because that (subset, decoder) pair never appeared
+    together in the dataloader `collectCrossModalReconstructions` was run
+    over.
+
+    Args:
+        collected: As returned by `collectCrossModalReconstructions` (or any
+            dict shaped the same way, e.g. hand-built for a single cell).
+        example_index: Which sample (row index into every collected tensor)
+            to plot; the same index is used in every cell, so every cell
+            shows the exact same underlying example under a different input
+            condition.
+        row_order: Explicit row order. `None` (default) sorts `collected`'s
+            keys by `_formatSubsetLabel` for a stable, readable order
+            (alphabetical; a subset sorts before any of its supersets,
+            since its label is always a prefix of theirs).
+        column_order: Explicit column order (decoder names). `None`
+            (default) is every decoder name appearing in any subset,
+            sorted.
+        inverse_transform: Decoder name -> callable applied to both the
+            original and the reconstruction of that column before plotting
+            (matching `evaluation.visual_export.exportEvaluationFigures`'s
+            own `inverse_transforms` convention), since different columns
+            can be different modalities with different preprocessing.
+            `None` (default), or a decoder name absent from this dict,
+            plots that column's raw model-space values unchanged.
+        x_values: As `inverse_transform`: decoder name -> x-axis
+            coordinates for that column.
+        title: Optional whole-figure title (`fig.suptitle`).
+        original_label: As in `plotReconstruction`.
+        reconstruction_label: As in `plotReconstruction`.
+        xlabel: As in `plotReconstruction`.
+        ylabel: As in `plotReconstruction`.
+        figsize_per_plot: Figure size of *one* subplot; the overall figure
+            size scales with the grid shape.
+
+    Returns:
+        The matplotlib `Figure`.
+
+    Raises:
+        ValueError: If `collected` is empty, or if `example_index` is out
+            of range for some cell actually being plotted.
+    """
+    if not collected:
+        raise ValueError("plotCrossModalReconstructionMatrix received an empty `collected`.")
+
+    resolved_rows = (
+        list(row_order) if row_order is not None else sorted(collected, key=_formatSubsetLabel)
+    )
+    all_decoders = {name for per_decoder in collected.values() for name in per_decoder}
+    resolved_columns = list(column_order) if column_order is not None else sorted(all_decoders)
+
+    nrows, ncols = len(resolved_rows), len(resolved_columns)
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(figsize_per_plot[0] * ncols, figsize_per_plot[1] * nrows),
+        squeeze=False,
+    )
+    if title:
+        fig.suptitle(title)
+
+    for row_index, subset in enumerate(resolved_rows):
+        for col_index, decoder_name in enumerate(resolved_columns):
+            ax = axes[row_index][col_index]
+            entry = collected[subset].get(decoder_name)
+            if entry is None:
+                ax.axis("off")
+                continue
+
+            original, reconstruction = entry
+            if not (0 <= example_index < original.shape[0]):
+                raise ValueError(
+                    f"example_index={example_index} is out of range for "
+                    f"collected[{sorted(subset)}][{decoder_name!r}], which has "
+                    f"{original.shape[0]} example(s)."
+                )
+
+            resolved_inverse = (
+                inverse_transform.get(decoder_name) if inverse_transform is not None else None
+            )
+            resolved_x = x_values.get(decoder_name) if x_values is not None else None
+            cell_title = f"in: {_formatSubsetLabel(subset)} -> out: {decoder_name}"
+            _plotOnePair(
+                ax,
+                original[example_index],
+                reconstruction[example_index],
+                resolved_inverse,
+                resolved_x,
+                original_label,
+                reconstruction_label,
+                xlabel,
+                ylabel,
+                cell_title,
+            )
+
+    fig.tight_layout()
+    return fig

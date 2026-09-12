@@ -15,12 +15,16 @@ import pytest
 
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import saveCheckpoint
-from tests.integration._script_fixtures import buildModelForScript
+from tests.integration._script_fixtures import buildModelForScript, buildTwoModalityModelForScript
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "evaluate.py"
 
 _MODEL_FACTORY = "tests.integration._script_fixtures:buildModelForScript"
 _DATALOADER_FACTORY = "tests.integration._script_fixtures:buildDataloaderForScript"
+_TWO_MODALITY_MODEL_FACTORY = "tests.integration._script_fixtures:buildTwoModalityModelForScript"
+_TWO_MODALITY_DATALOADER_FACTORY = (
+    "tests.integration._script_fixtures:buildTwoModalityDataloaderForScript"
+)
 
 
 def _loadScriptModule() -> ModuleType:
@@ -40,6 +44,14 @@ def script() -> ModuleType:
 def checkpoint_path(tmp_path: Path) -> Path:
     model = buildModelForScript()
     path = tmp_path / "model.pt"
+    saveCheckpoint(path, model=model)
+    return path
+
+
+@pytest.fixture
+def two_modality_checkpoint_path(tmp_path: Path) -> Path:
+    model = buildTwoModalityModelForScript()
+    path = tmp_path / "two_modality_model.pt"
     saveCheckpoint(path, model=model)
     return path
 
@@ -157,3 +169,50 @@ class TestMain:
     def test_missing_required_argument_raises_system_exit(self, script: ModuleType) -> None:
         with pytest.raises(SystemExit):
             script.main(["--checkpoint", "somewhere.pt"])
+
+
+class TestCrossModalFigures:
+    """`scripts/evaluate.py`'s opt-in `exportCrossModalFigures` call (spec §5,
+    `docs/adr/0016-cross-modal-reconstruction-reporting.md`): only writes a figure
+    for a model with more than one modality.
+    """
+
+    def test_two_modality_model_writes_a_cross_modal_figure(
+        self, script: ModuleType, two_modality_checkpoint_path: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "results"
+        script.main(
+            [
+                "--checkpoint",
+                str(two_modality_checkpoint_path),
+                "--model-factory",
+                _TWO_MODALITY_MODEL_FACTORY,
+                "--dataloader-factory",
+                _TWO_MODALITY_DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
+        assert (output_dir / "cross_modal_reconstructions.png").exists()
+
+    def test_single_modality_model_writes_no_cross_modal_figure(
+        self, script: ModuleType, checkpoint_path: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "results"
+        script.main(
+            [
+                "--checkpoint",
+                str(checkpoint_path),
+                "--model-factory",
+                _MODEL_FACTORY,
+                "--dataloader-factory",
+                _DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
+        assert not (output_dir / "cross_modal_reconstructions.png").exists()

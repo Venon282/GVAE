@@ -3,7 +3,10 @@
 
 Loads a checkpoint into a model built by a user-supplied factory function, evaluates it
 against a user-supplied test-dataloader factory function, prints a summary, and
-optionally saves a JSON report and reconstruction/latent-space figures.
+optionally saves a JSON report and reconstruction/latent-space figures, plus a
+cross-modal reconstruction matrix (spec §5,
+`docs/adr/0016-cross-modal-reconstruction-reporting.md`) for any model with more
+than one modality.
 
 Model construction and data loading stay the caller's own responsibility everywhere
 else in this framework (data pipeline concerns are explicitly out of scope; no config
@@ -39,6 +42,7 @@ from pathlib import Path
 
 import torch
 
+from global_vae.evaluation.cross_modal import exportCrossModalFigures
 from global_vae.evaluation.evaluate import evaluate
 from global_vae.evaluation.visual_export import exportEvaluationFigures
 from global_vae.models.global_vae import GlobalVae
@@ -156,6 +160,12 @@ def main(argv: list[str] | None = None) -> None:
                 device=resolved_device,
                 max_examples=args.max_examples,
                 latent_projection_method=args.latent_projection_method,
+            )
+            # No-op for a single-modality model (spec §6.1 milestone 1): see
+            # exportCrossModalFigures's own docstring and
+            # docs/adr/0016-cross-modal-reconstruction-reporting.md.
+            figure_paths += exportCrossModalFigures(
+                model, dataloader, args.output_dir, device=resolved_device
             )
             logger.info("Saved %d figure(s) to '%s'.", len(figure_paths), args.output_dir)
 

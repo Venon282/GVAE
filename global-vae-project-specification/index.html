@@ -1,0 +1,1910 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A modular, extensible multimodal Variational Autoencoder framework.">
+      
+      
+      
+      
+        <link rel="prev" href="../getting-started/">
+      
+      
+        <link rel="next" href="../how-to/add-a-modality/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Project Specification - Global Multimodal VAE</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#global-multimodal-vae-project-specification" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Global Multimodal VAE" class="md-header__button md-logo" aria-label="Global Multimodal VAE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Global Multimodal VAE
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Project Specification
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Venon282/GVAE" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GVAE
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../how-to/add-a-modality/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../adr/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture Decisions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../reference/global_vae/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Global Multimodal VAE" class="md-nav__button md-logo" aria-label="Global Multimodal VAE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Global Multimodal VAE
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Venon282/GVAE" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GVAE
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Specification
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-language-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Language &amp; conventions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-vision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Vision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-core-architectural-principle-three-independent-axes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Core architectural principle: three independent axes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Core architectural principle: three independent axes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-configuration-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Configuration matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-latent-routing-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Latent routing graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-latent-regularization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Latent regularization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-glossary-keep-consistent-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Glossary (keep consistent everywhere)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-fusion-strategies-encoder-latent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Fusion strategies (encoder -&gt; latent)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-missing-modality-robustness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Missing-modality robustness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-data-modality-roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Data modality roadmap
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Data modality roadmap">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-near-term-milestones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Near-term milestones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-generic-data-transforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Generic data transforms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-long-term-direction-not-built-now-but-not-blocked-either" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Long-term direction (not built now, but not blocked either)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-repository-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Repository structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-illustrative-config-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Illustrative config examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-coding-standards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Coding standards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-open-questions-deliberately-deferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Open questions (deliberately deferred)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-how-future-claude-conversations-should-use-this-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. How future Claude conversations should use this document
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/add-a-modality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a new modality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/add-a-strategy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a fusion / assembler / regularizer / transform / schedule
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/train/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Train a model (Hydra config)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate and visualize a checkpoint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../reference/global_vae/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#0-language-conventions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        0. Language &amp; conventions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-vision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Vision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-core-architectural-principle-three-independent-axes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Core architectural principle: three independent axes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Core architectural principle: three independent axes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-configuration-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Configuration matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-latent-routing-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Latent routing graph
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-latent-regularization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Latent regularization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-glossary-keep-consistent-everywhere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Glossary (keep consistent everywhere)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-fusion-strategies-encoder-latent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Fusion strategies (encoder -&gt; latent)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-missing-modality-robustness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Missing-modality robustness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-data-modality-roadmap" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Data modality roadmap
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Data modality roadmap">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-near-term-milestones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 Near-term milestones
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-generic-data-transforms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Generic data transforms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-long-term-direction-not-built-now-but-not-blocked-either" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Long-term direction (not built now, but not blocked either)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-repository-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Repository structure
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-illustrative-config-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Illustrative config examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-coding-standards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Coding standards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-open-questions-deliberately-deferred" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Open questions (deliberately deferred)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-how-future-claude-conversations-should-use-this-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. How future Claude conversations should use this document
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="global-multimodal-vae-project-specification">Global Multimodal VAE: Project Specification<a class="headerlink" href="#global-multimodal-vae-project-specification" title="Permanent link">&para;</a></h1>
+<p><strong>Status:</strong> living document, v0.1. Refine as decisions evolve.
+<strong>Purpose:</strong> this document is the ground-truth context for the Global VAE project. Any Claude conversation working on this project should treat it as authoritative. When something here is ambiguous or missing, ask rather than assume.</p>
+<hr />
+<h2 id="0-language-conventions">0. Language &amp; conventions<a class="headerlink" href="#0-language-conventions" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Conversations about the project may happen in any language (typically French).</li>
+<li>All code, docstrings, comments, config keys, commit messages, and technical documentation <strong>must be written in English</strong> (research/industry standard, needed for eventual publication and collaboration).</li>
+</ul>
+<hr />
+<h2 id="1-vision">1. Vision<a class="headerlink" href="#1-vision" title="Permanent link">&para;</a></h2>
+<p>Build a <strong>modular, extensible multimodal Variational Autoencoder framework</strong> capable of ingesting and reconstructing arbitrary data modalities: not a model for two fixed data types, but an architecture designed from day one so that adding a new modality never requires touching the core.</p>
+<p>Context: research project with both industrial and academic ambitions. No artificial ceiling on complexity: the framework should be able to evolve toward richer generative architectures (hierarchical/sequential latents, discrete codes, autoregressive priors) if the research direction moves toward world-model-like or LLM-adjacent systems. We are not building that now, but the core interfaces must not make assumptions that would block it later.</p>
+<p><strong>Starting modalities (Phase 1):</strong>
+1. 1D signals: a generic modality (any scalar series indexed by one variable). 
+2. Images</p>
+<p>Other signal sources (spectroscopy, sensor time series, etc.) should slot into the same "signal" encoder/decoder family later, with only preprocessing differing, not the architecture.</p>
+<p>Everything beyond this is added later through the same extension mechanism, with no special-casing.</p>
+<hr />
+<h2 id="2-core-architectural-principle-three-independent-axes">2. Core architectural principle: three independent axes<a class="headerlink" href="#2-core-architectural-principle-three-independent-axes" title="Permanent link">&para;</a></h2>
+<p>The model is not one fixed architecture: it's a <strong>configuration space</strong> along three independent binary axes, instantiated from config at model-creation time.</p>
+<table>
+<thead>
+<tr>
+<th>Axis</th>
+<th>Option A</th>
+<th>Option B</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Encoder(s)</strong></td>
+<td>Several: one specialized encoder per modality</td>
+<td>Single: one shared/unified encoder ingesting all modalities</td>
+</tr>
+<tr>
+<td><strong>Latent space(s)</strong></td>
+<td>Single: exactly one latent code for the whole model</td>
+<td>Several: independent latent spaces connected to encoders and decoders through a configurable routing graph (see §2.2)</td>
+</tr>
+<tr>
+<td><strong>Decoder(s)</strong></td>
+<td>Several: one specialized decoder per modality</td>
+<td>Single: one shared decoder producing all outputs</td>
+</tr>
+</tbody>
+</table>
+<p>This gives 8 valid configurations. None is "the" architecture: all must remain selectable via config.</p>
+<h3 id="21-configuration-matrix">2.1 Configuration matrix<a class="headerlink" href="#21-configuration-matrix" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Encoders</th>
+<th>Latent</th>
+<th>Decoders</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>E1‑L1‑D1</td>
+<td>single shared</td>
+<td>single</td>
+<td>single shared</td>
+<td>Fully unified: modalities tokenized/concatenated into one stream in and out.</td>
+</tr>
+<tr>
+<td>E1‑L1‑DN</td>
+<td>single shared</td>
+<td>single</td>
+<td>per‑modality</td>
+<td>Shared trunk, specialized reconstruction heads.</td>
+</tr>
+<tr>
+<td>E1‑LN‑D1</td>
+<td>single shared</td>
+<td>several</td>
+<td>single shared</td>
+<td>One backbone fans out to several independent latent heads; the single decoder consumes them through an assembler (§2.2).</td>
+</tr>
+<tr>
+<td>E1‑LN‑DN</td>
+<td>single shared</td>
+<td>several</td>
+<td>per‑modality</td>
+<td>One backbone, several independent latents; each decoder consumes whichever subset the routing graph assigns it.</td>
+</tr>
+<tr>
+<td>EN‑L1‑D1</td>
+<td>per‑modality</td>
+<td>single (fused)</td>
+<td>single shared</td>
+<td>Fusion (§4) combines specialized encoders into one latent; generic decoder.</td>
+</tr>
+<tr>
+<td><strong>EN‑L1‑DN</strong></td>
+<td>per‑modality</td>
+<td>single (fused)</td>
+<td>per‑modality</td>
+<td><strong>Recommended Phase‑1 default</strong>: classic multimodal VAE family (MVAE/MMVAE‑style).</td>
+</tr>
+<tr>
+<td>EN‑LN‑D1</td>
+<td>per‑modality</td>
+<td>several</td>
+<td>single shared</td>
+<td>Specialized encoders feed several independent latents; the single decoder assembles all of them (§2.2).</td>
+</tr>
+<tr>
+<td>EN‑LN‑DN</td>
+<td>per‑modality</td>
+<td>several</td>
+<td>per‑modality</td>
+<td>Most expressive / most flexible: a full routing graph between encoders, latent spaces, and decoders.</td>
+</tr>
+</tbody>
+</table>
+<p>The table above is a simplified overview. For any "several latent spaces" row, the actual topology (which encoder feeds which latent space(s), which decoder consumes which latent space(s), and with what assembler) is a further configuration choice, detailed in §2.2.</p>
+<h3 id="22-latent-routing-graph">2.2 Latent routing graph<a class="headerlink" href="#22-latent-routing-graph" title="Permanent link">&para;</a></h3>
+<p>"Several latent spaces" does not mean a fixed shared/private split. It means the model can have <strong>any number of independent latent spaces</strong>, each with its own posterior, its own prior, and its own egularization term (§2.3), wired to encoders and decoders through a <strong>configurable routing graph</strong>:</p>
+<ul>
+<li><strong>Encoder -&gt; latent.</strong> An encoder produces one <code>(mu, logvar)</code> output; that same output can feed one latent space directly, or several. When it feeds several, each encoder -&gt; latent edge may apply an optional <strong>Latent Head</strong> (identity by default, or a small linear/MLP projection when the target latent space's dimensionality or purpose differs) to adapt the shared encoder output before it becomes that latent space's own parameters. When <em>several encoders</em> feed the <em>same</em> latent space, that's the Fusion problem from §4 (PoE / MoE / concat+MLP / cross-attention), applied to the (optionally head-adapted) outputs. Fusion combines distribution parameters, before sampling.</li>
+<li><strong>Latent -&gt; decoder.</strong> A decoder can consume exactly one latent space, or several. When it consumes several, an <strong>Assembler</strong> combines the already-realized latent vectors into one input tensor. Candidate assemblers: <code>concat</code>, <code>sum</code>, <code>average</code>, <code>weighted_sum</code> (learned per-space weights), and <code>attention</code> (cross-attention over latent vectors, no fixed-dimensionality requirement) . a pluggable registry following the same pattern as Fusion, but operating on realized vectors rather than distribution parameters (no probabilistic machinery needed here: the vectors already exist, this is just merging them for the decoder's input layer).</li>
+</ul>
+<p>This <strong>generalizes</strong> the earlier "shared + private" idea rather than replacing it. Shared+private is just one specific routing graph: all encoders feed a <code>z_shared</code> via Fusion, each encoder also feeds its own untouched <code>z_private_m</code>, and each modality's decoder consumes <code>{z_shared, z_private_m}</code> via <code>concat</code>. The framework supports that topology as <em>one configuration among others</em>, not as the hardcoded meaning of "several latent spaces."</p>
+<p><strong>Constraints to validate at model-construction time:</strong>
+- Every latent space must have at least one encoder feeding it and at least one decoder consuming it: no orphan latent spaces.
+- <code>sum</code> and <code>average</code> assemblers require all their input latent spaces to share the same dimensionality; <code>concat</code> has no such restriction.</p>
+<h3 id="23-latent-regularization">2.3 Latent regularization<a class="headerlink" href="#23-latent-regularization" title="Permanent link">&para;</a></h3>
+<p>KL divergence to a standard normal prior is the default regularization term for a latent space, but it must not be hardcoded as the only option. Each latent space's regularization is a <strong>pluggable strategy</strong> (<code>AbstractLatentRegularizer</code>, registered like Fusion / Assembler / Latent Head), so alternatives . Maximum Mean Discrepancy (WAE-style), free-bits KL, or eventually a learned/autoregressive prior (§7) . can be added without touching the model class.</p>
+<p>The weight applied to a latent space's regularization term (<code>beta</code>) is likewise flexible. The three common patterns below are meant to be expressible through the same config mechanism, not mutually exclusive code paths:
+- a single constant shared by every latent space (simplest, no annealing);
+- a global schedule (e.g. linear warm-up, cyclical annealing) shared by every latent space;
+- a per-latent-space value or schedule, letting different latent spaces (e.g. a shared vs. a private code) be regularized differently.
+<code>losses/regularizers/</code> holds the registry of regularization strategies; the schedule (constant, or a function of training step) is a separate, orthogonal config concern from <em>which</em> regularizer is used for a given latent space.</p>
+<hr />
+<h2 id="3-glossary-keep-consistent-everywhere">3. Glossary (keep consistent everywhere)<a class="headerlink" href="#3-glossary-keep-consistent-everywhere" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Modality</strong>: a data type/source (1D signal, image, ...). A modality may have several concrete datasets (e.g. SAXS is one dataset within the "1D signal" modality).</li>
+<li><strong>Encoder</strong>: network mapping one modality's raw input to distribution parameters (or to features destined for fusion).</li>
+<li><strong>Latent head</strong>: optional per-edge module adapting an encoder's <code>(mu, logvar)</code> output to a specific latent space's dimensionality/purpose, used when that encoder feeds more than one latent space. Identity by default.</li>
+<li><strong>Fusion module</strong>: combines outputs of multiple <em>encoders</em> into a single set of latent distribution parameters, for one given latent space. Operates on distribution parameters, before sampling.</li>
+<li><strong>Latent space</strong>: an independent probabilistic code <code>z_i</code>, with its own posterior, its own prior, and its own regularization term (not necessarily KL divergence, see §2.3). A model has one or several; when several, they are wired to encoders and decoders through the routing graph (§2.2), not a fixed shared/private split.</li>
+<li><strong>Assembler</strong>: combines several already-realized <em>latent vectors</em> into one decoder input (<code>concat</code>, <code>sum</code>, <code>average</code>, <code>weighted_sum</code>, <code>attention</code>, ...). Distinct from Fusion: Fusion acts on distribution parameters before sampling; the Assembler acts on realized vectors after.</li>
+<li><strong>Routing graph</strong>: the bipartite wiring {encoders -&gt; latent spaces} and {latent spaces -&gt; decoders}, set via config, that determines connectivity whenever there is more than one latent space.</li>
+<li><strong>Decoder</strong>: network mapping latent(s) back to a modality-specific reconstruction.</li>
+<li><strong>Transform</strong>: a generic, invertible tensor operation applied as preprocessing/postprocessing (<code>log</code>, <code>standardize</code>, <code>resample</code>, §6.2). Distinct from an Encoder/Decoder: a transform never has learnable parameters and knows nothing about latent spaces; distinct from a Dataset/DataModule: a transform is a pure function of a tensor, with no knowledge of files, pairing, or splits.</li>
+<li><strong>Configuration</strong>: the tuple {encoder cardinality, latent cardinality, decoder cardinality, routing graph, per-latent-space fusion strategy, per-decoder assembler strategy, residual flag} that fully determines a model instance.</li>
+</ul>
+<hr />
+<h2 id="4-fusion-strategies-encoder-latent">4. Fusion strategies (encoder -&gt; latent)<a class="headerlink" href="#4-fusion-strategies-encoder-latent" title="Permanent link">&para;</a></h2>
+<p>No single fusion strategy is hardcoded, and fusion is not a single model-wide choice: it is selected <strong>per latent space</strong>, for whichever latent spaces are fed by more than one encoder (see the routing graph, §2.2). A latent space fed by exactly one encoder needs no fusion strategy at all. Each fusion assignment can optionally use residual connections (a config flag alongside it).</p>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>Idea</th>
+<th>Handles missing modalities natively?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Product-of-Experts (PoE)</strong></td>
+<td>Each modality contributes a Gaussian "expert"; experts are multiplied together (MVAE-style).</td>
+<td>Yes: simply drop the missing expert's term.</td>
+</tr>
+<tr>
+<td><strong>Mixture-of-Experts (MoE)</strong></td>
+<td>Each modality proposes its own latent estimate; a mixture combines them (MMVAE-style).</td>
+<td>Yes: natively subset-tolerant.</td>
+</tr>
+<tr>
+<td><strong>Concatenation + MLP</strong></td>
+<td>Concatenate encoder outputs, project through an MLP. Simple baseline.</td>
+<td>No: needs an explicit imputation/masking strategy if modalities can be missing.</td>
+</tr>
+<tr>
+<td><strong>Cross-attention / transformer fusion</strong></td>
+<td>Treat each modality's encoding as a token; a transformer block fuses them.</td>
+<td>Yes: missing modalities are simply omitted tokens; also the most natural bridge toward the long-term "world model" direction.</td>
+</tr>
+</tbody>
+</table>
+<p>This is implemented as a <strong>strategy pattern</strong>: an <code>AbstractFusion</code> interface with each strategy as a subclass, registered by name (e.g. <code>poe</code>, <code>moe</code>, <code>concat_mlp</code>, <code>cross_attention</code>) so a new one can be added without touching existing code.</p>
+<p>See §2.2 for the symmetric decoder-side mechanism (the Assembler) used when a decoder consumes more than one independent latent space, and for the Latent Head, the analogous mechanism on the encoder side when a single encoder feeds more than one latent space.</p>
+<hr />
+<h2 id="5-missing-modality-robustness">5. Missing-modality robustness<a class="headerlink" href="#5-missing-modality-robustness" title="Permanent link">&para;</a></h2>
+<p>Explicitly desired, but achieved as a <strong>side effect of the fusion strategy choice</strong> rather than as separate machinery:</p>
+<ul>
+<li>Using PoE, MoE, or cross-attention fusion, the model can be trained and queried with any subset of available modalities.</li>
+<li>Recommended training technique: <strong>modality dropout</strong>, randomly hiding one or more modalities per training step so the model learns to be robust to their absence at inference.</li>
+<li>Concatenation-based fusion is the one strategy that does <em>not</em> get this for free; if used with missing modalities it needs an explicit masking/imputation scheme. This should be documented as a known limitation, not silently patched.</li>
+</ul>
+<hr />
+<h2 id="6-data-modality-roadmap">6. Data modality roadmap<a class="headerlink" href="#6-data-modality-roadmap" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Modality</th>
+<th>Notes for encoder/decoder design</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>1D signal (generic), first dataset: SAXS (intensity vs. <em>q</em>)</td>
+<td>Variable-length series. Preprocessing is dataset-specific (e.g. log-scale intensity is standard for SAXS) and must live outside the architecture, in the data pipeline. Candidate encoders: 1D CNN or small transformer over the series.</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Images</td>
+<td>Candidate encoders: CNN (ResNet-style) or ViT, depending on resolution/dataset size.</td>
+</tr>
+<tr>
+<td>3+</td>
+<td>Open-ended (audio, tabular, text, time series, graphs, point clouds, ...)</td>
+<td>Adding a modality = writing one new <code>Encoder</code> + <code>Decoder</code> subclass and registering them. Zero changes to core framework code.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="61-near-term-milestones">6.1 Near-term milestones<a class="headerlink" href="#61-near-term-milestones" title="Permanent link">&para;</a></h3>
+<p>The genericity described above (§1, §6) is a design constraint on the architecture, not the order in which things get built. The concrete build order is:</p>
+<ol>
+<li><strong>A working single-modality signal VAE.</strong> One encoder, one latent space, one decoder . no fusion, no second modality, just <code>signal -&gt; z -&gt; signal</code> . trained end to end on SAXS data, with the ability to inspect training curves and visualize the latent space. This validates the base building blocks (encoder, latent, decoder, losses) in isolation before any multimodal machinery is exercised.</li>
+<li><strong>A paired signal + image setup.</strong> Two datasets (signal, image) that are currently separate get associated into (signal, image) pairs. The exact pairing mechanism (matching by filename/sample-ID convention, or otherwise) is still open (§11). This is what exercises Fusion (§4) and the <code>EN-L1-DN</code> default (§2.1) for the first time.</li>
+<li>Everything else in the roadmap table above (further modalities, richer latent topologies) comes after milestones 1 and 2 are working end to end.
+Future Claude conversations should default to whichever milestone is currently active, rather than jumping straight to the fully general multimodal machinery.</li>
+</ol>
+<h3 id="62-generic-data-transforms">6.2 Generic data transforms<a class="headerlink" href="#62-generic-data-transforms" title="Permanent link">&para;</a></h3>
+<p>Spec §6 already anticipated that preprocessing differs per dataset/modality
+while the architecture does not ("SAXS-specific preprocessing... belongs in
+transforms, not in the encoder"; other signal sources "should slot into the
+same... family later, with only preprocessing differing"). <code>data/transforms/</code>
+is where the framework draws the line between the two:</p>
+<ul>
+<li><strong>Dataset loading, matching/pairing samples across modalities, and
+  train/val/test splitting stay entirely the caller's own responsibility</strong>
+  (<code>DataConfig.loader_factory</code>, §9), permanently, not merely pending an open
+  question. There is no reusable structure to extract from this: how to read
+  a file, how to associate a signal with an image, how to split — all of it
+  is inherently specific to one dataset/user, and a framework-provided
+  <code>datamodule.py</code> would either be a no-op wrapper or would have to guess at
+  dataset-specific behavior. <code>datamodule.py</code> therefore does not exist and is
+  not planned.</li>
+<li><strong>Generic, invertible tensor operations belong in the framework</strong>, because
+  they carry no dataset-specific structure at all: an elementwise log, a
+  normalization by known statistics, a resampling to a fixed grid, are the
+  same operation whether applied to a SAXS curve, a sensor reading, or a
+  pixel value. <code>data/transforms/</code> holds exactly these, following the same
+  <code>AbstractTransform</code> + registry pattern as every other pluggable strategy in
+  this codebase (<code>apply</code>/<code>inverse</code>, self-registered via
+  <code>@registerTransform(name)</code>, e.g. <code>log</code>, <code>standardize</code>, <code>resample</code>), plus
+  <code>ComposeTransform</code> for chaining several into one invertible pipeline.
+  <code>DataConfig.transforms</code> (§9) is a <strong>per-modality</strong> mapping — modality name
+  -&gt; an ordered list of these, by registry name — since two modalities/
+  datasets in the same family (e.g. two different 1D-signal sources, see the
+  roadmap table above) can need entirely different steps and statistics;
+  <code>config.data.buildTransformPipeline</code> resolves it into one composed
+  callable per modality, each one's <code>.inverse</code> directly usable as
+  <code>visualization.reconstruction_plot</code>'s own <code>inverse_transform</code> hook.
+  <code>DataConfig.sequence_length</code> is keyed the same way, per modality. Nothing
+  in this framework calls <code>buildTransformPipeline</code> automatically — a
+  caller's <code>loader_factory</code> may use it, or preprocess data its own way
+  entirely; the framework only provides the reusable operation.</li>
+</ul>
+<p><strong>Hard requirement: every transform in <code>data/transforms/</code> must be fully
+generic across dimensionality.</strong> Data in this framework can be 1D, 2D, 3D,
+multi-channel, or anything else; a transform's behavior with respect to
+shape is expressed only through explicit, caller-supplied parameters (e.g.
+<code>ResampleTransform</code>'s <code>num_spatial_dims</code>), never by hardcoding a
+dimensionality (no separate "1D version" / "2D version" of a transform) or
+by encoding anything specific to one dataset or modality (no "SAXS",
+no modality name, anywhere in this subpackage). A transform whose logic
+cannot be written this way does not belong in <code>data/transforms/</code>; it belongs
+in the caller's own data pipeline, exactly like dataset loading already does.
+This mirrors, and is held to the same standard as, the existing
+architecture-level rule that adding a modality's Encoder/Decoder must never
+require touching the core (§10, §12) — here applied to preprocessing instead
+of model architecture.</p>
+<hr />
+<h2 id="7-long-term-direction-not-built-now-but-not-blocked-either">7. Long-term direction (not built now, but not blocked either)<a class="headerlink" href="#7-long-term-direction-not-built-now-but-not-blocked-either" title="Permanent link">&para;</a></h2>
+<p>Noted so that early interface design doesn't foreclose these later:
+- Hierarchical or sequential/temporal latents (world-model-style state prediction).
+- Discrete/VQ latent codes as an alternative to continuous Gaussian latents.
+- Autoregressive or learned priors over the latent space instead of a fixed standard normal.
+- Scaling toward larger backbones (transformer-heavy encoders/decoders/fusion).</p>
+<p>These are <strong>future directions</strong>, listed to keep core abstractions (encoder/decoder/fusion interfaces, latent representation) general enough to extend without a rewrite, not a commitment to build them now.</p>
+<hr />
+<h2 id="8-repository-structure">8. Repository structure<a class="headerlink" href="#8-repository-structure" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>global-vae/
+├── pyproject.toml
+├── README.md
+├── configs/                     # Hydra/OmegaConf configs
+│   ├── model/
+│   ├── data/
+│   └── experiment/
+├── examples/                     # runnable, self-contained pipeline walkthroughs on
+│   │                             # synthetic data (distinct from scripts/, which need a
+│   │                             # user-supplied factory/config; see examples/README.md)
+├── src/
+│   └── global_vae/
+│       ├── encoders/
+│       │   ├── base.py          # AbstractEncoder interface
+│       │   ├── registry.py
+│       │   ├── signal_encoder.py
+│       │   └── image_encoder.py
+│       ├── decoders/
+│       │   ├── base.py          # AbstractDecoder interface
+│       │   ├── registry.py
+│       │   ├── signal_decoder.py
+│       │   └── image_decoder.py
+│       ├── fusion/
+│       │   ├── base.py          # AbstractFusion interface
+│       │   ├── registry.py
+│       │   ├── poe.py
+│       │   ├── moe.py
+│       │   ├── concat_mlp.py
+│       │   └── cross_attention.py
+│       ├── heads/
+│       │   ├── base.py          # AbstractLatentHead interface
+│       │   ├── registry.py
+│       │   ├── identity.py      # default: no-op passthrough
+│       │   └── linear.py        # small learned projection between an encoder output and a latent space
+│       ├── assemblers/
+│       │   ├── base.py          # AbstractAssembler interface
+│       │   ├── registry.py
+│       │   ├── concat.py
+│       │   ├── sum.py
+│       │   ├── average.py
+│       │   ├── weighted_sum.py
+│       │   └── attention.py
+│       ├── latent/
+│       │   ├── base.py          # LatentSpace, RoutingGraph, validateRoutingGraph
+│       │   ├── single.py        # preset: one latent space feeding every decoder
+│       │   └── shared_private.py # preset: shared + private latent spaces
+│       ├── models/
+│       │   └── global_vae.py    # assembles encoders + heads + fusion + latent + decoders from a routing graph
+│       ├── losses/
+│       │   ├── reconstruction.py
+│       │   └── regularizers/
+│       │       ├── base.py      # AbstractLatentRegularizer interface
+│       │       ├── registry.py
+│       │       └── kl_standard_normal.py  # default strategy
+│       ├── data/
+│       │   ├── datamodule.py    # NOT built, and not planned: see §6.2 (permanent scope boundary)
+│       │   └── transforms/      # AbstractTransform interface + registry: log, standardize, resample (§6.2)
+│       ├── training/
+│       │   └── trainer.py       # raw PyTorch loop for now (see §10); Lightning/Fabric later
+│       └── utils/
+├── tests/
+│   ├── unit/
+│   └── integration/              # end-to-end test for each of the 8 configurations
+├── notebooks/
+├── scripts/
+└── docs/
+</code></pre></div>
+<hr />
+<h2 id="9-illustrative-config-examples">9. Illustrative config examples<a class="headerlink" href="#9-illustrative-config-examples" title="Permanent link">&para;</a></h2>
+<p>Not final: these show how the registry + config-driven pattern is meant to operate in practice, matching <code>GlobalVae</code>'s two constructors (<code>__init__</code> with an explicit <code>RoutingGraph</code>, and the <code>createSingleLatent()</code> convenience wrapper; see <code>models/global_vae.py</code> and ADR 0002).</p>
+<p><strong>Single latent space</strong> (<code>GlobalVae.createSingleLatent</code>, the <code>EN-L1-DN</code> Phase-1 default):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">model</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">global_vae</span>
+<span class="w">  </span><span class="nt">modalities</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">signal</span><span class="p">:</span><span class="w">                    </span><span class="c1"># first concrete dataset for this modality: SAXS</span>
+<span class="w">      </span><span class="nt">encoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signal_cnn_v1</span>
+<span class="w">      </span><span class="nt">decoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signal_cnn_v1</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">encoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet_encoder_v1</span>
+<span class="w">      </span><span class="nt">decoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet_decoder_v1</span>
+<span class="w">  </span><span class="nt">latent</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">single</span><span class="w">              </span><span class="c1"># single | several</span>
+<span class="w">    </span><span class="nt">dim</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">128</span>
+<span class="w">    </span><span class="nt">fusion</span><span class="p">:</span><span class="w">                   </span><span class="c1"># only meaningful because this latent space is fed by 2 encoders</span>
+<span class="w">      </span><span class="nt">strategy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">poe</span><span class="w">            </span><span class="c1"># poe | moe | concat_mlp | cross_attention</span>
+<span class="w">      </span><span class="nt">residual</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">training</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">beta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linear_warmup</span><span class="w">       </span><span class="c1"># constant | schedule name | per-space dict (see §2.3)</span>
+<span class="w">    </span><span class="nt">modality_dropout_p</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.15</span><span class="w">  </span><span class="c1"># trains robustness to missing modalities</span>
+</code></pre></div>
+<p><strong>Several independent latent spaces, no encoder fan-out</strong> (<code>GlobalVae.__init__</code> with an explicit <code>RoutingGraph</code>; this pattern works end to end today, verified against ADR 0002):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">model</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">global_vae</span>
+<span class="w">  </span><span class="nt">modalities</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">signal</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">encoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signal_cnn_v1</span>
+<span class="w">      </span><span class="nt">decoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">joint_decoder_v1</span><span class="w">        </span><span class="c1"># shares a decoder with image: its own key, not "signal"</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">encoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet_encoder_v1</span>
+<span class="w">      </span><span class="nt">decoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">joint_decoder_v1</span>
+<span class="w">  </span><span class="nt">latent</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">several</span>
+<span class="w">    </span><span class="nt">spaces</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">z_signal</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">dim</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">128</span>
+<span class="w">        </span><span class="nt">fed_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">signal</span><span class="p p-Indicator">]</span><span class="w">                </span><span class="c1"># exactly one encoder: no fusion needed</span>
+<span class="w">      </span><span class="nt">z_image</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">dim</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">128</span>
+<span class="w">        </span><span class="nt">fed_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">image</span><span class="p p-Indicator">]</span><span class="w">                 </span><span class="c1"># exactly one encoder: no fusion needed</span>
+<span class="w">    </span><span class="nt">decoders_consume</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">joint</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">spaces</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">z_signal</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">z_image</span><span class="p p-Indicator">],</span><span class="nt"> assembler</span><span class="p">:</span><span class="w"> </span><span class="nv">concat</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">training</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">beta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linear_warmup</span><span class="w">       </span><span class="c1"># constant | schedule name | per-space dict (see §2.3)</span>
+<span class="w">    </span><span class="nt">modality_dropout_p</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.15</span>
+</code></pre></div>
+<p><strong>Shared plus private latent spaces</strong> (<code>latent/shared_private.py</code>'s preset . the encoder fan-out case, resolved via the Latent Head, §2.2):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">model</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">global_vae</span>
+<span class="w">  </span><span class="nt">modalities</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">signal</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">encoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signal_cnn_v1</span>
+<span class="w">      </span><span class="nt">decoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signal_cnn_v1</span>
+<span class="w">    </span><span class="nt">image</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">encoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet_encoder_v1</span>
+<span class="w">      </span><span class="nt">decoder</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">resnet_decoder_v1</span>
+<span class="w">  </span><span class="nt">latent</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">several</span>
+<span class="w">    </span><span class="nt">spaces</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">z_shared</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">dim</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">128</span>
+<span class="w">        </span><span class="nt">fed_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">signal</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">image</span><span class="p p-Indicator">]</span><span class="w">        </span><span class="c1"># more than one encoder: needs a fusion strategy</span>
+<span class="w">        </span><span class="nt">fusion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">poe</span>
+<span class="w">      </span><span class="nt">z_signal_private</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">dim</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">32</span>
+<span class="w">        </span><span class="nt">fed_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">signal</span><span class="p p-Indicator">]</span><span class="w">                </span><span class="c1"># same encoder as z_shared: this is encoder fan-out</span>
+<span class="w">        </span><span class="nt">head</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linear</span><span class="w">                    </span><span class="c1"># projects the signal encoder's 128-dim output down to 32</span>
+<span class="w">      </span><span class="nt">z_image_private</span><span class="p">:</span>
+<span class="w">        </span><span class="nt">dim</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">32</span>
+<span class="w">        </span><span class="nt">fed_by</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">image</span><span class="p p-Indicator">]</span><span class="w">                  </span><span class="c1"># same encoder as z_shared: this is encoder fan-out</span>
+<span class="w">        </span><span class="nt">head</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linear</span><span class="w">                    </span><span class="c1"># projects the image encoder's 128-dim output down to 32</span>
+<span class="w">    </span><span class="nt">decoders_consume</span><span class="p">:</span>
+<span class="w">      </span><span class="nt">signal</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">spaces</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">z_shared</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">z_signal_private</span><span class="p p-Indicator">],</span><span class="nt"> assembler</span><span class="p">:</span><span class="w"> </span><span class="nv">concat</span><span class="p p-Indicator">}</span>
+<span class="w">      </span><span class="nt">image</span><span class="p">:</span><span class="w">  </span><span class="p p-Indicator">{</span><span class="nt">spaces</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">z_shared</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">z_image_private</span><span class="p p-Indicator">],</span><span class="nt">  assembler</span><span class="p">:</span><span class="w"> </span><span class="nv">concat</span><span class="p p-Indicator">}</span>
+<span class="w">  </span><span class="nt">training</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">beta</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linear_warmup</span><span class="w">            </span><span class="c1"># constant | schedule name | per-space dict (see §2.3)</span>
+<span class="w">    </span><span class="nt">modality_dropout_p</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.15</span>
+</code></pre></div>
+<p><code>signal</code> feeds both <code>z_shared</code> (through Fusion, combined with <code>image</code>) and its own <code>z_signal_private</code>. This is the encoder fan-out case from §2.2: the <code>signal</code> encoder produces one <code>(mu, logvar)</code> pair, and the <code>head: linear</code> on the <code>z_signal_private</code> edge adapts that shared output down to this latent space's own dimensionality (128 -&gt; 32), so the two latent spaces stay genuinely independent instead of accidentally sharing the same values.</p>
+<p><strong>Data preprocessing pipeline</strong> (§6.2, <code>DataConfig.transforms</code>, resolved by <code>config.data.buildTransformPipeline</code>; keyed per modality — docs/adr/0015-per-modality-data-transforms.md — so a second signal dataset never has to share the first's statistics):</p>
+<div class="highlight"><pre><span></span><code><span class="nt">data</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">loader_factory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my_project.data:buildSignalDataloaders</span>
+<span class="w">  </span><span class="nt">train_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">data/raw/train</span>
+<span class="w">  </span><span class="nt">transforms</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">signal</span><span class="p">:</span><span class="w">                       </span><span class="c1"># modality name, matching model.modalities' own keys</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">log</span><span class="w">                 </span><span class="c1"># data.transforms registry key</span>
+<span class="w">        </span><span class="nt">kwargs</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">eps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.0e-6</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">standardize</span>
+<span class="w">        </span><span class="nt">kwargs</span><span class="p">:</span>
+<span class="w">          </span><span class="nt">mean</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0.42</span><span class="w">               </span><span class="c1"># computed from the caller's own training split;</span>
+<span class="w">          </span><span class="nt">std</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1.13</span><span class="w">                </span><span class="c1"># never guessed by this framework (see StandardizeTransform)</span>
+</code></pre></div>
+<p>All of these examples are illustrative, not final: the actual schema still needs validation logic and a Hydra/dataclass binding (§11).</p>
+<hr />
+<h2 id="10-coding-standards">10. Coding standards<a class="headerlink" href="#10-coding-standards" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Language/runtime:</strong> Python 3.11+, PyTorch (latest stable).</li>
+<li><strong>Formatting/linting:</strong> <code>ruff</code> (lint + format), consistent import ordering.</li>
+<li><strong>Naming convention (custom, overrides PEP8 default for callables):</strong></li>
+<li>Classes -&gt; <code>CamelCase</code> (e.g. <code>GlobalVae</code>, <code>SignalEncoder</code>, <code>ProductOfExperts</code>).</li>
+<li>Variables -&gt; <code>snake_case</code> (e.g. <code>latent_dim</code>, <code>batch_size</code>).</li>
+<li>Functions and methods -&gt; same rule as classes but starting lowercase, i.e. <code>camelCase</code> (e.g. <code>computeLoss</code>, <code>encodeSignal</code>, <code>registerEncoder</code>), not PEP8's usual <code>snake_case</code> for callables.</li>
+<li>Property not calculated -&gt; snake_case</li>
+<li>Since this deviates from PEP8, disable/adjust <code>ruff</code>'s naming rules (<code>N802</code>, <code>N803</code>, <code>N806</code>) in <code>pyproject.toml</code> and note the exception in the contributor docs, so linting doesn't silently "fix" it back to snake_case later.</li>
+<li><strong>Typography:</strong> no em dashes (<code>—</code>) and in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead. This is a house style rule, not a technical one, so there is no linter for it; review for it like any other style note. Same for the arrows (<code>→</code>) you can use <code>-&gt;</code> instead</li>
+<li><strong>Typing:</strong> type hints mandatory everywhere; <code>mypy</code> run in CI.</li>
+<li><strong>Docstrings:</strong> Google-style, mandatory on every public class/function: purpose, <code>Args</code>, <code>Returns</code>, <code>Raises</code>.</li>
+<li><strong>Modularity:</strong> one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers/heads/regularizers/transforms. No god-files: a base class, its registry, and every concrete strategy each get their own file (see <code>fusion/</code>, <code>assemblers/</code>, <code>heads/</code>, <code>losses/regularizers/</code>, <code>data/transforms/</code>).</li>
+<li><strong>Interfaces:</strong> <code>AbstractEncoder</code>, <code>AbstractDecoder</code>, <code>AbstractFusion</code>, <code>AbstractAssembler</code>, <code>AbstractLatentHead</code>, <code>AbstractLatentRegularizer</code>, <code>AbstractTransform</code> as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (<code>@registerEncoder("signal")</code>); this is what makes "add a modality without touching the core" actually true, not just aspirational.</li>
+<li><strong>Registry population:</strong> a class decorated with <code>@registerX(...)</code> is only registered once its module has actually been imported. Each registry-based subpackage's <code>__init__.py</code> must import every concrete implementation for that side effect (<code>import global_vae.assemblers.concat  # noqa: F401</code>, one line per file), or <code>getXClass(name)</code> raises <code>KeyError</code> even though the file exists on disk.</li>
+<li><strong>Routing graph validation:</strong> <code>validateRoutingGraph</code> (<code>latent/base.py</code>) must run at model-construction time for every configuration, not just the Phase-1 default. It rejects orphan latent spaces, rejects a decoder that consumes more than one latent space without an assigned assembler, checks dimensional compatibility for <code>sum</code>/<code>average</code> assemblers, and rejects an encoder -&gt; latent edge whose <code>head</code> output dimension does not match the target latent space's declared <code>dim</code>.</li>
+<li><strong>Latent regularization:</strong> never hardcode <code>LatentSpace.klDivergence</code> (or an equivalent KL-only computation) as the only regularization path inside the model class; route it through the <code>AbstractLatentRegularizer</code> registry (§2.3) so alternative strategies (MMD, free-bits, learned priors) can be swapped in via config.</li>
+<li><strong>Data transforms:</strong> never hardcode a preprocessing step (log, normalization, resampling) inline in an encoder, a decoder, or the data pipeline; route it through the <code>AbstractTransform</code> registry (<code>data/transforms/</code>, §6.2) instead, and keep every transform fully generic across dimensionality (§6.2's hard requirement).</li>
+<li><strong>Training loop:</strong> a raw PyTorch loop (<code>training/trainer.py</code>) for now, favoring transparency while the architecture (routing graph, registries) is still actively changing; migrate to PyTorch Lightning (or <code>Lightning Fabric</code> as an intermediate step) once the model design stabilizes and multi-GPU/scaling needs become concrete.</li>
+<li><strong>Config management:</strong> Hydra + structured dataclasses (or Pydantic) for validated, composable configs. No magic strings/dicts scattered through the code.</li>
+<li><strong>Testing:</strong> <code>pytest</code>. Unit tests per module, plus an integration test that instantiates <strong>each of the 8 architecture combinations</strong> end-to-end on dummy tensors (shape and gradient sanity checks). Coverage should target core logic (fusion math, loss correctness, forward/backward pass), not a vanity percentage. This includes, at minimum :</li>
+<li>Unit tests for every self-registration registry (encoders, decoders, fusion, assemblers, regularizers, beta schedules, <strong>data transforms</strong>), covering registration, lookup, and the duplicate/unknown-name error paths.</li>
+<li>Unit tests for the beta-schedule strategies' value correctness (constant, linear warm-up, cyclical annealing, and any further schedule).</li>
+<li>Unit tests for the data transforms (§6.2), <strong>notably their invertibility</strong>: <code>apply</code> then <code>inverse</code> must round-trip to floating-point precision for exact transforms (<code>log</code>, <code>standardize</code>, any composition of them via <code>ComposeTransform</code>), and to a documented, tested tolerance for lossy ones (<code>resample</code>); exercised across more than one dimensionality per transform, per §6.2's genericity requirement.</li>
+<li><strong>No test is required for <code>datamodule.py</code></strong>: per §6.2, it is a permanent scope boundary, not deferred code, so there is nothing to test.</li>
+<li>A <strong>smoke test for the trainer</strong>: a handful of optimizer steps on dummy (non-real) data, verifying that the loss decreases over that short run and that no parameter's gradient is left <code>None</code> after a step.</li>
+<li>An <strong>integration test with the real modules</strong> for spec §6.1 milestone 1 specifically: <code>OneDCnnEncoder</code> + <code>OneDCnnDecoder</code>, assembled via <code>GlobalVae.createSingleLatent</code> with no fusion strategy (single modality), covering forward-pass shapes, gradient flow, and a short trained-end-to-end run where the loss decreases. This is distinct from, and in addition to, the dummy-encoder/decoder <code>EN-L1-DN</code> integration test already required above: dummy modules validate the assembly/routing machinery, this test validates that the actual Phase-1-milestone modules work together correctly.</li>
+<li><strong>Experiment tracking:</strong> Weights &amp; Biases or MLflow, logging losses, latent-space visualizations, and reconstructions per run.</li>
+<li><strong>Reproducibility:</strong> global seed management, deterministic-mode flag documented, config snapshotted with every run.</li>
+<li><strong>Logging:</strong> standard <code>logging</code> module, no bare <code>print</code>.</li>
+<li><strong>Version control:</strong> Conventional Commits, semantic versioning, maintained <code>CHANGELOG.md</code>. Architectural decisions get a new ADR when they change, rather than an old ADR being edited in place (see <code>docs/adr/0002-*.md</code> for an example of one ADR superseding part of another).</li>
+<li><strong>CI:</strong> GitHub Actions running lint, type-check, and tests on every push.</li>
+<li><strong>Documentation:</strong> <code>mkdocs</code> + <code>mkdocstrings</code> built from docstrings; major architectural choices (e.g. "why PoE + MoE + cross-attention", "why a routing graph instead of a fixed shared/private split") recorded as short ADRs (<code>docs/adr/NNNN-title.md</code>).</li>
+<li><strong>New-modality checklist:</strong> adding a modality means (1) subclass <code>Encoder</code>, (2) subclass <code>Decoder</code>, (3) register both, (4) add a config entry, (5) add a test. This keeps the "no limit on data types" promise operational rather than aspirational.</li>
+<li><strong>Flexibility:</strong> The code should be as flexible and generalist as possible so that it can be adapted to suit all users. In other words, avoid hard-coded values that may be significant to the user; instead, define default values. Another example: the signal encoder is not general-purpose, whereas the 1D CNN encoder and the ResNet 1D encoder are</li>
+</ul>
+<hr />
+<h2 id="11-open-questions-deliberately-deferred">11. Open questions (deliberately deferred)<a class="headerlink" href="#11-open-questions-deliberately-deferred" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Exact schema (YAML/dataclass) for expressing the routing graph, the Latent Head assignments, and the regularizer/beta configuration . §2.2, §2.3, and §9 are illustrative, not final; the validation logic (<code>validateRoutingGraph</code> and its Hydra/Pydantic binding, §10) still needs to be written.</li>
+<li>Which assembler operators to implement first: <code>concat</code>, <code>sum</code>, <code>average</code>, <code>weighted_sum</code>, and <code>attention</code> are all wanted (§2.2) . order of implementation is open, but none is deferred indefinitely.</li>
+<li>Which regularizer strategies to implement beyond the default <code>kl_standard_normal</code> (§2.3) . MMD and free-bits KL are candidates; not needed immediately, but the registry should stay open.</li>
+<li>Exact pairing mechanism for the first paired signal+image dataset (§6.1) . matching by filename/sample-ID convention is the likely approach, but the concrete scheme isn't decided yet. (Note: this is a <em>pairing</em> question, i.e. a <code>loader_factory</code> concern, distinct from and not blocking §6.2's generic transforms, which are already implemented and do not depend on how pairing is eventually done.)</li>
+<li>Precise β schedule hyperparameters (warm-up length, cyclical period, per-space values) . the mechanism supports all of this (§2.3); only the actual numbers are still to be tuned empirically once training starts.</li>
+<li>Concrete production/serving target (API serving, batch inference, edge deployment, ...) . in scope longer-term (§1), but sequenced after the model is functionally complete; specific requirements aren't known yet.</li>
+</ul>
+<p><strong>Resolved, no longer open:</strong> whether any part of the data pipeline belongs inside the framework (§6.2). Generic, invertible preprocessing (<code>data/transforms/</code>) does; dataset loading, pairing, and splitting (<code>datamodule.py</code>) permanently does not, for the reasons given in §6.2. This was previously bundled as one deferred item; it is now a settled design decision, not an open question.</p>
+<hr />
+<h2 id="12-how-future-claude-conversations-should-use-this-document">12. How future Claude conversations should use this document<a class="headerlink" href="#12-how-future-claude-conversations-should-use-this-document" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Treat the terminology in §3 as canonical: don't invent new names for the same concepts.</li>
+<li>Any new component (encoder, decoder, fusion strategy, assembler, latent head, regularizer, <strong>data transform</strong>) must follow the registry pattern in §10, not be hardcoded into the model class (or, for transforms, into an encoder/decoder or the data pipeline), and must be added to its subpackage's <code>__init__.py</code> imports so it actually registers.</li>
+<li>Latent spaces are independent by construction: never hardcode a shared/private split as <em>the</em> meaning of "several latent spaces"; always go through the routing graph (§2.2). Fusion is chosen per latent space, not once for the whole model.</li>
+<li>Encoder fan-out to several latent spaces goes through a Latent Head (§2.2), never by giving <code>AbstractEncoder</code> multiple output heads or duplicating the encoder.</li>
+<li>Regularization is never hardcoded to KL-to-standard-normal inside the model class; it goes through the <code>AbstractLatentRegularizer</code> registry (§2.3).</li>
+<li>Data transforms (<code>data/transforms/</code>, §6.2) must stay fully generic across dimensionality (1D/2D/3D/other) and must never encode anything specific to one dataset or modality (e.g. SAXS); modality-specific preprocessing decisions (which transforms, in what order, with what parameters) stay in the caller's own data pipeline, exactly as they always have. <code>datamodule.py</code> is a permanent scope boundary (§6.2), not a pending milestone: do not build it, and do not treat its absence as a gap to fill.</li>
+<li>Build routing graphs through <code>RoutingGraph</code> directly or through a preset in <code>latent/</code> (<code>single.py</code>, <code>shared_private.py</code>, or a new one); never re-derive the same construction inline in a model class.</li>
+<li>Respect the milestone order in §6.1: don't build the fully general multimodal machinery before the single-modality signal VAE (encoder -&gt; latent -&gt; decoder, training + latent visualization) actually works end to end.</li>
+<li>If a request would violate the "no fixed fusion strategy" or "no fixed modality set" principles, flag it rather than silently narrowing the design.</li>
+<li>When a decision in §11 is needed to proceed, ask: don't guess and move on.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2236 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A modular, extensible multimodal Variational Autoencoder framework.">
+      
+      
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../experiment/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>data - Global Multimodal VAE</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../../../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../../../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#global_vaeconfigdata" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../../../.." title="Global Multimodal VAE" class="md-header__button md-logo" aria-label="Global Multimodal VAE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Global Multimodal VAE
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              data
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Venon282/GVAE" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GVAE
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../../global-vae-project-specification/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../../../how-to/add-a-modality/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../../../adr/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture Decisions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../../../.." title="Global Multimodal VAE" class="md-nav__button md-logo" aria-label="Global Multimodal VAE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Global Multimodal VAE
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Venon282/GVAE" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GVAE
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../../global-vae-project-specification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../../how-to/add-a-modality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a new modality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../../how-to/add-a-strategy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a fusion / assembler / regularizer / transform / schedule
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../../how-to/train/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Train a model (Hydra config)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../../how-to/evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate and visualize a checkpoint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../../../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#global_vae.config.data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        data
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="data">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#global_vae.config.data.DataConfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DataConfig
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DataConfig">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#global_vae.config.data.DataConfig.__post_init__" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        __post_init__
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_vae.config.data.DataloaderBundle" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DataloaderBundle
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_vae.config.data.TransformConfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TransformConfig
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_vae.config.data.buildDataloadersFromConfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        buildDataloadersFromConfig
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#global_vae.config.data.buildTransformPipeline" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        buildTransformPipeline
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="global_vaeconfigdata"><code>global_vae.config.data</code><a class="headerlink" href="#global_vaeconfigdata" title="Permanent link">&para;</a></h1>
+
+
+<div class="doc doc-object doc-module">
+
+
+
+<h2 id="global_vae.config.data" class="doc doc-heading">
+            <span class="doc doc-object-name doc-module-name">global_vae.config.data</span>
+
+
+<a href="#global_vae.config.data" class="headerlink" title="Permanent link">&para;</a></h2>
+
+    <div class="doc doc-contents first">
+
+        <p>Structured config schema for the data domain (spec §9, §10 "Config management").</p>
+<p>This module is deliberately a <strong>contract, not an implementation</strong> for dataset
+loading, matching/pairing, and splitting: per this project's explicit scope
+decision, those stay entirely the caller's own responsibility (<code>data/NOTE.md</code>),
+since the concrete format is dataset-specific (spec §6: "preprocessing is
+dataset-specific... and must live outside the architecture"). <code>DataConfig</code>
+describes the <em>shape</em> of that information (paths, batch size, split) so it can
+be captured, validated, and snapshotted alongside the rest of an experiment's
+config (spec §10: "config snapshotted with every run"), but this module never
+reads a file, resamples a series, or builds a <code>torch.utils.data.Dataset</code>
+itself.</p>
+<p>Preprocessing (spec §6.2) is the one part of this boundary that <em>does</em> get
+real, reusable framework code: <code>DataConfig.transforms</code> is a <strong>per-modality</strong>
+mapping, modality name -&gt; ordered list of <code>TransformConfig</code> entries (name +
+kwargs), each resolved through the <code>data.transforms</code> registry exactly like
+every other pluggable strategy in this codebase; <code>buildTransformPipeline</code>
+turns it into one composed, invertible <code>ComposeTransform</code> per modality.
+Per-modality, not one shared pipeline, because spec §6 is explicit that more
+than one dataset can share the 1D-signal encoder/decoder family "with only
+preprocessing differing, not the architecture": a second signal dataset (a
+different instrument, a different sensor) genuinely needs its own <code>log</code>/
+<code>standardize</code> statistics, its own choice of steps, and its own resampled
+length, independently of any other modality/dataset already configured, not
+a single pipeline reused (or, worse, silently misapplied) across all of them.
+Nothing here calls <code>buildTransformPipeline</code> automatically: a caller's own
+<code>loader_factory</code> may call it and apply the resulting per-modality pipelines
+while loading data, or ignore <code>config.transforms</code> entirely and do its own
+thing. Because every <code>data.transforms</code> strategy is itself dimensionality-
+agnostic (<code>data/transforms/base.py</code>), no transform <em>implementation</em> needs to
+know about modalities; the per-modality <em>mapping</em> lives here, one layer up,
+purely so two modalities/datasets can be configured independently. See
+<code>docs/adr/0015-per-modality-data-transforms.md</code>.</p>
+<p>The other piece of indirection that makes this config actually <em>usable</em> end
+to end without the framework owning any data-loading code is <code>loader_factory</code>:
+a <code>"module.path:function_name"</code> reference (the same convention
+<code>scripts/evaluate.py</code> already uses for <code>--model-factory</code>/<code>--dataloader-factory</code>,
+shared via <code>global_vae.utils.imports.importCallable</code>) to a function the
+caller writes themselves, taking this exact <code>DataConfig</code> and returning a
+<code>DataloaderBundle</code>. <code>buildDataloadersFromConfig</code> does nothing but resolve and
+call that reference.</p>
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="global_vae.config.data.DataConfig" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">DataConfig</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#global_vae.config.data.DataConfig" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">DataConfig</span><span class="p">(</span><span class="n">loader_factory</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">MISSING</span><span class="p">,</span> <span class="n">train_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">MISSING</span><span class="p">,</span> <span class="n">val_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">test_path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">32</span><span class="p">,</span> <span class="n">num_workers</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">val_split</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">test_split</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">shuffle_train</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span> <span class="n">transforms</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">list</span><span class="p">[</span><span class="n">TransformConfig</span><span class="p">]]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(),</span> <span class="n">sequence_length</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">int</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">seed</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>Data configuration contract (spec §6: preprocessing/pairing/splitting stays
+outside this framework; this only describes it, except for the reusable
+generic-transform part covered by <code>transforms</code> below, spec §6.2).</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.loader_factory">loader_factory</span></code></td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>"module.path:function_name"</code> pointing at a
+callable the caller writes: <code>(DataConfig) -&gt; DataloaderBundle</code>.
+Required: without it, nothing in this framework can obtain
+actual data, by design.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.train_path">train_path</span></code></td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Path (file, directory, glob, or any string the
+caller's own <code>loader_factory</code> knows how to interpret) to
+the training data. Required.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.val_path">val_path</span></code></td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional explicit validation data path. If <code>None</code>
+and <code>val_split</code> is set, the caller's own <code>loader_factory</code>
+is expected to carve a validation split out of
+<code>train_path</code> instead (this config only records the
+intent; carrying it out is the factory's job).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.test_path">test_path</span></code></td>
+            <td>
+                  <code><span title="str">str</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional explicit test data path, same convention
+as <code>val_path</code>/<code>test_split</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.batch_size">batch_size</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Batch size the caller's <code>loader_factory</code> is
+expected to use.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.num_workers">num_workers</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>torch.utils.data.DataLoader</code>-style worker count,
+forwarded as a plain integer for the caller's own
+<code>loader_factory</code> to use however it sees fit (this
+framework never constructs a <code>DataLoader</code> itself).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.val_split">val_split</span></code></td>
+            <td>
+                  <code><span title="float">float</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Fraction of <code>train_path</code> to hold out for
+validation, if <code>val_path</code> is not given directly. <code>None</code>
+means no validation split.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.test_split">test_split</span></code></td>
+            <td>
+                  <code><span title="float">float</span> | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>As <code>val_split</code>, for a test split.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.shuffle_train">shuffle_train</span></code></td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the training split should be shuffled
+per epoch. Recorded here so it is part of the snapshotted
+config (spec §10) even though this framework never
+shuffles anything itself.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.transforms">transforms</span></code></td>
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="list">list</span>[<a class="autorefs autorefs-internal" title="TransformConfig
+
+
+  
+      dataclass
+   (global_vae.config.data.TransformConfig)" href="#global_vae.config.data.TransformConfig">TransformConfig</a>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Modality name -&gt; ordered list of generic,
+invertible preprocessing steps for that modality (spec
+§6.2), each resolved through the <code>data.transforms</code> registry
+(<code>log</code>, <code>standardize</code>, <code>resample</code>, or any further strategy
+registered there). <code>buildTransformPipeline(config)</code> turns
+this into one composed <code>ComposeTransform</code> per modality;
+nothing in this framework applies any of them automatically
+(see the module docstring). A modality absent from this
+dict simply has no configured pipeline here (a caller may
+still preprocess it however it likes inside its own
+<code>loader_factory</code>; see <code>buildTransformPipeline</code>'s own
+docstring for the exact "absent" contract). Keyed per
+modality, not a flat list, so two modalities/datasets --
+e.g. two different 1D-signal-family datasets, spec §6's own
+example of "only preprocessing differing" -- can each have
+their own steps and statistics without colliding. See
+<code>__post_init__</code> for a Hydra/OmegaConf-specific detail: this
+field's leaf entries are repaired into real <code>TransformConfig</code>
+instances there, since <code>OmegaConf.to_object()</code> does not do so
+itself for a dataclass nested this deep.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.sequence_length">sequence_length</span></code></td>
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="int">int</span>] | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Modality name -&gt; target fixed length after any
+resampling that modality's own <code>loader_factory</code> pipeline
+performs, if that modality's signals are resampled to a
+common grid before being batched (typically via a
+<code>"resample"</code> entry in that modality's own <code>transforms</code> list
+above). A modality absent from this dict, or this field
+left <code>None</code> entirely, means "not applicable" for that
+modality (e.g. images, or a modality already fixed-length).
+Purely informational here: a decoder's own <code>output_length</code>
+(<code>configs/model/*.yaml</code>) must still be set to match this
+value by hand, for that same modality, since
+<code>config/model.py</code> deliberately knows nothing about the data
+domain (see that module's docstring).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataConfig.seed">seed</span></code></td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Seed for any train/val/test split randomization the
+caller's own <code>loader_factory</code> performs. Kept separate from
+<code>ExperimentConfig.seed</code> (spec §10's global seed) so a data
+split can stay fixed across runs that otherwise use
+different global seeds, if desired; defaults to <code>0</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-object doc-function">
+
+
+<h4 id="global_vae.config.data.DataConfig.__post_init__" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">__post_init__</span>
+
+
+<a href="#global_vae.config.data.DataConfig.__post_init__" class="headerlink" title="Permanent link">&para;</a></h4>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">__post_init__</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Repair <code>self.transforms</code>' leaf entries after Hydra/OmegaConf composition.</p>
+<p><code>OmegaConf.to_object()</code> (used by
+<code>global_vae.config.experiment.loadExperimentConfig</code>) does not
+reconstruct a real dataclass instance for a value nested two
+containers deep: <code>transforms</code>'s modality-level <code>dict</code> and each
+modality's own <code>list</code> are both correctly materialized, but each
+individual step inside that list comes back as a plain <code>dict</code>
+(<code>{"name": ..., "kwargs": {...}}</code>) instead of a <code>TransformConfig</code>.
+This is a known limitation of <code>OmegaConf.to_object()</code> with
+dataclasses nested inside <code>Dict[str, List[...]]</code> (it does correctly
+hydrate the single-nesting cases used elsewhere in this codebase,
+e.g. <code>TrainingConfig.beta_schedules: dict[str, BetaScheduleConfig]</code>),
+not a bug in the composed YAML or in this schema's own shape.</p>
+<p>This hook repairs exactly that: any step that is not already a
+<code>TransformConfig</code> is reconstructed as one from its own fields. A
+caller constructing <code>DataConfig(transforms=...)</code> directly in Python
+with real <code>TransformConfig</code> instances (every direct-construction
+call site in this codebase, e.g. in tests) is unaffected: the
+<code>isinstance</code> check makes this a no-op for them.</p>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/global_vae/config/data.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">163</span>
+<span class="normal">164</span>
+<span class="normal">165</span>
+<span class="normal">166</span>
+<span class="normal">167</span>
+<span class="normal">168</span>
+<span class="normal">169</span>
+<span class="normal">170</span>
+<span class="normal">171</span>
+<span class="normal">172</span>
+<span class="normal">173</span>
+<span class="normal">174</span>
+<span class="normal">175</span>
+<span class="normal">176</span>
+<span class="normal">177</span>
+<span class="normal">178</span>
+<span class="normal">179</span>
+<span class="normal">180</span>
+<span class="normal">181</span>
+<span class="normal">182</span>
+<span class="normal">183</span>
+<span class="normal">184</span>
+<span class="normal">185</span>
+<span class="normal">186</span>
+<span class="normal">187</span>
+<span class="normal">188</span>
+<span class="normal">189</span>
+<span class="normal">190</span>
+<span class="normal">191</span>
+<span class="normal">192</span>
+<span class="normal">193</span>
+<span class="normal">194</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Repair `self.transforms`' leaf entries after Hydra/OmegaConf composition.</span>
+
+<span class="sd">    `OmegaConf.to_object()` (used by</span>
+<span class="sd">    `global_vae.config.experiment.loadExperimentConfig`) does not</span>
+<span class="sd">    reconstruct a real dataclass instance for a value nested two</span>
+<span class="sd">    containers deep: `transforms`'s modality-level `dict` and each</span>
+<span class="sd">    modality's own `list` are both correctly materialized, but each</span>
+<span class="sd">    individual step inside that list comes back as a plain `dict`</span>
+<span class="sd">    (`{"name": ..., "kwargs": {...}}`) instead of a `TransformConfig`.</span>
+<span class="sd">    This is a known limitation of `OmegaConf.to_object()` with</span>
+<span class="sd">    dataclasses nested inside `Dict[str, List[...]]` (it does correctly</span>
+<span class="sd">    hydrate the single-nesting cases used elsewhere in this codebase,</span>
+<span class="sd">    e.g. `TrainingConfig.beta_schedules: dict[str, BetaScheduleConfig]`),</span>
+<span class="sd">    not a bug in the composed YAML or in this schema's own shape.</span>
+
+<span class="sd">    This hook repairs exactly that: any step that is not already a</span>
+<span class="sd">    `TransformConfig` is reconstructed as one from its own fields. A</span>
+<span class="sd">    caller constructing `DataConfig(transforms=...)` directly in Python</span>
+<span class="sd">    with real `TransformConfig` instances (every direct-construction</span>
+<span class="sd">    call site in this codebase, e.g. in tests) is unaffected: the</span>
+<span class="sd">    `isinstance` check makes this a no-op for them.</span>
+<span class="sd">    """</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">transforms</span><span class="p">:</span>
+        <span class="k">return</span>
+    <span class="bp">self</span><span class="o">.</span><span class="n">transforms</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="n">modality_name</span><span class="p">:</span> <span class="p">[</span>
+            <span class="n">step</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">step</span><span class="p">,</span> <span class="n">TransformConfig</span><span class="p">)</span> <span class="k">else</span> <span class="n">TransformConfig</span><span class="p">(</span><span class="o">**</span><span class="n">step</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="n">steps</span>
+        <span class="p">]</span>
+        <span class="k">for</span> <span class="n">modality_name</span><span class="p">,</span> <span class="n">steps</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">transforms</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+    <span class="p">}</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="global_vae.config.data.DataloaderBundle" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">DataloaderBundle</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#global_vae.config.data.DataloaderBundle" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">DataloaderBundle</span><span class="p">(</span><span class="n">train</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]],</span> <span class="n">val</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">test</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Tensor</span><span class="p">]]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>What a <code>loader_factory</code> (see <code>DataConfig.loader_factory</code>) must return.</p>
+<p>A plain data carrier, not a framework-provided dataset/loader
+implementation: every field is whatever iterable of
+<code>dict[str, torch.Tensor]</code> batches the caller's own code produces
+(the same convention <code>Trainer</code>/<code>GlobalVae.forward</code> already use
+throughout this framework), most commonly a
+<code>torch.utils.data.DataLoader</code>, but any re-iterable object works.</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataloaderBundle.train">train</span></code></td>
+            <td>
+                  <code><span title="collections.abc.Iterable">Iterable</span>[<span title="dict">dict</span>[<span title="str">str</span>, <span title="torch.Tensor">Tensor</span>]]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Training batches. Required.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataloaderBundle.val">val</span></code></td>
+            <td>
+                  <code><span title="collections.abc.Iterable">Iterable</span>[<span title="dict">dict</span>[<span title="str">str</span>, <span title="torch.Tensor">Tensor</span>]] | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional validation batches, forwarded to
+<code>Trainer.fit</code>'s own <code>val_dataloader</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.DataloaderBundle.test">test</span></code></td>
+            <td>
+                  <code><span title="collections.abc.Iterable">Iterable</span>[<span title="dict">dict</span>[<span title="str">str</span>, <span title="torch.Tensor">Tensor</span>]] | None</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Optional test batches, for a later <code>evaluation.evaluate</code>
+pass (spec's C8 requirement); not consumed by
+<code>scripts/train.py</code> itself.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-class">
+
+
+
+<h3 id="global_vae.config.data.TransformConfig" class="doc doc-heading">
+            <span class="doc doc-object-name doc-class-name">TransformConfig</span>
+
+
+  <span class="doc doc-labels">
+      <small class="doc doc-label doc-label-dataclass"><code>dataclass</code></small>
+  </span>
+
+<a href="#global_vae.config.data.TransformConfig" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">TransformConfig</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="n">MISSING</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">())</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+
+
+        <p>One preprocessing step in one modality's entry of <code>DataConfig.transforms</code>
+(spec §6.2, §9).</p>
+
+
+<p><span class="doc-section-title">Attributes:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.TransformConfig.name">name</span></code></td>
+            <td>
+                  <code><span title="str">str</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>data.transforms</code> registry key, e.g. <code>"log"</code>,
+<code>"standardize"</code>, <code>"resample"</code>.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td><code><span title="global_vae.config.data.TransformConfig.kwargs">kwargs</span></code></td>
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <span title="typing.Any">Any</span>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Forwarded to the transform's constructor (e.g.
+<code>{"eps": 1e-6}</code> for <code>"log"</code>, <code>{"mean": ..., "std": ...}</code>
+for <code>"standardize"</code>).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+
+
+
+
+
+
+
+
+
+<div class="doc doc-children">
+
+
+
+
+
+
+
+
+
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="global_vae.config.data.buildDataloadersFromConfig" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">buildDataloadersFromConfig</span>
+
+
+<a href="#global_vae.config.data.buildDataloadersFromConfig" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">buildDataloadersFromConfig</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">DataConfig</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataloaderBundle</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Resolve <code>config.loader_factory</code> and call it with <code>config</code>.</p>
+<p>The only function in this module with any behavior around
+dataset loading itself, and even this is pure indirection: it
+never loads data itself, it only finds and calls the
+caller-supplied factory function that does. See
+<code>buildTransformPipeline</code> for the one piece of data-domain
+behavior this module does own outright (spec §6.2).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>config</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="DataConfig
+
+
+  
+      dataclass
+   (global_vae.config.data.DataConfig)" href="#global_vae.config.data.DataConfig">DataConfig</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A <code>DataConfig</code>, typically produced by
+<code>global_vae.config.experiment.loadExperimentConfig</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="DataloaderBundle
+
+
+  
+      dataclass
+   (global_vae.config.data.DataloaderBundle)" href="#global_vae.config.data.DataloaderBundle">DataloaderBundle</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whatever <code>DataloaderBundle</code> the resolved <code>loader_factory</code></p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="DataloaderBundle
+
+
+  
+      dataclass
+   (global_vae.config.data.DataloaderBundle)" href="#global_vae.config.data.DataloaderBundle">DataloaderBundle</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>returns.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If <code>config.loader_factory</code> is not a valid
+<code>"module.path:function_name"</code> string (delegated to
+<code>importCallable</code>).</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ModuleNotFoundError">ModuleNotFoundError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the factory's module cannot be
+imported.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="AttributeError">AttributeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the factory function does not exist on that
+module.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="TypeError">TypeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If the resolved factory does not accept a single
+<code>DataConfig</code> positional argument (surfaces at call time,
+from the factory itself).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/global_vae/config/data.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">222</span>
+<span class="normal">223</span>
+<span class="normal">224</span>
+<span class="normal">225</span>
+<span class="normal">226</span>
+<span class="normal">227</span>
+<span class="normal">228</span>
+<span class="normal">229</span>
+<span class="normal">230</span>
+<span class="normal">231</span>
+<span class="normal">232</span>
+<span class="normal">233</span>
+<span class="normal">234</span>
+<span class="normal">235</span>
+<span class="normal">236</span>
+<span class="normal">237</span>
+<span class="normal">238</span>
+<span class="normal">239</span>
+<span class="normal">240</span>
+<span class="normal">241</span>
+<span class="normal">242</span>
+<span class="normal">243</span>
+<span class="normal">244</span>
+<span class="normal">245</span>
+<span class="normal">246</span>
+<span class="normal">247</span>
+<span class="normal">248</span>
+<span class="normal">249</span>
+<span class="normal">250</span>
+<span class="normal">251</span>
+<span class="normal">252</span>
+<span class="normal">253</span>
+<span class="normal">254</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">buildDataloadersFromConfig</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">DataConfig</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataloaderBundle</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">"""Resolve `config.loader_factory` and call it with `config`.</span>
+
+<span class="sd">    The only function in this module with any behavior around</span>
+<span class="sd">    dataset loading itself, and even this is pure indirection: it</span>
+<span class="sd">    never loads data itself, it only finds and calls the</span>
+<span class="sd">    caller-supplied factory function that does. See</span>
+<span class="sd">    `buildTransformPipeline` for the one piece of data-domain</span>
+<span class="sd">    behavior this module does own outright (spec §6.2).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        config: A `DataConfig`, typically produced by</span>
+<span class="sd">            `global_vae.config.experiment.loadExperimentConfig`.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Whatever `DataloaderBundle` the resolved `loader_factory`</span>
+<span class="sd">        returns.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        ValueError: If `config.loader_factory` is not a valid</span>
+<span class="sd">            `"module.path:function_name"` string (delegated to</span>
+<span class="sd">            `importCallable`).</span>
+<span class="sd">        ModuleNotFoundError: If the factory's module cannot be</span>
+<span class="sd">            imported.</span>
+<span class="sd">        AttributeError: If the factory function does not exist on that</span>
+<span class="sd">            module.</span>
+<span class="sd">        TypeError: If the resolved factory does not accept a single</span>
+<span class="sd">            `DataConfig` positional argument (surfaces at call time,</span>
+<span class="sd">            from the factory itself).</span>
+<span class="sd">    """</span>
+    <span class="n">loader_factory</span> <span class="o">=</span> <span class="n">importCallable</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">loader_factory</span><span class="p">)</span>
+    <span class="n">bundle</span><span class="p">:</span> <span class="n">DataloaderBundle</span> <span class="o">=</span> <span class="n">loader_factory</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>  <span class="c1"># type: ignore[operator]</span>
+    <span class="k">return</span> <span class="n">bundle</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h3 id="global_vae.config.data.buildTransformPipeline" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">buildTransformPipeline</span>
+
+
+<a href="#global_vae.config.data.buildTransformPipeline" class="headerlink" title="Permanent link">&para;</a></h3>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">buildTransformPipeline</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">DataConfig</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ComposeTransform</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents ">
+
+        <p>Resolve <code>config.transforms</code> into one composed, invertible pipeline per
+modality (spec §6.2).</p>
+<p>Every configured modality's step list is instantiated via the
+<code>data.transforms</code> registry (<code>getTransformClass</code>, mirroring how every
+other config-driven strategy in this codebase is resolved) and
+chained, in order, into that modality's own <code>ComposeTransform</code>.</p>
+<p>This function is a convenience the caller's own <code>loader_factory</code>,
+or later evaluation/visualization code, <em>may</em> call; nothing in
+this framework calls it automatically (see the module docstring:
+the data pipeline stays the caller's own responsibility). Each
+returned pipeline's <code>.apply</code>/<code>__call__</code> and, in particular,
+<code>.inverse</code> is directly usable wherever this codebase already
+accepts a plain <code>Callable[[Tensor], Tensor]</code> for undoing
+preprocessing, e.g. <code>visualization.reconstruction_plot</code>'s own
+<code>inverse_transform</code> parameter (pass <code>pipelines["signal"].inverse</code>)
+or <code>evaluation.visual_export.exportEvaluationFigures</code>'s
+<code>inverse_transforms</code> dict (the returned dict is already keyed the
+same way that parameter expects: by modality name).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>config</code>
+            </td>
+            <td>
+                  <code><a class="autorefs autorefs-internal" title="DataConfig
+
+
+  
+      dataclass
+   (global_vae.config.data.DataConfig)" href="#global_vae.config.data.DataConfig">DataConfig</a></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>A <code>DataConfig</code>.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Modality name -&gt; <code>ComposeTransform</code> chaining that modality's</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>configured steps in order. A modality with an empty step list</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>(<code>config.transforms[name] == []</code>) gets a <code>ComposeTransform</code></p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>with zero steps, whose <code>.apply</code>/<code>.inverse</code> are both the</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>identity. A modality entirely absent from <code>config.transforms</code></p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>is not a key of the returned dict at all, not an implicit</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>identity entry: <code>DataConfig</code> has no independent notion of</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>which modalities exist in the first place (that list lives in</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>ModelConfig.modalities</code>, a separate config domain, spec §9),</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>so this function cannot invent a key for a modality it was</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>never told about. Callers wanting an explicit identity</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>fallback for an unconfigured modality do so themselves, e.g.</p>
+              </div>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="dict">dict</span>[<span title="str">str</span>, <a class="autorefs autorefs-internal" title="ComposeTransform (global_vae.data.transforms.compose.ComposeTransform)" href="../../data/transforms/compose/#global_vae.data.transforms.compose.ComposeTransform">ComposeTransform</a>]</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p><code>pipelines.get(modality_name, ComposeTransform([]))</code>.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="KeyError">KeyError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If any <code>TransformConfig.name</code> is not a registered
+<code>data.transforms</code> strategy.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+            <details class="mkdocstrings-source">
+              <summary>Source code in <code>src/global_vae/config/data.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">257</span>
+<span class="normal">258</span>
+<span class="normal">259</span>
+<span class="normal">260</span>
+<span class="normal">261</span>
+<span class="normal">262</span>
+<span class="normal">263</span>
+<span class="normal">264</span>
+<span class="normal">265</span>
+<span class="normal">266</span>
+<span class="normal">267</span>
+<span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
+<span class="normal">283</span>
+<span class="normal">284</span>
+<span class="normal">285</span>
+<span class="normal">286</span>
+<span class="normal">287</span>
+<span class="normal">288</span>
+<span class="normal">289</span>
+<span class="normal">290</span>
+<span class="normal">291</span>
+<span class="normal">292</span>
+<span class="normal">293</span>
+<span class="normal">294</span>
+<span class="normal">295</span>
+<span class="normal">296</span>
+<span class="normal">297</span>
+<span class="normal">298</span>
+<span class="normal">299</span>
+<span class="normal">300</span>
+<span class="normal">301</span>
+<span class="normal">302</span>
+<span class="normal">303</span>
+<span class="normal">304</span>
+<span class="normal">305</span>
+<span class="normal">306</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">buildTransformPipeline</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">DataConfig</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ComposeTransform</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Resolve `config.transforms` into one composed, invertible pipeline per</span>
+<span class="sd">    modality (spec §6.2).</span>
+
+<span class="sd">    Every configured modality's step list is instantiated via the</span>
+<span class="sd">    `data.transforms` registry (`getTransformClass`, mirroring how every</span>
+<span class="sd">    other config-driven strategy in this codebase is resolved) and</span>
+<span class="sd">    chained, in order, into that modality's own `ComposeTransform`.</span>
+
+<span class="sd">    This function is a convenience the caller's own `loader_factory`,</span>
+<span class="sd">    or later evaluation/visualization code, *may* call; nothing in</span>
+<span class="sd">    this framework calls it automatically (see the module docstring:</span>
+<span class="sd">    the data pipeline stays the caller's own responsibility). Each</span>
+<span class="sd">    returned pipeline's `.apply`/`__call__` and, in particular,</span>
+<span class="sd">    `.inverse` is directly usable wherever this codebase already</span>
+<span class="sd">    accepts a plain `Callable[[Tensor], Tensor]` for undoing</span>
+<span class="sd">    preprocessing, e.g. `visualization.reconstruction_plot`'s own</span>
+<span class="sd">    `inverse_transform` parameter (pass `pipelines["signal"].inverse`)</span>
+<span class="sd">    or `evaluation.visual_export.exportEvaluationFigures`'s</span>
+<span class="sd">    `inverse_transforms` dict (the returned dict is already keyed the</span>
+<span class="sd">    same way that parameter expects: by modality name).</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        config: A `DataConfig`.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Modality name -&gt; `ComposeTransform` chaining that modality's</span>
+<span class="sd">        configured steps in order. A modality with an empty step list</span>
+<span class="sd">        (`config.transforms[name] == []`) gets a `ComposeTransform`</span>
+<span class="sd">        with zero steps, whose `.apply`/`.inverse` are both the</span>
+<span class="sd">        identity. A modality entirely absent from `config.transforms`</span>
+<span class="sd">        is not a key of the returned dict at all, not an implicit</span>
+<span class="sd">        identity entry: `DataConfig` has no independent notion of</span>
+<span class="sd">        which modalities exist in the first place (that list lives in</span>
+<span class="sd">        `ModelConfig.modalities`, a separate config domain, spec §9),</span>
+<span class="sd">        so this function cannot invent a key for a modality it was</span>
+<span class="sd">        never told about. Callers wanting an explicit identity</span>
+<span class="sd">        fallback for an unconfigured modality do so themselves, e.g.</span>
+<span class="sd">        `pipelines.get(modality_name, ComposeTransform([]))`.</span>
+
+<span class="sd">    Raises:</span>
+<span class="sd">        KeyError: If any `TransformConfig.name` is not a registered</span>
+<span class="sd">            `data.transforms` strategy.</span>
+<span class="sd">    """</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="n">modality_name</span><span class="p">:</span> <span class="n">ComposeTransform</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">getTransformClass</span><span class="p">(</span><span class="n">step</span><span class="o">.</span><span class="n">name</span><span class="p">)(</span><span class="o">**</span><span class="n">step</span><span class="o">.</span><span class="n">kwargs</span><span class="p">)</span> <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="n">steps</span><span class="p">]</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">modality_name</span><span class="p">,</span> <span class="n">steps</span> <span class="ow">in</span> <span class="n">config</span><span class="o">.</span><span class="n">transforms</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+    <span class="p">}</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+  </div>
+
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../../../..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "content.code.copy", "search.suggest"], "search": "../../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

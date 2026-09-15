@@ -1,0 +1,1378 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A modular, extensible multimodal Variational Autoencoder framework.">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Understanding VAEs: complete and accessible guide - Global Multimodal VAE</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#understanding-vaes-complete-and-accessible-guide" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Global Multimodal VAE" class="md-header__button md-logo" aria-label="Global Multimodal VAE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Global Multimodal VAE
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Understanding VAEs: complete and accessible guide
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Venon282/GVAE" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GVAE
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../getting-started/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Getting Started
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../global-vae-project-specification/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../how-to/add-a-modality/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  How-to Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../adr/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture Decisions
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../reference/global_vae/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Global Multimodal VAE" class="md-nav__button md-logo" aria-label="Global Multimodal VAE" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Global Multimodal VAE
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Venon282/GVAE" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GVAE
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../global-vae-project-specification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Specification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/add-a-modality/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a new modality
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/add-a-strategy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Add a fusion / assembler / regularizer / transform / schedule
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/train/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Train a model (Hydra config)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../how-to/evaluate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluate and visualize a checkpoint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adr/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture Decisions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../reference/global_vae/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-the-starting-point-the-classic-autoencoder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. The starting point: the classic autoencoder
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-the-idea-of-a-vae-replacing-a-point-with-a-cloud" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. The idea of a VAE: replacing a point with a cloud
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. The idea of a VAE: replacing a point with a cloud">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-logvar-instead-of-the-variance-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why logvar instead of the variance directly?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-the-prior-the-plan-we-impose-on-the-latent-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. The prior: the plan we impose on the latent space
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-posterior-the-plan-that-we-really-have-of-the-latent-space" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Posterior: the plan that we really have of the latent space
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-the-reparameterization-trick-how-we-can-still-do-gradient-descent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. The reparameterization trick: how we can still do gradient descent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-kl-the-regalurisateur" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. KL: the regalurisateur
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. KL: the regalurisateur">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#where-the-name-comes-from" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where the name comes from
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-measures-in-a-vae" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it measures in a VAE
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-formula-term-by-term" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The formula, term by term
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-we-need-this-constraint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why we need this constraint
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-reconstruction-the-other-half-of-the-loss" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Reconstruction: the other half of the loss
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-the-total-loss-reconstruction-kl-and-the-tension-between-the-two" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. The total loss: reconstruction + KL, and the tension between the two
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. The total loss: reconstruction + KL, and the tension between the two">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-role-of-beta" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The role of beta
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-the-classic-pitfall-posterior-collapse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. The classic pitfall: "posterior collapse"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-overview-the-complete-path-through-globalvae" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Overview: the complete path through GlobalVae
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-bonus-what-about-multiple-modalities-signal-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Bonus: what about multiple modalities (signal + image)?
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#small-glossary-to-quickly-find-a-word" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Small glossary, to quickly find a word
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="understanding-vaes-complete-and-accessible-guide">Understanding VAEs: complete and accessible guide<a class="headerlink" href="#understanding-vaes-complete-and-accessible-guide" title="Permanent link">&para;</a></h1>
+<p>This document explains VAEs (Variational Autoencoders) from scratch. Every term is defined when it first appears, including those that seem "obvious" to someone already familiar with the subject: the VAE literature is often poorly explained for beginners, with notation that assumes years of statistics already. This document goes through everything in order, with direct links to the project code (<code>global-vae-project-specification.md</code> and the files in <code>src/global_vae/</code>) at each step.</p>
+<hr />
+<h2 id="1-the-starting-point-the-classic-autoencoder">1. The starting point: the classic autoencoder<a class="headerlink" href="#1-the-starting-point-the-classic-autoencoder" title="Permanent link">&para;</a></h2>
+<p>Before the "V" in VAE, there is the plain autoencoder (AE). The idea is simple:</p>
+<ul>
+<li>An <strong>encoder</strong> takes an input datum <code>x</code> and compresses it into a small vector <code>z</code>, called the <strong>latent code</strong> (or <strong>latent space</strong>, for the set of all possible <code>z</code> values).</li>
+<li>A <strong>decoder</strong> takes this <code>z</code> and tries to reconstruct <code>x</code> identically, producing a reconstruction denoted <code>x̂</code> (x-hat).</li>
+</ul>
+<p>Analogy: summarize a book on a 10-line sheet (<code>z</code>), then ask someone else to rewrite the entire book from that single sheet (<code>x̂</code>). If the summary is good, the reconstructed book looks like the original.</p>
+<p><strong>The problem with a classic AE</strong>: nothing forces the <code>z</code> values of two similar inputs to be close to each other in the latent space, nor does it force the latent space to be "filled" continuously. Result: by picking a random point in this space (to <em>generate</em> a new, never-before-seen datum), there is a high chance of landing in a "hole" that the decoder has never learned to interpret, producing nonsense. A classic AE knows how to compress and reconstruct, but does not know how to <em>generate</em>.</p>
+<p>This is exactly the problem that the V (Variational) solves.</p>
+<hr />
+<h2 id="2-the-idea-of-a-vae-replacing-a-point-with-a-cloud">2. The idea of a VAE: replacing a point with a cloud<a class="headerlink" href="#2-the-idea-of-a-vae-replacing-a-point-with-a-cloud" title="Permanent link">&para;</a></h2>
+<p>A VAE (Variational Autoencoder) changes one thing, but it has enormous consequences: instead of the encoder producing one single, precise point <code>z</code>, it produces a <strong>probability distribution</strong>: a kind of "cloud" of possible values for <code>z</code>, with a more probable central region and less probable edges.</p>
+<p>A <strong>probability distribution</strong> is a rule that says, for each possible value, how likely it is. The VAE uses the simplest and best-understood distribution in statistics: the <strong>normal distribution</strong> (or <strong>Gaussian</strong>, named after the mathematician Carl Friedrich Gauss), the famous "bell curve." A Gaussian is fully described by two numbers:</p>
+<ul>
+<li>the <strong>mean</strong> (<code>mu</code>, the Greek letter μ): the center of the bell, the most probable value.</li>
+<li>the <strong>variance</strong> (often written σ², sigma squared): how wide or narrow the bell is. A small variance = narrow bell = we are almost certain of the value. A large variance = wide bell = a lot of uncertainty. The square root of the variance is called the <strong>standard deviation</strong> (σ, sigma), in the same unit as the datum itself.</li>
+</ul>
+<p>Concretely, for a given input <code>x</code>, the encoder no longer produces a single <code>z</code>, but two vectors: <code>mu</code> (the center of the distribution) and something related to the variance (see just below why it is not the variance directly). This can be seen exactly as-is in <code>AbstractEncoder.forward</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">x</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">"""Retourne (mu, logvar), chacun de forme (batch, latent_dim)."""</span>
+</code></pre></div>
+<h3 id="why-logvar-instead-of-the-variance-directly">Why <code>logvar</code> instead of the variance directly?<a class="headerlink" href="#why-logvar-instead-of-the-variance-directly" title="Permanent link">&para;</a></h3>
+<p>The variance must always be positive (a negative "width" makes no sense). But a neural network, at the output of a simple linear layer, can produce any number, positive or negative. If we asked the network to produce the variance directly, nothing would prevent it from outputting a negative number at some point during training, which would break everything.</p>
+<p>The solution: the network produces <code>logvar</code> (the logarithm of the variance), which can be any real number without a problem, and then we convert it back to the actual variance with <code>exp(logvar)</code> (the exponential "cancels" the logarithm and guarantees a result that is always positive, whatever <code>logvar</code>). This is exactly what <code>LatentSpace.reparameterize</code> (<code>src/global_vae/latent/base.py</code>) does:</p>
+<div class="highlight"><pre><span></span><code><span class="n">std</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">logvar</span><span class="p">)</span>   <span class="c1"># écart-type = exp(logvar / 2)</span>
+</code></pre></div>
+<p>(Le <code>0.5 *</code> vient du fait qu'on veut l'écart-type, pas la variance : écart-type = racine carrée de la variance = exp(logvar)^0.5 = exp(0.5 * logvar).)</p>
+<hr />
+<h2 id="3-the-prior-the-plan-we-impose-on-the-latent-space">3. The prior: the plan we impose on the latent space<a class="headerlink" href="#3-the-prior-the-plan-we-impose-on-the-latent-space" title="Permanent link">&para;</a></h2>
+<p><strong>Prior</strong> means "previous," "before" (from the Latin <em>a priori</em>, "before experience"). In Bayesian statistics, the prior is the belief we have about a quantity <em>before even looking at the data</em>. Here, it is the shape we decide, in advance, to give to the entire latent space, regardless of any particular input <code>x</code>.</p>
+<p>In a VAE, we almost always choose the same prior: the standard normal distribution, denoted <code>N(0, I)</code>:</p>
+<ul>
+<li>mean = 0 in every latent dimension</li>
+<li>variance = 1 in every dimension</li>
+<li>the dimensions are independent of each other (the <code>I</code>, for "identity matrix," means that there is no correlation between the dimensions)</li>
+</ul>
+<p>This is a choice, not an absolute mathematical necessity, but an excellent practical choice for three reasons:</p>
+<ol>
+<li><strong>It is trivial to sample.</strong> Drawing a random vector according to <code>N(0, I)</code> simply means drawing independent "normal" random numbers, a basic operation in any numerical library (<code>torch.randn_like(...)</code>).</li>
+<li><strong>It is mathematically well understood</strong>, which gives us a simple formula for comparing a distribution to this prior (section 8).</li>
+<li><strong>It gives generation "for free"</strong>: once the model is trained, to create an entirely new datum, all you need to do is draw a random <code>z</code> from this same prior <code>N(0, I)</code>, then give it to the decoder. No input <code>x</code> is needed at all.</li>
+</ol>
+<p>The prior is therefore literally the "mold" we want the latent space to adopt, so that we can then pick from it blindly and always get something that the decoder knows how to interpret.</p>
+<hr />
+<h2 id="4-posterior-the-plan-that-we-really-have-of-the-latent-space">4. Posterior: the plan that we really have of the latent space<a class="headerlink" href="#4-posterior-the-plan-that-we-really-have-of-the-latent-space" title="Permanent link">&para;</a></h2>
+<p>Once we have defined the prior (the distribution we <em>want</em>), we need a word to designate the distribution that the encoder <em>actually</em> produces for a specific input <code>x</code>. This is the <strong>posterior</strong> ("posterior," "after," that is, after observing the data).</p>
+<ul>
+<li>Prior <code>p(z)</code>: the initial belief about <code>z</code>, before observing anything. Always <code>N(0, I)</code>, fixed, independent of any input.</li>
+<li>Posterior <code>q(z|x)</code>: the updated belief about <code>z</code>, once we have observed a specific input <code>x</code>. This is exactly <code>(mu, logvar)</code> that the encoder computes for that <code>x</code>. <code>q(z|x)</code> is read as "the distribution of <code>z</code> given <code>x</code>."</li>
+</ul>
+<p>Each input <code>x</code> therefore has its own posterior (its own <code>mu</code>, its own variance), but there is only one prior shared by the whole model. The entire goal of training is to make these posteriors, taken together, look as much as possible like the prior, while remaining sufficiently distinct from one input to another so that the decoder can still tell them apart. This tension is at the heart of every VAE (section 9).</p>
+<hr />
+<h2 id="5-the-reparameterization-trick-how-we-can-still-do-gradient-descent">5. The reparameterization trick: how we can still do gradient descent<a class="headerlink" href="#5-the-reparameterization-trick-how-we-can-still-do-gradient-descent" title="Permanent link">&para;</a></h2>
+<p>Once we have <code>(mu, logvar)</code>, we need to <em>sample</em> a concrete <code>z</code> from this distribution so that we can give it to the decoder. The problem: "sampling randomly" is a non-differentiable operation. Yet training a neural network relies entirely on <strong>gradient descent</strong>: we calculate how much each network weight contributed to the final error by tracing the computations backwards (the <strong>backpropagation</strong>). If a raw random draw sits in the middle of the computation chain, we can no longer propagate the gradient through it: the computation is "broken" at that point.</p>
+<p>The trick, the <strong>reparameterization trick</strong>, consists in taking the random part out of the path that we need to differentiate:</p>
+<div class="highlight"><pre><span></span><code>epsilon ~ N(0, 1)          # un tirage aléatoire "pur", sans rapport avec le réseau
+z = mu + epsilon * std     # combinaison différentiable de mu, std (calculés par le réseau) et epsilon
+</code></pre></div>
+<p><code>epsilon</code> is simply external noise, with no parameter to learn. All that matters for the gradient is <code>mu</code> and <code>std</code>, which are computed by the network and are therefore differentiable normally. This is exactly the code of <code>LatentSpace.reparameterize</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">reparameterize</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mu</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">logvar</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+    <span class="n">std</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">logvar</span><span class="p">)</span>
+    <span class="n">eps</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">randn_like</span><span class="p">(</span><span class="n">std</span><span class="p">)</span>   <span class="c1"># epsilon, tiré au hasard, hors du graphe de calcul appris</span>
+    <span class="k">return</span> <span class="n">mu</span> <span class="o">+</span> <span class="n">eps</span> <span class="o">*</span> <span class="n">std</span>
+</code></pre></div>
+<p>This is the little trick that makes everything else possible: without it, we simply could not train a VAE with standard gradient descent.</p>
+<hr />
+<h2 id="6-kl-the-regalurisateur">6. KL: the regalurisateur<a class="headerlink" href="#6-kl-the-regalurisateur" title="Permanent link">&para;</a></h2>
+<h3 id="where-the-name-comes-from">Where the name comes from<a class="headerlink" href="#where-the-name-comes-from" title="Permanent link">&para;</a></h3>
+<p><strong>KL</strong> is simply the initials of two surnames: <strong>Solomon Kullback</strong> and <strong>Richard Leibler</strong>, two American statisticians who formalized this measure in 1951. The "Kullback-Leibler divergence" (or "KL divergence") measures how much one probability distribution differs from another.</p>
+<p>It is not a true "distance" in the strict mathematical sense (it is not symmetric: the divergence from A to B is not necessarily equal to that from B to A), but it behaves intuitively like a distance:</p>
+<ul>
+<li>if the two distributions are identical, the KL divergence is <strong>0</strong></li>
+<li>the more they differ, the <strong>larger</strong> the divergence</li>
+</ul>
+<h3 id="what-it-measures-in-a-vae">What it measures in a VAE<a class="headerlink" href="#what-it-measures-in-a-vae" title="Permanent link">&para;</a></h3>
+<p>We use it to compare the posterior <code>q(z|x)</code> (what the encoder produced for this specific input) to the prior <code>p(z) = N(0, I)</code> (what we would generally like it to look like). It is written <code>KL(q(z|x) || p(z))</code>.</p>
+<h3 id="the-formula-term-by-term">The formula, term by term<a class="headerlink" href="#the-formula-term-by-term" title="Permanent link">&para;</a></h3>
+<p>Since the prior and posterior are both Gaussians, there is an exact formula (no approximation needed) for this divergence. It is the one implemented in <code>KlStandardNormalRegularizer</code> (<code>src/global_vae/losses/regularizers/kl_standard_normal.py</code>):</p>
+<div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">forward</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mu</span><span class="p">,</span> <span class="n">logvar</span><span class="p">):</span>
+    <span class="k">return</span> <span class="o">-</span><span class="mf">0.5</span> <span class="o">*</span> <span class="n">torch</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">logvar</span> <span class="o">-</span> <span class="n">mu</span><span class="o">.</span><span class="n">pow</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="o">-</span> <span class="n">logvar</span><span class="o">.</span><span class="n">exp</span><span class="p">(),</span> <span class="n">dim</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+</code></pre></div>
+<p>Let's break it down with concrete values:</p>
+<ul>
+<li><strong>If <code>mu = 0</code> and <code>logvar = 0</code></strong> (so variance = <code>exp(0) = 1</code>): this is exactly the prior <code>N(0, 1)</code>. The calculation gives <code>-0.5 * (1 + 0 - 0 - 1) = 0</code>. Makes sense: if the posterior is identical to the prior, the divergence is zero.</li>
+<li><strong>If <code>mu</code> moves away from 0</strong>: the <code>mu²</code> term grows, making the result inside the parentheses more negative, and therefore (because of the <code>-0.5 *</code> in front) making the final KL larger. In other words: <em>moving away from the center of the prior is costly.</em></li>
+<li><strong>If <code>logvar</code> becomes very negative</strong> (so the variance becomes tiny, and the encoder becomes "too confident" about an almost point-like <code>z</code>): the <code>logvar</code> term decreases and <code>exp(logvar)</code> tends toward 0, which also makes the KL grow. In other words: <em>becoming too precise or too narrow is costly too, not just moving away from the center.</em></li>
+</ul>
+<p>This formula therefore penalizes two things at once: moving away from the center of the prior, and being too confident (variance too small). It "pulls" each posterior toward <code>N(0, I)</code> in both ways.</p>
+<h3 id="why-we-need-this-constraint">Why we need this constraint<a class="headerlink" href="#why-we-need-this-constraint" title="Permanent link">&para;</a></h3>
+<p>Without any KL term at all, nothing would stop the encoder from doing exactly what a classic autoencoder does (section 1): placing each input <code>x</code> at a completely arbitrary location in the latent space, with a tiny variance (almost a point). The model would then learn a kind of directory saying "this exact input goes exactly here," which reconstructs known inputs very well but leaves the latent space full of unorganized holes: exactly the problem we were trying to avoid in section 1.</p>
+<p>The KL term is the "glue" that forces all posteriors to stay close to one and the same shared mold (<code>N(0, I)</code>), and therefore keeps the latent space continuous and usable as a whole.</p>
+<hr />
+<h2 id="7-reconstruction-the-other-half-of-the-loss">7. Reconstruction: the other half of the loss<a class="headerlink" href="#7-reconstruction-the-other-half-of-the-loss" title="Permanent link">&para;</a></h2>
+<p>The decoder receives <code>z</code> and must produce something that looks like <code>x</code>. To measure "how similar it is," we use a reconstruction loss function, the simplest and most common being <strong>MSE</strong> (<em>Mean Squared Error</em>): we calculate the difference between each value of <code>x</code> and <code>x̂</code>, square it (so that positive and negative errors do not cancel each other out, and to penalize larger errors more strongly), then take the average. This is <code>losses/reconstruction.py</code> in this project, with <code>torch.nn.functional.mse_loss</code> as the default choice.</p>
+<hr />
+<h2 id="8-the-total-loss-reconstruction-kl-and-the-tension-between-the-two">8. The total loss: reconstruction + KL, and the tension between the two<a class="headerlink" href="#8-the-total-loss-reconstruction-kl-and-the-tension-between-the-two" title="Permanent link">&para;</a></h2>
+<p>The total loss of a VAE is simply the addition of the two parts:</p>
+<div class="highlight"><pre><span></span><code>loss_totale = loss_reconstruction + beta * loss_KL
+</code></pre></div>
+<p>This is exactly <code>StepLosses</code> in <code>training/trainer.py</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">total_loss</span> <span class="o">=</span> <span class="n">reconstruction_loss</span> <span class="o">+</span> <span class="n">regularization_loss</span>
+</code></pre></div>
+<p>These two terms pull in opposite directions, and this is precisely what makes training a VAE delicate:</p>
+<ul>
+<li>Minimizing <strong>only</strong> reconstruction would push the encoder back toward being a classic autoencoder (tiny variance, memorization): good reconstruction, bad latent space.</li>
+<li>Minimizing <strong>only</strong> KL would push the encoder to completely ignore <code>x</code> and always produce <code>mu = 0</code>, <code>logvar = 0</code> (the prior itself, which has zero KL by definition): a well-organized latent space, but one that no longer contains any useful information about <code>x</code>. The decoder, deprived of all information, can then only produce an average, blurry reconstruction that is identical for everyone.</li>
+</ul>
+<p>A good VAE finds a compromise between the two. In the literature, this compromise has a formal name: the <strong>ELBO</strong> (<em>Evidence Lower BOund</em>). This is the exact mathematical name of this quantity (reconstruction minus KL, up to a sign depending on conventions), which we seek to maximize. Its full derivation is not necessary to use the framework, only the fact that "loss = reconstruction + beta * KL" <em>is</em> literally a practical reformulation of the ELBO.</p>
+<h3 id="the-role-of-beta">The role of <code>beta</code><a class="headerlink" href="#the-role-of-beta" title="Permanent link">&para;</a></h3>
+<p><code>beta</code> (β) is a simple multiplicative coefficient that weights the importance of the KL term relative to reconstruction. It is the "β" in <strong>β-VAE</strong>, a widely used variant. The larger <code>beta</code> is, the more we force the latent space to resemble the prior (at the risk of ignoring <code>x</code>); the smaller it is, the more we favor reconstruction fidelity (at the risk of falling back to a poorly organized latent space).</p>
+<p>In this project, <code>beta</code> can even vary during training, via <code>training/beta_schedules/</code>:</p>
+<ul>
+<li><code>ConstantBetaSchedule</code>: <code>beta</code> fixed from start to finish.</li>
+<li><code>LinearWarmupBetaSchedule</code>: <code>beta</code> starts at 0 and gradually increases.</li>
+<li><code>CyclicalAnnealingBetaSchedule</code>: <code>beta</code> rises and falls several times during training.</li>
+</ul>
+<hr />
+<h2 id="9-the-classic-pitfall-posterior-collapse">9. The classic pitfall: "posterior collapse"<a class="headerlink" href="#9-the-classic-pitfall-posterior-collapse" title="Permanent link">&para;</a></h2>
+<p>If <code>beta</code> is too high, or rises too quickly, right at the very beginning of training (before the decoder has even learned anything useful from <code>z</code>), the encoder finds the easiest way to quickly reduce the loss: produce <code>mu = 0</code>, <code>logvar = 0</code> for absolutely every input, that is, copy the prior exactly, regardless of <code>x</code>. The KL drops to 0, the encoder has "won" its half of the game, but it has completely stopped using <code>z</code> to transmit any information about <code>x</code>. This is <strong>posterior collapse</strong> (the posterior collapsing onto the prior).</p>
+<p>The symptom: reconstruction remains poor indefinitely, regardless of how much model capacity (more layers, more parameters) is added, because the problem is not a lack of capacity, but a latent representation that no longer carries any information to exploit.</p>
+<p>This is exactly what the project documents in <code>examples/01_signal_vae_pipeline.py</code> (the "On regularization" section of its docstring): a first version, with the default <code>kl_standard_normal</code> regularizer and a warm-up that was too short, remained stuck at an R² of about 0.3 (a reconstruction quality score close to "barely better than predicting the mean everywhere"), regardless of the capacity added to the model: the typical signature of a collapse.</p>
+<p>Two countermeasures, already present in this framework:</p>
+<ul>
+<li><strong>Beta warm-up</strong> (<code>LinearWarmupBetaSchedule</code>): keep <code>beta</code> very low at the beginning, giving the decoder time to actually learn to use <code>z</code>, before gradually increasing the regularization pressure.</li>
+<li><strong>Free bits</strong> (<code>FreeBitsKlRegularizer</code>, <code>losses/regularizers/free_bits_kl.py</code>): give each latent dimension a small KL "budget" that it is never penalized for using. Concretely, below a certain threshold (<code>free_bits</code>, often around 0.5 to 1.0), the KL of that dimension no longer helps reduce the loss, so the encoder has no incentive to completely squash it toward 0. This is the solution that <code>01_signal_vae_pipeline.py</code> ultimately uses, raising the R² from about 0.3 to about 0.97.</li>
+</ul>
+<hr />
+<h2 id="10-overview-the-complete-path-through-globalvae">10. Overview: the complete path through <code>GlobalVae</code><a class="headerlink" href="#10-overview-the-complete-path-through-globalvae" title="Permanent link">&para;</a></h2>
+<p>Putting everything we have just seen together, here is the exact path that a batch of inputs follows in the code (<code>GlobalVae.forward</code>, <code>src/global_vae/models/global_vae.py</code>):</p>
+<ol>
+<li><code>x</code> (the raw input) passes through the <strong>encoder</strong>, which produces <code>(mu, logvar)</code>. (<code>AbstractEncoder.forward</code>)</li>
+<li><code>(mu, logvar)</code> passes through <strong>reparameterize</strong>, which produces a concrete, sampled <code>z</code>. (<code>LatentSpace.reparameterize</code>)</li>
+<li><code>z</code> passes through the <strong>decoder</strong>, which produces <code>x̂</code>, the reconstruction. (<code>AbstractDecoder.forward</code>)</li>
+<li>We compute the <strong>reconstruction loss</strong> between <code>x</code> and <code>x̂</code> (<code>losses/reconstruction.py</code>), and the <strong>KL loss</strong> between <code>(mu, logvar)</code> and the prior <code>N(0, I)</code> (<code>losses/regularizers/kl_standard_normal.py</code>, or another registered strategy).</li>
+<li><code>total_loss = reconstruction + beta * KL</code>, and we take a gradient descent step on it (<code>training/trainer.py::computeLosses</code> then <code>.backward()</code>).</li>
+</ol>
+<p>At inference time (once the model is trained), there are two distinct uses, both already present in this code:</p>
+<ul>
+<li><strong>Reconstructing an existing input</strong>: go through steps 1 to 3 normally (<code>evaluate()</code> even uses <code>use_mean=True</code>, meaning that we directly take <code>z = mu</code>, without random sampling, to obtain a deterministic and reproducible result from one execution to another).</li>
+<li><strong>Generating an entirely new datum</strong>: skip steps 1 and 2 entirely. Directly draw <code>z ~ N(0, I)</code> (the prior), and only perform step 3 (<code>decoder(z)</code>). This is where all the effort put into the KL term pays off: because the entire latent space has been trained to resemble this prior, any randomly drawn <code>z</code> from it gives the decoder something plausible, even if that exact <code>z</code> was never produced by a real <code>x</code> during training.</li>
+</ul>
+<hr />
+<h2 id="11-bonus-what-about-multiple-modalities-signal-image">11. Bonus: what about multiple modalities (signal + image)?<a class="headerlink" href="#11-bonus-what-about-multiple-modalities-signal-image" title="Permanent link">&para;</a></h2>
+<p>A very quick overview, for the day when Fusion (<code>fusion/poe.py</code>) comes into play: when multiple encoders (one per modality) feed the <strong>same</strong> latent space, each produces its own <code>(mu, logvar)</code>, like independent "experts" on the same variable <code>z</code>. The <strong>Product-of-Experts (PoE)</strong> strategy combines these experts into a single fused posterior, <em>before</em> sampling, giving more weight to the most confident experts (those with the smallest variance). Everything else (reparameterize, decoder, losses) then works exactly as described above, on this already fused posterior. This is why the spec clearly distinguishes Fusion (combining distributions, before sampling) from the Assembler (combining already sampled vectors, after): two different steps in the pipeline.</p>
+<hr />
+<h2 id="small-glossary-to-quickly-find-a-word">Small glossary, to quickly find a word<a class="headerlink" href="#small-glossary-to-quickly-find-a-word" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Short definition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Autoencoder (AE)</strong></td>
+<td>Network that compresses an input into a code, then reconstructs it from that code.</td>
+</tr>
+<tr>
+<td><strong>VAE</strong></td>
+<td>Autoencoder whose encoder produces a distribution (not a point) and whose latent space is regularized to resemble a chosen prior.</td>
+</tr>
+<tr>
+<td><strong>Encoder</strong></td>
+<td>Network that transforms the input <code>x</code> into <code>(mu, logvar)</code>.</td>
+</tr>
+<tr>
+<td><strong>Decoder</strong></td>
+<td>Network that transforms a <code>z</code> into a reconstruction <code>x̂</code>.</td>
+</tr>
+<tr>
+<td><strong>Latent space</strong></td>
+<td>The set of possible <code>z</code> values; the compressed representation.</td>
+</tr>
+<tr>
+<td><strong>z</strong></td>
+<td>A concrete latent vector, sampled from <code>(mu, logvar)</code>.</td>
+</tr>
+<tr>
+<td><strong>mu (μ)</strong></td>
+<td>The mean of the distribution produced by the encoder: the most probable center.</td>
+</tr>
+<tr>
+<td><strong>logvar</strong></td>
+<td>The logarithm of the variance; allows the network to output any number while guaranteeing a positive variance after <code>exp()</code>.</td>
+</tr>
+<tr>
+<td><strong>Standard deviation (σ)</strong></td>
+<td>Square root of the variance; measures the width of the distribution, in the same unit as the datum.</td>
+</tr>
+<tr>
+<td><strong>Probability distribution</strong></td>
+<td>A rule that gives the probability of each possible value.</td>
+</tr>
+<tr>
+<td><strong>Gaussian / normal distribution</strong></td>
+<td>The "bell-shaped" distribution, fully defined by its mean and variance.</td>
+</tr>
+<tr>
+<td><strong>Prior <code>p(z)</code></strong></td>
+<td>The distribution we impose in advance on the latent space, fixed, <code>N(0, I)</code> by default.</td>
+</tr>
+<tr>
+<td><strong>Posterior <code>q(z\|x)</code></strong></td>
+<td>The distribution that the encoder actually produces for a specific input <code>x</code>.</td>
+</tr>
+<tr>
+<td><strong>Reparameterization trick</strong></td>
+<td><code>z = mu + epsilon * std</code>, the technique that makes sampling differentiable.</td>
+</tr>
+<tr>
+<td><strong>KL divergence</strong></td>
+<td>Measure (due to Kullback and Leibler) of the difference between two distributions; 0 if identical.</td>
+</tr>
+<tr>
+<td><strong>ELBO</strong></td>
+<td><em>Evidence Lower BOund</em>, the formal quantity that "reconstruction + KL" practically reformulates.</td>
+</tr>
+<tr>
+<td><strong>Beta (β-VAE)</strong></td>
+<td>Coefficient that weights the contribution of the KL term in the total loss.</td>
+</tr>
+<tr>
+<td><strong>Posterior collapse</strong></td>
+<td>Failure mode where the encoder ignores <code>x</code> and always produces the prior; <code>z</code> no longer carries information.</td>
+</tr>
+<tr>
+<td><strong>Free bits</strong></td>
+<td>A small KL budget, per dimension, that is never penalized, to avoid collapse.</td>
+</tr>
+<tr>
+<td><strong>Reconstruction loss</strong></td>
+<td>Measure of the difference between <code>x</code> and <code>x̂</code> (often MSE).</td>
+</tr>
+<tr>
+<td><strong>Fusion (PoE, etc.)</strong></td>
+<td>Combines multiple <code>(mu, logvar)</code> values (one per modality) into a single posterior, before sampling.</td>
+</tr>
+<tr>
+<td><strong>Assembler</strong></td>
+<td>Combines multiple already sampled <code>z</code> values into a single vector, for the decoder.</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.indexes", "content.code.copy", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

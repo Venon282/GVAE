@@ -1,0 +1,68 @@
+site_name: Global Multimodal VAE
+site_description: A modular, extensible multimodal Variational Autoencoder framework.
+repo_url: https://github.com/Venon282/GVAE
+repo_name: GVAE
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - content.code.copy
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Concepts:
+      - Project Specification: global-vae-project-specification.md
+  - How-to Guides:
+      - Add a new modality: how-to/add-a-modality.md
+      - Add a fusion / assembler / regularizer / transform / schedule: how-to/add-a-strategy.md
+      - Train a model (Hydra config): how-to/train.md
+      - Evaluate and visualize a checkpoint: how-to/evaluate.md
+  - Architecture Decisions: adr/index.md
+  - API Reference: reference/  # populated automatically at build time, see scripts/gen_ref_pages.py
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - scripts/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - section-index
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_root_heading: true
+            show_source: true
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+            show_if_no_docstring: false
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - toc:
+      permalink: true

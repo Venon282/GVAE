@@ -1,0 +1,31 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install docs dependencies
+        run: pip install -e ".[docs]"
+
+      # --strict turns a broken internal link, an unresolved mkdocstrings
+      # reference, or a missing nav entry into a failed CI run instead of a
+      # silently broken page in production.
+      - name: Build (strict)
+        run: mkdocs build --strict
+
+      - name: Deploy to gh-pages
+        run: mkdocs gh-deploy --force

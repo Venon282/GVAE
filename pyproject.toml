@@ -43,6 +43,14 @@ tsne = [
 umap = [
     "umap-learn>=0.5",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6",
+    "mkdocs-section-index>=0.3",
+]
 # Soft dependency of ResampleTransform(interpolation="scipy") only (data/transforms/resample.py,
 # spec §6.2): coordinate-aware resampling (explicit source_coords/target_coords, and interpolation
 # methods beyond torch.nn.functional.interpolate's evenly-spaced-grid modes: cubic/pchip/akima
@@ -66,7 +74,7 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B"]
+select = ["E", "F", "I", "N", "UP", "B", "D]
 # N802 (function name should be lowercase), N803 (argument name should be
 # lowercase), N806 (variable in function should be lowercase) are disabled
 # on purpose: this project uses a deliberate custom convention where
@@ -74,6 +82,9 @@ select = ["E", "F", "I", "N", "UP", "B"]
 # §10 "Naming convention" and README.md "Naming convention"). Without this
 # override, ruff would silently "fix" camelCase names back to snake_case.
 ignore = ["N802", "N803", "N806"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = ["global_vae"]

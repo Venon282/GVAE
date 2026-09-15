@@ -36,6 +36,9 @@ nav:
       - Evaluate and visualize a checkpoint: how-to/evaluate.md
   - Architecture Decisions: adr/index.md
   - API Reference: reference/  # populated automatically at build time, see scripts/gen_ref_pages.py
+  - About VAE:
+      - En: guide-vae-accessible-en.md
+      - Fr: guide-vae-accessible-fr.md
 
 plugins:
   - search
@@ -43,7 +46,7 @@ plugins:
       scripts:
         - scripts/gen_ref_pages.py
   - literate-nav:
-      nav_file: SUMMARY.md
+      nav_file: reference/SUMMARY.md
   - section-index
   - mkdocstrings:
       handlers:

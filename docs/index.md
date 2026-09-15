@@ -1,4 +1,4 @@
-# Global Multimodal VAE
+# Global VAE
 
 A modular, extensible multimodal Variational Autoencoder framework: not a
 model for two fixed data types, but an architecture designed so that adding

@@ -13,7 +13,7 @@ a new modality never requires touching the core.
 - **Looking up a function or class?** Jump straight to the
   [API reference](reference/index.md).
 - **What changed recently?** See the [changelog](changelog/CHANGELOG.md).
-- **Uderstand what is a VAE and its specific terms ?** Check [about vae](guide-vae-accessible-en.md)
+- **Understand what a VAE is and its specific terms** Check [about vae](guide-vae-accessible-en.md)
 
 For the current release notes and feature status, see the repository's
 `README.md`; this site focuses on how to use and extend the framework, and

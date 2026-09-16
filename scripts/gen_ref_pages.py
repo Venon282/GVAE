@@ -52,6 +52,13 @@ for path in sorted(package_root.rglob("*.py")):
     mkdocs_gen_files.set_edit_path(full_doc_path, path.relative_to(root))
     generated_count += 1
 
+with mkdocs_gen_files.open("reference/index.md", "w") as reference_file:
+    reference_file.write("# API Reference\n\n")
+    reference_file.write(
+        "This section documents the public Python API of Global Multimodal VAE.\n\n"
+    )
+    reference_file.write("::: global_vae\n")
+
 with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as nav_file:
     nav_file.writelines(nav.build_literate_nav())
 
@@ -59,7 +66,11 @@ with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as nav_file:
 # codebase has 60+ modules under src/global_vae; a run producing only a
 # handful of pages means the walk above broke (wrong package_root, glob
 # instead of rglob, ...), not that the package shrank.
-if generated_count < 20:
+python_files = [
+    path for path in package_root.rglob("*.py")
+    if path.name != "__main__.py"
+]
+if generated_count < len(python_files):
     raise RuntimeError(
         f"gen_ref_pages.py only generated {generated_count} reference page(s) "
         f"from '{package_root}', expected 20+. Check that package_root points "

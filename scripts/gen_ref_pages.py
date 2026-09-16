@@ -57,7 +57,6 @@ with mkdocs_gen_files.open("reference/index.md", "w") as reference_file:
     reference_file.write(
         "This section documents the public Python API of Global Multimodal VAE.\n\n"
     )
-    reference_file.write("::: global_vae\n")
 
 with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as nav_file:
     nav_file.writelines(nav.build_literate_nav())

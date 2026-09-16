@@ -35,10 +35,20 @@ nav:
       - Train a model (Hydra config): how-to/train.md
       - Evaluate and visualize a checkpoint: how-to/evaluate.md
   - Architecture Decisions: adr/index.md
-  - API Reference: reference/  # populated automatically at build time, see scripts/gen_ref_pages.py
+  - API Reference: reference/SUMMARY.md  # populated automatically at build time, see scripts/gen_ref_pages.py
+  - Changelog: changelog/SUMMARY.md
   - About VAE:
       - En: guide-vae-accessible-en.md
       - Fr: guide-vae-accessible-fr.md
+
+# ADR pages and per-version changelog files are intentionally reached via
+# their own index page (adr/index.md, changelog/CHANGELOG.md), not listed
+# individually in the sidebar -- this silences the "not included in nav"
+# INFO messages for exactly those, without hiding a genuine mistake
+# elsewhere (a real orphaned page anywhere else still warns).
+# not_in_nav: |
+#   adr/*.md
+#   changelog/*.md
 
 plugins:
   - search

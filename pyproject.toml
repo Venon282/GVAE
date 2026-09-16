@@ -44,12 +44,13 @@ umap = [
     "umap-learn>=0.5",
 ]
 docs = [
-    "mkdocs>=1.6",
+    "mkdocs>=1.6,<=1.6.1",
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.25",
     "mkdocs-gen-files>=0.5",
     "mkdocs-literate-nav>=0.6",
     "mkdocs-section-index>=0.3",
+    "ruff>=0.4",
 ]
 # Soft dependency of ResampleTransform(interpolation="scipy") only (data/transforms/resample.py,
 # spec §6.2): coordinate-aware resampling (explicit source_coords/target_coords, and interpolation

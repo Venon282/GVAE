@@ -8,8 +8,9 @@ edit to an old one in place (see the
 !!! note
     The one-line topics below were reconstructed from how the codebase
     itself cross-references each ADR (docstrings, README), not copied from
-    the ADR files directly — double-check they still match your actual
-    file titles, and correct anything that's drifted.
+    the ADR files directly. **0015 and 0016 are guesses from their filenames
+    alone** (I don't have their content) -- please correct these two, the
+    other fourteen I'm fairly confident about.
 
 | ADR | Topic |
 |---|---|
@@ -27,3 +28,5 @@ edit to an old one in place (see the
 | [0012 — Generic data transforms](0012-generic-data-transforms.md) | `data/transforms/`: `log` / `standardize` / `resample` as dimensionality-agnostic, invertible, registry-based transforms. |
 | [0013 — Coordinate-aware resampling](0013-coordinate-aware-resampling.md) | `ResampleTransform`'s `interpolation="scipy"` mode: explicit source/target positions, not just point counts. |
 | [0014 — Residual 1D encoder/decoder](0014-residual-1d-encoder-decoder.md) | `OneDCnnResidualEncoder` / `OneDCnnResidualDecoder`: configurable-depth residual blocks as an alternative backbone (spec §7). |
+| [0015 — Per-modality data transforms](0015-per-modality-data-transforms.md) | *Guess:* extending `DataConfig.transforms` from one shared pipeline to a per-modality mapping, likely needed once a second modality (image) is actually in play. |
+| [0016 — Cross-modal reconstruction reporting](0016-cross-modal-reconstruction-reporting.md) | *Guess:* evaluation/visualization support for reconstructing one modality from another modality's latent (e.g. image from signal), relevant once fusion is exercised end to end. |

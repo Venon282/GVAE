@@ -21,12 +21,6 @@ root = Path(__file__).parent.parent
 src = root / "src"
 package_root = src / "global_vae"
 
-with mkdocs_gen_files.open("reference/index.md", "w") as reference_file:
-    reference_file.write("# API Reference\n\n")
-    reference_file.write(
-        "This section documents the public Python API of Global Multimodal VAE.\n\n"
-    )
-    reference_file.write("::: global_vae\n")
 
 for path in sorted(package_root.rglob("*.py")):
     module_path = path.relative_to(src).with_suffix("")

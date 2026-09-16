@@ -325,3 +325,51 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
   - `docs/adr/0016-cross-modal-reconstruction-reporting.md` documenting the above,
     including why the figure-export half lives in its own `evaluation/cross_modal.py`
     rather than folded into `evaluate.py`/`visual_export.py`.
+
+### Added
+
+- `encoders/TwoDCnnEncoder.py` (`2d_cnn_encoder_v1`) and `decoders/TwoDCnnDecoder.py`
+  (`2d_cnn_decoder_v1`): plain (non-residual) 2D CNN encoder/decoder for spec §6's
+  image modality, a direct generalization of `OneDCnnEncoder`/`OneDCnnDecoder`
+  matching every flexibility feature of the 1D pair (per-stage kernel/stride/
+  padding/dilation, per-stage pooling/activation/normalization, adaptive global
+  pooling for size-agnostic encoding, the custom-`nn.Module`-stage escape hatch,
+  and the decoder's exact-output-shape verification instead of resizing, on both
+  axes independently, with `output_padding` auto-solved per axis for
+  `conv_transpose`). `TwoDCnnEncoder` also adds a new `minimal_input_shape ->
+  tuple[int, int]` property alongside the base-class-required
+  `minimal_input_length` (a single `int`, unable to fully express a 2D minimum on
+  its own; see the ADR below). See `docs/adr/0017-2d-cnn-encoder-decoder.md`.
+- `utils/stage_config.py` gained `broadcastPerStageShape` and
+  `broadcastPerStageOptionalShape` (the latter tolerating a per-stage/shared
+  `None`, needed for `pool_kernel_sizes`/`pool_strides`), finally implementing what
+  the module's own docstring had already named and described but never shipped:
+  the 2D generalization of `broadcastPerStage` that resolves the ambiguity a bare
+  `Sequence`-based broadcast would have once a per-stage value can itself be a
+  multi-component shape (`list` = one entry per stage, `tuple` = one shape shared
+  by every stage). **Behavior note:** this makes `tuple` and `list` mean different
+  things for shape-like arguments of the new 2D classes, unlike the 1D classes
+  where they were interchangeable; see the ADR for the reasoning and the exact
+  error a mis-sized tuple now raises instead of being silently misread.
+- `utils/conv_math.py` gained the 2D counterpart of every 1D shape-arithmetic
+  function `TwoDCnnDecoder` needs (`computeConv2dOutputShape`,
+  `computeConvTranspose2dOutputShape`, `computeUpsampleThenConv2dOutputShape`,
+  `solveConvTranspose2dOutputPadding`, `solveMinimumInputShapeForConv2d`,
+  `computeUpsampleStack2dOutputShape`), each just its 1D counterpart applied once
+  per axis (`Conv2d`/`ConvTranspose2d`'s own formulas are separable per axis, so no
+  new math is derived here). `utils/builders.py` gained `build2DPoolLayer`/
+  `build2DUpSampleStage`, mirroring `build1DPoolLayer`/`build1DUpSampleStage`.
+- `tests/integration/test_image_encoder.py` and `tests/integration/test_image_decoder.py`
+  covering the above: shapes (square, non-square, multi-channel, implicit-channel
+  input), the `tuple`-vs-`list` behavior difference and its error path, per-stage
+  pooling/activation/normalization, minimum-input-shape solving (including a
+  non-square minimum from non-square hyperparameters), the decoder's exact-shape
+  verification and its non-square, per-axis `output_padding` auto-solve, gradient
+  flow, registration, and an encoder-decoder round trip (square RGB and
+  rectangular grayscale) mirroring how `GlobalVae` wires a modality's encoder and
+  decoder together.
+- `docs/adr/0017-2d-cnn-encoder-decoder.md` documenting the above, including the
+  `mypy --strict` reasoning behind splitting `broadcastPerStageShape` in two
+  rather than making one `Optional`-typed function, and why `TwoDCnnEncoder`
+  keeps `minimal_input_length` as a conservative `max(minimal_input_shape)`
+  summary instead of widening `AbstractEncoder`'s own contract.

@@ -56,6 +56,14 @@ exactly what that boundary does and does not cover. What's built:
   the same 1D signal modality, built from configurable-depth residual
   blocks instead of plain conv stages, see
   `docs/adr/0014-residual-1d-encoder-decoder.md`),
+  `TwoDCnnEncoder`/`TwoDCnnDecoder` (`2d_cnn_encoder_v1`/`2d_cnn_decoder_v1`,
+  spec §6's image modality, the plain-CNN candidate: a direct 2D
+  generalization of `OneDCnnEncoder`/`OneDCnnDecoder` matching its
+  flexibility exactly, including size-agnostic encoding and exact,
+  per-axis output-shape verification on the decoder side; see
+  `docs/adr/0017-2d-cnn-encoder-decoder.md` — a residual/ResNet-style 2D
+  pair, mirroring `OneDCnnResidualEncoder`/`OneDCnnResidualDecoder`, is a
+  natural future addition, not built yet),
   and `ProductOfExperts` (`poe`, spec §4's MVAE-style fusion strategy).
 - Pluggable latent regularization (`losses/regularizers/`:
   `kl_standard_normal`, `free_bits_kl`, `mmd`) and pluggable
@@ -166,17 +174,20 @@ exactly what that boundary does and does not cover. What's built:
   bullet (checklist item **C11**) for the full requirement list.
 
 What's deliberately **not** built yet, and why (see `NOTE.md` in each
-directory): concrete image encoders/decoders, the MoE/concat_mlp/
-cross-attention fusion strategies, an image-comparison reconstruction
-plot (needs an image decoder to exist first), and the dataset-loading half
-of the data pipeline — `datamodule.py`, i.e. reading files, matching/
-pairing samples, and splitting — which is out of this framework's scope
-by permanent design (spec §6.2; the person building on this framework
-owns their own data loading). Generic preprocessing (`data/transforms/`)
-is *not* in this list: it is implemented, see above. Each remaining item
-either depends on an open question flagged in spec §11 that hasn't been
-decided yet, or is simply the next not-yet-reached milestone — per spec
-§12, an open question is a reason to ask, not to guess.
+directory): the MoE/concat_mlp/cross-attention fusion strategies, a
+residual/ResNet-style 2D encoder/decoder (spec §7, mirroring
+`OneDCnnResidualEncoder`/`OneDCnnResidualDecoder`; the plain 2D CNN pair
+above is built), an image-comparison reconstruction plot (now unblocked
+by `TwoDCnnDecoder`, but not built in this pass), and the dataset-loading
+half of the data pipeline — `datamodule.py`, i.e. reading files,
+matching/pairing samples, and splitting — which is out of this
+framework's scope by permanent design (spec §6.2; the person building on
+this framework owns their own data loading). Generic preprocessing
+(`data/transforms/`) is *not* in this list: it is implemented, see
+above. Each remaining item either depends on an open question flagged in
+spec §11 that hasn't been decided yet, or is simply the next
+not-yet-reached milestone — per spec §12, an open question is a reason
+to ask, not to guess.
 
 ## Setup
 

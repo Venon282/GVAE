@@ -19,6 +19,7 @@ def computeConv1dOutputLength(
     """
     return (input_length + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
 
+
 def computeConvTranspose1dOutputLength(
     input_length: int,
     kernel_size: int,
@@ -52,6 +53,7 @@ def computeConvTranspose1dOutputLength(
         + 1
     )
 
+
 def computeUpsampleThenConv1dOutputLength(
     input_length: int,
     scale_factor: int,
@@ -81,6 +83,7 @@ def computeUpsampleThenConv1dOutputLength(
     return computeConv1dOutputLength(
         upsampled_length, kernel_size, stride=1, padding=padding, dilation=dilation
     )
+
 
 def solveConvTranspose1dOutputPadding(
     input_length: int,
@@ -122,6 +125,7 @@ def solveConvTranspose1dOutputPadding(
     )
     return target_length - length_with_zero_output_padding
 
+
 def solveMinimumInputLengthForConv1d(
     min_output_length: int,
     kernel_size: int,
@@ -152,6 +156,7 @@ def solveMinimumInputLengthForConv1d(
     minimum = stride * (min_output_length - 1) - 2 * padding + dilation * (kernel_size - 1) + 1
     return max(1, minimum)
 
+
 def computeConv1dLengthOffset(kernel_size: int, padding: int, dilation: int) -> int:
     """Compute a stride-1 `Conv1d`'s length-changing "offset" (`utils/conv_blocks.py`).
 
@@ -177,6 +182,7 @@ def computeConv1dLengthOffset(kernel_size: int, padding: int, dilation: int) -> 
     """
     return 2 * padding - dilation * (kernel_size - 1)
 
+
 def isLengthPreservingConv1d(kernel_size: int, padding: int, dilation: int) -> bool:
     """Whether a stride-1 `Conv1d` with these hyperparameters preserves input length exactly.
 
@@ -195,6 +201,7 @@ def isLengthPreservingConv1d(kernel_size: int, padding: int, dilation: int) -> b
         needs an odd effective kernel span.
     """
     return computeConv1dLengthOffset(kernel_size, padding, dilation) == 0
+
 
 def computeConvTranspose1dLengthOffset(
     kernel_size: int, padding: int, output_padding: int, dilation: int
@@ -221,6 +228,7 @@ def computeConvTranspose1dLengthOffset(
         The length offset.
     """
     return -2 * padding + dilation * (kernel_size - 1) + output_padding
+
 
 def computeUpsampleStackOutputLength(
     seed_length: int,
@@ -286,3 +294,264 @@ def computeUpsampleStackOutputLength(
                 f"'interpolate_conv'."
             )
     return length
+
+
+# --- 2D counterparts (spec §6's image modality; TwoDCnnEncoder/TwoDCnnDecoder) ---
+#
+# Both spatial axes of a Conv2d/ConvTranspose2d/MaxPool2d/AvgPool2d are independent
+# under PyTorch's own formulas: each axis's output length only ever depends on that
+# same axis's own kernel_size/stride/padding/dilation, never on the other axis's.
+# Every function below is therefore exactly the corresponding 1D function above,
+# applied once per axis to an already-resolved `(height, width)` shape (see
+# `utils.stage_config.broadcastPerStageShape`, which is what produces these
+# per-axis tuples from a caller's shared-or-per-stage, square-or-non-square
+# hyperparameters in the first place). This keeps one single implementation of the
+# actual arithmetic (the 1D functions above); nothing below re-derives it.
+
+
+def computeConv2dOutputShape(
+    input_shape: tuple[int, int],
+    kernel_size: tuple[int, int],
+    stride: tuple[int, int],
+    padding: tuple[int, int],
+    dilation: tuple[int, int],
+) -> tuple[int, int]:
+    """Compute a `Conv2d`'s exact output shape (PyTorch's own formula, per axis).
+
+    Args:
+        input_shape: `(height, width)` of the input feature map.
+        kernel_size: `(kernel_height, kernel_width)`.
+        stride: `(stride_height, stride_width)`.
+        padding: `(padding_height, padding_width)`, applied to both
+            sides of each axis.
+        dilation: `(dilation_height, dilation_width)`.
+
+    Returns:
+        `(output_height, output_width)`.
+    """
+    return (
+        computeConv1dOutputLength(
+            input_shape[0], kernel_size[0], stride[0], padding[0], dilation[0]
+        ),
+        computeConv1dOutputLength(
+            input_shape[1], kernel_size[1], stride[1], padding[1], dilation[1]
+        ),
+    )
+
+
+def computeConvTranspose2dOutputShape(
+    input_shape: tuple[int, int],
+    kernel_size: tuple[int, int],
+    stride: tuple[int, int],
+    padding: tuple[int, int],
+    output_padding: tuple[int, int],
+    dilation: tuple[int, int],
+) -> tuple[int, int]:
+    """Compute a `ConvTranspose2d`'s exact output shape (PyTorch's own formula, per axis).
+
+    Args:
+        input_shape: `(height, width)` of the input feature map.
+        kernel_size: `(kernel_height, kernel_width)`.
+        stride: `(stride_height, stride_width)`, the upsampling factor
+            along each axis.
+        padding: `(padding_height, padding_width)`.
+        output_padding: `(output_padding_height, output_padding_width)`,
+            resolving each axis's own stride-induced output-size
+            ambiguity independently. Each component must satisfy
+            `0 <= output_padding[axis] < max(stride[axis],
+            dilation[axis])` for PyTorch itself to accept it.
+        dilation: `(dilation_height, dilation_width)`.
+
+    Returns:
+        `(output_height, output_width)`.
+    """
+    return (
+        computeConvTranspose1dOutputLength(
+            input_shape[0], kernel_size[0], stride[0], padding[0], output_padding[0], dilation[0]
+        ),
+        computeConvTranspose1dOutputLength(
+            input_shape[1], kernel_size[1], stride[1], padding[1], output_padding[1], dilation[1]
+        ),
+    )
+
+
+def computeUpsampleThenConv2dOutputShape(
+    input_shape: tuple[int, int],
+    scale_factor: tuple[int, int],
+    kernel_size: tuple[int, int],
+    padding: tuple[int, int],
+    dilation: tuple[int, int],
+) -> tuple[int, int]:
+    """Compute the output shape of `nn.Upsample` followed by a stride-1 `Conv2d`.
+
+    The `"interpolate_conv"` upsampling mode's shape formula (see
+    `computeUpsampleThenConv1dOutputLength`, applied per axis):
+    `nn.Upsample(scale_factor=..., mode="nearest")` multiplies each
+    axis's length by that axis's own scale factor, then the following
+    `Conv2d` (implicitly stride 1) changes each axis by a fixed,
+    independently computable amount.
+
+    Args:
+        input_shape: `(height, width)`, before upsampling.
+        scale_factor: `(scale_height, scale_width)`, `nn.Upsample`'s
+            own per-axis integer scale factors.
+        kernel_size: The following `Conv2d`'s `(kernel_height,
+            kernel_width)`.
+        padding: The following `Conv2d`'s `(padding_height,
+            padding_width)`.
+        dilation: The following `Conv2d`'s `(dilation_height,
+            dilation_width)`.
+
+    Returns:
+        `(output_height, output_width)`.
+    """
+    upsampled_shape = (input_shape[0] * scale_factor[0], input_shape[1] * scale_factor[1])
+    return computeConv2dOutputShape(
+        upsampled_shape, kernel_size, stride=(1, 1), padding=padding, dilation=dilation
+    )
+
+
+def solveConvTranspose2dOutputPadding(
+    input_shape: tuple[int, int],
+    target_shape: tuple[int, int],
+    kernel_size: tuple[int, int],
+    stride: tuple[int, int],
+    padding: tuple[int, int],
+    dilation: tuple[int, int],
+) -> tuple[int, int]:
+    """Solve, independently per axis, the `output_padding` that makes a `ConvTranspose2d`
+    hit `target_shape` exactly.
+
+    Each axis of a `ConvTranspose2d` is an independent 1D
+    `ConvTranspose1d`-equivalent computation (see the module-level
+    note above), so this is `solveConvTranspose1dOutputPadding`
+    applied once per axis; the two axes' solved values are entirely
+    unrelated to one another (e.g. reconstructing a non-square image
+    routinely needs a different `output_padding` on each axis).
+
+    Args:
+        input_shape: `(height, width)` of the input feature map.
+        target_shape: Desired `(height, width)`.
+        kernel_size: `(kernel_height, kernel_width)`.
+        stride: `(stride_height, stride_width)`.
+        padding: `(padding_height, padding_width)`.
+        dilation: `(dilation_height, dilation_width)`.
+
+    Returns:
+        `(output_padding_height, output_padding_width)`. Not
+        guaranteed to be a value PyTorch actually accepts on either
+        axis (each component must additionally satisfy `0 <=
+        output_padding[axis] < max(stride[axis], dilation[axis])`);
+        callers must check that themselves, exactly as in the 1D case.
+    """
+    return (
+        solveConvTranspose1dOutputPadding(
+            input_shape[0], target_shape[0], kernel_size[0], stride[0], padding[0], dilation[0]
+        ),
+        solveConvTranspose1dOutputPadding(
+            input_shape[1], target_shape[1], kernel_size[1], stride[1], padding[1], dilation[1]
+        ),
+    )
+
+
+def solveMinimumInputShapeForConv2d(
+    min_output_shape: tuple[int, int],
+    kernel_size: tuple[int, int],
+    stride: tuple[int, int],
+    padding: tuple[int, int],
+    dilation: tuple[int, int],
+) -> tuple[int, int]:
+    """Solve, independently per axis, the minimum input shape whose `Conv2d` output
+    shape reaches `min_output_shape`.
+
+    Also valid for 2D pooling layers (`MaxPool2d`/`AvgPool2d`), exactly
+    as `solveMinimumInputLengthForConv1d` is for their 1D counterparts:
+    call with `dilation=(1, 1)` for `AvgPool2d`, which has no dilation
+    parameter of its own.
+
+    Args:
+        min_output_shape: Smallest acceptable `(height, width)` for
+            this layer's output (typically `(1, 1)`, to keep the layer
+            from collapsing either axis of its input to an empty or
+            invalid feature map).
+        kernel_size: `(kernel_height, kernel_width)`.
+        stride: `(stride_height, stride_width)`.
+        padding: `(padding_height, padding_width)`.
+        dilation: `(dilation_height, dilation_width)`.
+
+    Returns:
+        The minimum `(height, width)` whose `computeConv2dOutputShape`
+        result is at least `min_output_shape` on both axes. Each
+        component is always at least `1`.
+    """
+    return (
+        solveMinimumInputLengthForConv1d(
+            min_output_shape[0], kernel_size[0], stride[0], padding[0], dilation[0]
+        ),
+        solveMinimumInputLengthForConv1d(
+            min_output_shape[1], kernel_size[1], stride[1], padding[1], dilation[1]
+        ),
+    )
+
+
+def computeUpsampleStack2dOutputShape(
+    seed_shape: tuple[int, int],
+    kernel_sizes: tuple[tuple[int, int], ...],
+    strides: tuple[tuple[int, int], ...],
+    paddings: tuple[tuple[int, int], ...],
+    output_paddings: tuple[tuple[int, int], ...],
+    dilations: tuple[tuple[int, int], ...],
+    upsample_modes: tuple[str, ...],
+) -> tuple[int, int]:
+    """Chain the per-transition 2D upsampling shape formula across an already-resolved stack.
+
+    The `TwoDCnnDecoder` counterpart of `computeUpsampleStackOutputLength`,
+    generalized to `(height, width)` shapes throughout (both axes are
+    independent at every transition, so this is not a new formula, only
+    the same chaining logic driven by 2D shapes instead of 1D lengths).
+
+    Args:
+        seed_shape: `(height, width)` before any transition is applied.
+        kernel_sizes: Per-transition `(kernel_height, kernel_width)`.
+        strides: Per-transition `(stride_height, stride_width)`.
+        paddings: Per-transition `(padding_height, padding_width)`.
+        output_paddings: Per-transition `ConvTranspose2d` output
+            paddings. Ignored (but must still be a same-length tuple)
+            for any transition whose `upsample_mode` is
+            `"interpolate_conv"`.
+        dilations: Per-transition `(dilation_height, dilation_width)`.
+        upsample_modes: `"conv_transpose"` or `"interpolate_conv"`,
+            per transition.
+
+    Returns:
+        The `(height, width)` after every transition.
+
+    Raises:
+        ValueError: If any transition's `upsample_mode` is not
+            recognized.
+    """
+    shape = seed_shape
+    for stage in range(len(kernel_sizes)):
+        if upsample_modes[stage] == "conv_transpose":
+            shape = computeConvTranspose2dOutputShape(
+                shape,
+                kernel_sizes[stage],
+                strides[stage],
+                paddings[stage],
+                output_paddings[stage],
+                dilations[stage],
+            )
+        elif upsample_modes[stage] == "interpolate_conv":
+            shape = computeUpsampleThenConv2dOutputShape(
+                shape,
+                strides[stage],
+                kernel_sizes[stage],
+                paddings[stage],
+                dilations[stage],
+            )
+        else:
+            raise ValueError(
+                f"Unknown upsample_mode '{upsample_modes[stage]}'. Expected 'conv_transpose' or "
+                f"'interpolate_conv'."
+            )
+    return shape

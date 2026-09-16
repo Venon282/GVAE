@@ -4,7 +4,7 @@ All notable changes to this project are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-08-29
+## [1.0.0] - 2026-08-29
 
 First release of the framework. Covers spec §6.1 milestone 1 end to end (a
 single-modality signal VAE — encoder, one latent space, decoder, no fusion —

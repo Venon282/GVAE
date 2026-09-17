@@ -19,11 +19,7 @@ nav = mkdocs_gen_files.Nav()
 root = Path(__file__).parent.parent
 src = root / "src"
 package_root = src / "global_vae"
-
-<<<<<<< HEAD
-=======
 generated_count = 0
->>>>>>> 4631eb1b249e5d8ffea482a3c5f0626a49423b0e
 
 # rglob, not glob: this MUST walk every subpackage recursively (encoders/,
 # decoders/, fusion/, assemblers/, latent/, losses/, data/, training/,

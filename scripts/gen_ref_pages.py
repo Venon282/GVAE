@@ -42,7 +42,8 @@ for path in sorted(package_root.rglob("*.py")):
     elif parts[-1] == "__main__":
         continue
 
-    nav[parts] = doc_path.as_posix()
+    nav_parts = parts[1:] if len(parts) > 1 else parts
+    nav[nav_parts] = doc_path.as_posix()
 
     with mkdocs_gen_files.open(full_doc_path, "w") as reference_file:
         identifier = ".".join(parts)

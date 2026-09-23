@@ -15,34 +15,6 @@ Also fixes real issues found while writing this entry and, separately, while a u
 ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults (see
 "Fixed").
 
-### Fixed
-
-- `DataConfig.transforms` and `DataConfig.sequence_length` were a single, flat
-  value shared by the whole experiment (`transforms: list[TransformConfig]`,
-  `sequence_length: int | None`), even though spec §6 explicitly anticipates more
-  than one dataset sharing the 1D-signal encoder/decoder family "with only
-  preprocessing differing, not the architecture": a second signal dataset had
-  nowhere to configure its own steps, its own `log`/`standardize` statistics, or
-  its own resampled length independently of the first. This was also inconsistent
-  with `evaluation.visual_export.exportEvaluationFigures`'s and
-  `visualization.reconstruction_plot.plotReconstructionGrid`'s own
-  `inverse_transforms: dict[str, InverseTransform]` parameter, already keyed per
-  modality, which the old flat pipeline had no way to produce correctly without
-  bypassing the config layer entirely (as `examples/01_signal_vae_pipeline.py`
-  already had to). Both fields are now per-modality mappings
-  (`transforms: dict[str, list[TransformConfig]]`,
-  `sequence_length: dict[str, int] | None`), and
-  `buildTransformPipeline(config) -> dict[str, ComposeTransform]` now returns one
-  pipeline per configured modality instead of one pipeline for the whole config; a
-  modality absent from `config.transforms` is simply absent from the returned
-  dict rather than getting an implicit identity pipeline. Breaking change to
-  `DataConfig`'s shape (no real dataset depended on the old shape yet);
-  `configs/data/signal.yaml`,
-  `tests/integration/test_transforms.py::TestBuildTransformPipelineFromConfig`,
-  `tests/integration/test_config.py`, `tests/integration/_train_script_fixtures.py`,
-  and `examples/_synthetic_signal_data.py` updated accordingly. See
-  `docs/adr/0015-per-modality-data-transforms.md`.
-
 ### Added
 
 - `encoders/OneDCnnResidualEncoder.py` (`1d_cnn_resnet_encoder_v1`) and
@@ -194,8 +166,6 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
   Hydra); this only makes it visible without having to already know that. The
   module docstring gained a paragraph spelling out the same thing.
 
-### Added
-
 - Cross-modal reconstruction reporting (spec §5: "the model can be trained and
   queried with any subset of available modalities"), making a mechanism
   `GlobalVae.forward` already implements (no code change to `GlobalVae` or any
@@ -330,6 +300,31 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
 
 ### Fixed
 
+- `DataConfig.transforms` and `DataConfig.sequence_length` were a single, flat
+  value shared by the whole experiment (`transforms: list[TransformConfig]`,
+  `sequence_length: int | None`), even though spec §6 explicitly anticipates more
+  than one dataset sharing the 1D-signal encoder/decoder family "with only
+  preprocessing differing, not the architecture": a second signal dataset had
+  nowhere to configure its own steps, its own `log`/`standardize` statistics, or
+  its own resampled length independently of the first. This was also inconsistent
+  with `evaluation.visual_export.exportEvaluationFigures`'s and
+  `visualization.reconstruction_plot.plotReconstructionGrid`'s own
+  `inverse_transforms: dict[str, InverseTransform]` parameter, already keyed per
+  modality, which the old flat pipeline had no way to produce correctly without
+  bypassing the config layer entirely (as `examples/01_signal_vae_pipeline.py`
+  already had to). Both fields are now per-modality mappings
+  (`transforms: dict[str, list[TransformConfig]]`,
+  `sequence_length: dict[str, int] | None`), and
+  `buildTransformPipeline(config) -> dict[str, ComposeTransform]` now returns one
+  pipeline per configured modality instead of one pipeline for the whole config; a
+  modality absent from `config.transforms` is simply absent from the returned
+  dict rather than getting an implicit identity pipeline. Breaking change to
+  `DataConfig`'s shape (no real dataset depended on the old shape yet);
+  `configs/data/signal.yaml`,
+  `tests/integration/test_transforms.py::TestBuildTransformPipelineFromConfig`,
+  `tests/integration/test_config.py`, `tests/integration/_train_script_fixtures.py`,
+  and `examples/_synthetic_signal_data.py` updated accordingly. See
+  `docs/adr/0015-per-modality-data-transforms.md`.
 - `examples/02_config_driven_pipeline.py` read `DataloaderBundle.test` (via
   `_saveVariantFigures`'s `list(bundle.test)` and `runVariant`'s
   `evaluate(best_model, dataloaders.test, ...)`) as if it were never `None`. Its

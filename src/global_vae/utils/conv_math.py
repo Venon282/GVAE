@@ -494,6 +494,72 @@ def solveMinimumInputShapeForConv2d(
     )
 
 
+def computeConv2dLengthOffset(
+    kernel_size: tuple[int, int], padding: tuple[int, int], dilation: tuple[int, int]
+) -> tuple[int, int]:
+    """Compute a stride-1 `Conv2d`'s length-changing "offset", independently per axis.
+
+    The 2D counterpart of `computeConv1dLengthOffset`, applied once per
+    axis for the identical reason `computeConv2dOutputShape` is (see
+    the module-level note above): each axis of a `Conv2d` is an
+    independent 1D computation under PyTorch's own formula, so there is
+    nothing new to derive here, only the existing 1D offset applied
+    twice. Used by `utils.conv_blocks.Residual2DBlock`/
+    `Residual2DUpBlock` to verify a residual shortcut reaches the exact
+    same output shape as its main path, for every input shape,
+    independently on both axes (checking one example shape is not
+    enough, for the same floor-division reason
+    `computeConv1dLengthOffset`'s own docstring explains).
+
+    Args:
+        kernel_size: `(kernel_height, kernel_width)`.
+        padding: `(padding_height, padding_width)`, applied to both
+            sides of each axis.
+        dilation: `(dilation_height, dilation_width)`.
+
+    Returns:
+        `(offset_height, offset_width)`. `(0, 0)` means this stride-1
+        configuration preserves input shape exactly on both axes.
+    """
+    return (
+        computeConv1dLengthOffset(kernel_size[0], padding[0], dilation[0]),
+        computeConv1dLengthOffset(kernel_size[1], padding[1], dilation[1]),
+    )
+
+
+def computeConvTranspose2dLengthOffset(
+    kernel_size: tuple[int, int],
+    padding: tuple[int, int],
+    output_padding: tuple[int, int],
+    dilation: tuple[int, int],
+) -> tuple[int, int]:
+    """Compute a `ConvTranspose2d`'s length-changing "offset", independently per axis.
+
+    The 2D counterpart of `computeConvTranspose1dLengthOffset`, applied
+    once per axis for the identical reason `computeConv2dLengthOffset`
+    is. Used by `utils.conv_blocks.Residual2DUpBlock` to verify a
+    `"conv_transpose"`-mode shortcut reaches the exact same output
+    shape as its main path, for every input shape, on both axes.
+
+    Args:
+        kernel_size: `(kernel_height, kernel_width)`.
+        padding: `(padding_height, padding_width)`.
+        output_padding: `(output_padding_height, output_padding_width)`.
+        dilation: `(dilation_height, dilation_width)`.
+
+    Returns:
+        `(offset_height, offset_width)`.
+    """
+    return (
+        computeConvTranspose1dLengthOffset(
+            kernel_size[0], padding[0], output_padding[0], dilation[0]
+        ),
+        computeConvTranspose1dLengthOffset(
+            kernel_size[1], padding[1], output_padding[1], dilation[1]
+        ),
+    )
+
+
 def computeUpsampleStack2dOutputShape(
     seed_shape: tuple[int, int],
     kernel_sizes: tuple[tuple[int, int], ...],

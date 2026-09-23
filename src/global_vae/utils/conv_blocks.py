@@ -57,10 +57,12 @@ from collections.abc import Callable
 import torch
 from torch import nn
 
-from global_vae.utils.builders import build1DUpSampleStage
+from global_vae.utils.builders import build1DUpSampleStage, build2DUpSampleStage
 from global_vae.utils.conv_math import (
     computeConv1dLengthOffset,
+    computeConv2dLengthOffset,
     computeConvTranspose1dLengthOffset,
+    computeConvTranspose2dLengthOffset,
 )
 
 
@@ -486,6 +488,453 @@ class Residual1DUpBlock(nn.Module):
 
         Returns:
             Output tensor, shape `(batch, out_channels, out_length)`.
+        """
+        main_output: torch.Tensor = self.main(x)
+        shortcut_output: torch.Tensor = self.shortcut(x)
+        result: torch.Tensor = self.output_activation(main_output + shortcut_output)
+        return result
+
+
+# --- 2D counterparts (spec §6's image modality; TwoDCnnResidualEncoder/TwoDCnnResidualDecoder) ---
+#
+# Direct 2D generalizations of Residual1DBlock/Residual1DUpBlock above, mirroring how
+# utils/conv_math.py's and utils/builders.py's own 2D sections generalize their 1D
+# counterparts: both spatial axes of a Conv2d/ConvTranspose2d are independent under
+# PyTorch's own formulas, so every shape-changing computation here is the 1D block's
+# own logic, applied once per axis via computeConv2dLengthOffset/
+# computeConvTranspose2dLengthOffset (utils/conv_math.py) instead of
+# computeConv1dLengthOffset/computeConvTranspose1dLengthOffset. Every shape-like
+# constructor argument (kernel_size, stride, padding, dilation,
+# shortcut_kernel_size) is an already-resolved `(height, width)` tuple, exactly like
+# every other 2D building block in this codebase (TwoDCnnEncoder, TwoDCnnDecoder,
+# utils.builders.build2DPoolLayer/build2DUpSampleStage): resolving a caller's
+# shared-or-per-stage, square-or-non-square hyperparameters into these tuples is
+# utils.stage_config.broadcastPerStageShape's job, done once by
+# TwoDCnnResidualEncoder/TwoDCnnResidualDecoder before either class below is ever
+# touched.
+
+
+def _requireOddKernelForDepth2d(depth: int, kernel_size: tuple[int, int], block_name: str) -> None:
+    """Raise a clear error if `depth > 1` cannot possibly preserve shape internally.
+
+    2D counterpart of `_requireOddKernelForDepth`: an internal, length-preserving
+    layer needs an odd kernel size independently on *both* axes, since the two axes
+    of a `Conv2d`/`ConvTranspose2d` never interact under PyTorch's own formula (see
+    `computeConv2dLengthOffset`'s own module-level reasoning in `utils/conv_math.py`).
+
+    Args:
+        depth: Number of conv layers in the block.
+        kernel_size: `(kernel_height, kernel_width)` shared by every layer in the
+            block.
+        block_name: Which class is raising, used only for the error message.
+
+    Raises:
+        ValueError: If `depth > 1` and either component of `kernel_size` is even.
+    """
+    if depth > 1 and (kernel_size[0] % 2 == 0 or kernel_size[1] % 2 == 0):
+        raise ValueError(
+            f"{block_name} with depth={depth} > 1 requires an odd kernel_size on both axes "
+            f"for its internal, length-preserving layers (a stride-1 layer with an even "
+            f"kernel_size cannot preserve length exactly with any integer padding, "
+            f"independently per axis), got kernel_size={kernel_size}. Use an odd kernel_size "
+            f"on both axes, or depth=1 if an even kernel_size is required on some axis."
+        )
+
+
+class Residual2DBlock(nn.Module):
+    """One 2D residual block for an encoder: `depth` stacked `Conv2d` layers plus a shortcut.
+
+    Direct 2D generalization of `Residual1DBlock` (see its own docstring for the
+    full reasoning behind the "only the first layer may downsample/change channel
+    width" design, which carries over unchanged, applied independently per axis).
+    Only the first layer may downsample (`stride != (1, 1)`) and/or change channel
+    width (`in_channels -> out_channels`); every subsequent layer keeps both fixed
+    (stride `(1, 1)`, `out_channels -> out_channels`, "same" padding on both axes),
+    which is what keeps the block's shortcut, and its contribution to the
+    surrounding encoder's overall output shape, identical to a plain, single-layer
+    stage of the same stride/kernel_size/padding/dilation.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        depth: int = 2,
+        kernel_size: tuple[int, int] = (3, 3),
+        stride: tuple[int, int] = (1, 1),
+        padding: tuple[int, int] | None = None,
+        dilation: tuple[int, int] = (1, 1),
+        shortcut_kernel_size: tuple[int, int] = (1, 1),
+        activation: Callable[[], nn.Module] | None = nn.ReLU,
+        normalization: Callable[[int], nn.Module] | None = nn.BatchNorm2d,
+    ) -> None:
+        """Build the block.
+
+        Args:
+            in_channels: Input channel width.
+            out_channels: Output channel width of every layer in this block (the
+                first layer projects `in_channels -> out_channels`; every later
+                layer is `out_channels -> out_channels`).
+            depth: Number of `Conv2d` layers in this block. Must be at least `1`.
+                `2` (the default) is the classic ResNet "BasicBlock"; pass a larger
+                value for a deeper block, or `1` for a single projection layer plus
+                a shortcut (no internal layers at all).
+            kernel_size: `(kernel_height, kernel_width)` shared by every layer in
+                this block. Both components must be odd if `depth > 1` (see
+                `_requireOddKernelForDepth2d`).
+            stride: `(stride_height, stride_width)` of the first layer only (the
+                block's only shape-changing layer, aside from `padding`/`dilation`
+                choices); every later layer always uses stride `(1, 1)`.
+            padding: `(padding_height, padding_width)` of the first layer. `None`
+                (default) resolves to `dilation[axis] * (kernel_size[axis] // 2)`
+                per axis, matching every other "same"-style default in this
+                codebase (`TwoDCnnEncoder`'s own default padding).
+            dilation: `(dilation_height, dilation_width)` shared by every layer in
+                this block.
+            shortcut_kernel_size: `(kernel_height, kernel_width)` of the
+                shortcut's projection conv, only built when a projection is
+                actually needed (`in_channels != out_channels` or
+                `stride != (1, 1)`). Defaults to `(1, 1)`, the standard ResNet
+                choice. Its own padding is always the same "same"-style default as
+                above (with `dilation=(1, 1)`, since the shortcut is a single,
+                un-dilated projection); if that does not reach the exact same
+                output shape as the main path's first layer for every input
+                shape, on both axes independently, construction raises
+                `ValueError` naming both offsets (see
+                `utils.conv_math.computeConv2dLengthOffset`) rather than silently
+                building a mismatched shortcut.
+            activation: Zero-argument factory returning a fresh activation
+                module, applied after every internal layer and, once more, after
+                the residual addition itself. Pass `None` to disable activation
+                entirely (including after the addition).
+            normalization: One-argument factory taking a channel count and
+                returning a fresh normalization module, applied after every layer
+                in the main path and, if a projection shortcut is built, after
+                the shortcut's own conv too (standard ResNet convention: the
+                shortcut is normalized, never activated, before the addition).
+                Pass `None` to disable normalization entirely.
+
+        Raises:
+            ValueError: If `depth` is not at least `1`; if `depth > 1` and either
+                component of `kernel_size` is even; or if a projection shortcut is
+                needed but cannot be built to match the main path's output shape
+                for every input shape on both axes (adjust `padding` for this
+                block, or `shortcut_kernel_size`).
+        """
+        super().__init__()
+        if depth < 1:
+            raise ValueError(f"Residual2DBlock requires depth >= 1, got {depth}.")
+        _requireOddKernelForDepth2d(depth, kernel_size, "Residual2DBlock")
+
+        resolved_padding = (
+            padding
+            if padding is not None
+            else (dilation[0] * (kernel_size[0] // 2), dilation[1] * (kernel_size[1] // 2))
+        )
+        # used by every internal (non-first) layer
+        same_padding = (dilation[0] * (kernel_size[0] // 2), dilation[1] * (kernel_size[1] // 2))
+
+        layers: list[nn.Module] = []
+        current_in = in_channels
+        for index in range(depth):
+            is_first = index == 0
+            is_last = index == depth - 1
+            layer_stride = stride if is_first else (1, 1)
+            layer_padding = resolved_padding if is_first else same_padding
+            layers.append(
+                nn.Conv2d(
+                    current_in,
+                    out_channels,
+                    kernel_size=kernel_size,
+                    stride=layer_stride,
+                    padding=layer_padding,
+                    dilation=dilation,
+                )
+            )
+            if normalization is not None:
+                layers.append(normalization(out_channels))
+            if not is_last and activation is not None:
+                layers.append(activation())
+            current_in = out_channels
+        self.main = nn.Sequential(*layers)
+
+        self.needs_projection = in_channels != out_channels or stride != (1, 1)
+        if self.needs_projection:
+            main_offset = computeConv2dLengthOffset(kernel_size, resolved_padding, dilation)
+            # The shortcut's own dilation is always fixed at (1, 1) (a single un-dilated
+            # projection layer, the standard ResNet choice), so its "same"-style padding
+            # only ever depends on its own kernel_size, not on this block's `dilation`.
+            shortcut_padding = (shortcut_kernel_size[0] // 2, shortcut_kernel_size[1] // 2)
+            shortcut_offset = computeConv2dLengthOffset(
+                shortcut_kernel_size, shortcut_padding, (1, 1)
+            )
+            if main_offset != shortcut_offset:
+                raise ValueError(
+                    f"Residual2DBlock cannot build a shortcut that reaches the main path's "
+                    f"output shape for every input shape: the main path's first layer "
+                    f"(kernel_size={kernel_size}, padding={resolved_padding}, "
+                    f"dilation={dilation}) has length offset {main_offset}, but the shortcut "
+                    f"(kernel_size={shortcut_kernel_size}, padding={shortcut_padding}, "
+                    f"dilation=(1, 1)) has offset {shortcut_offset}. Adjust this block's "
+                    f"padding, or shortcut_kernel_size, so both offsets match on both axes "
+                    f"(the defaults, an odd kernel_size with padding=None, always satisfy "
+                    f"this)."
+                )
+            shortcut_layers: list[nn.Module] = [
+                nn.Conv2d(
+                    in_channels,
+                    out_channels,
+                    kernel_size=shortcut_kernel_size,
+                    stride=stride,
+                    padding=shortcut_padding,
+                )
+            ]
+            if normalization is not None:
+                shortcut_layers.append(normalization(out_channels))
+            self.shortcut: nn.Module = nn.Sequential(*shortcut_layers)
+        else:
+            self.shortcut = nn.Identity()
+
+        self.output_activation: nn.Module = (
+            activation() if activation is not None else nn.Identity()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the block: `activation(main(x) + shortcut(x))`.
+
+        Args:
+            x: Input tensor, shape `(batch, in_channels, height, width)`.
+
+        Returns:
+            Output tensor, shape `(batch, out_channels, out_height, out_width)`,
+            given by this block's first layer's own
+            stride/kernel_size/padding/dilation, independently per axis
+            (`utils.conv_math.computeConv2dOutputShape`).
+        """
+        main_output: torch.Tensor = self.main(x)
+        shortcut_output: torch.Tensor = self.shortcut(x)
+        result: torch.Tensor = self.output_activation(main_output + shortcut_output)
+        return result
+
+
+class Residual2DUpBlock(nn.Module):
+    """One 2D residual block for a decoder: `depth` stacked upsampling/conv layers plus a shortcut.
+
+    Direct 2D generalization of `Residual1DUpBlock`, mirroring it exactly on both
+    spatial axes: only the first layer upsamples (via
+    `utils.builders.build2DUpSampleStage`, the exact same
+    `"conv_transpose"`/`"interpolate_conv"` choice `TwoDCnnDecoder` offers); every
+    subsequent layer is a stride-`(1, 1)`, length-preserving `Conv2d` at the
+    block's `out_channels` width. The shortcut always uses the same
+    `upsample_mode` and the same `stride` as the main path's first layer, so both
+    paths' shape formulas share the same structure; it is verified, at
+    construction time, to reach the exact same output shape as the main path for
+    every input shape, on both axes independently, never merely for one example
+    shape.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        depth: int = 2,
+        kernel_size: tuple[int, int] = (3, 3),
+        stride: tuple[int, int] = (2, 2),
+        padding: tuple[int, int] = (1, 1),
+        output_padding: tuple[int, int] = (0, 0),
+        dilation: tuple[int, int] = (1, 1),
+        upsample_mode: str = "interpolate_conv",
+        shortcut_kernel_size: tuple[int, int] = (1, 1),
+        activation: Callable[[], nn.Module] | None = nn.ReLU,
+        normalization: Callable[[int], nn.Module] | None = nn.BatchNorm2d,
+        apply_output_normalization: bool = True,
+        apply_output_activation: bool = True,
+    ) -> None:
+        """Build the block.
+
+        Args:
+            in_channels: Input channel width.
+            out_channels: Output channel width of every layer in this block.
+            depth: Number of layers in this block (the first upsamples, every
+                later one is a stride-`(1, 1)` `Conv2d`). Must be at least `1`.
+                See `Residual1DUpBlock.__init__` for the same parameter's full
+                explanation; identical here, per axis.
+            kernel_size: `(kernel_height, kernel_width)` shared by every layer
+                in this block. Both components must be odd if `depth > 1`.
+            stride: `(stride_height, stride_width)` upsampling factor of the
+                first layer, and of the shortcut (kept identical on purpose, see
+                the class docstring).
+            padding: `(padding_height, padding_width)` of the first (upsampling)
+                layer. No `None`-resolves-to-"same" default, mirroring
+                `Residual1DUpBlock`'s own explicit-`padding` convention (an
+                upsampling transition is expected to change shape, so there is
+                no natural "same" padding either).
+            output_padding: `ConvTranspose2d`'s `(output_padding_height,
+                output_padding_width)` for the first layer. Ignored if
+                `upsample_mode` is `"interpolate_conv"`.
+            dilation: `(dilation_height, dilation_width)` shared by every layer
+                in this block.
+            upsample_mode: `"conv_transpose"` or `"interpolate_conv"`, exactly
+                as in `TwoDCnnDecoder`/`build2DUpSampleStage`.
+            shortcut_kernel_size: `(kernel_height, kernel_width)` of the
+                shortcut's own upsampling layer (built via the same
+                `build2DUpSampleStage`, same `upsample_mode`, same `stride`,
+                same `output_padding` for `"conv_transpose"` mode). Defaults to
+                `(1, 1)`. Its own padding is always resolved so the shortcut
+                reaches the exact same output shape as the main path's first
+                layer for every input shape, on both axes independently; if
+                that resolved padding would need to be negative on some axis,
+                or (for `"conv_transpose"` mode) the implied `output_padding`
+                combination is infeasible on some axis, construction raises
+                `ValueError` explaining why (adjust `padding`/`output_padding`
+                for this block, or `shortcut_kernel_size`).
+            activation: As in `Residual1DUpBlock.__init__`.
+            normalization: As in `Residual1DUpBlock.__init__`.
+            apply_output_normalization: As in `Residual1DUpBlock.__init__`.
+            apply_output_activation: As in `Residual1DUpBlock.__init__`.
+
+        Raises:
+            ValueError: If `depth` is not at least `1`; if `depth > 1` and either
+                component of `kernel_size` is even; if `upsample_mode` is not
+                recognized; or if a projection shortcut cannot be built to match
+                the main path's output shape for every input shape on both axes.
+        """
+        super().__init__()
+        if depth < 1:
+            raise ValueError(f"Residual2DUpBlock requires depth >= 1, got {depth}.")
+        _requireOddKernelForDepth2d(depth, kernel_size, "Residual2DUpBlock")
+        if upsample_mode not in ("conv_transpose", "interpolate_conv"):
+            raise ValueError(
+                f"Unknown upsample_mode '{upsample_mode}'. Expected 'conv_transpose' or "
+                f"'interpolate_conv'."
+            )
+
+        # used by every internal (non-first) layer
+        same_padding = (dilation[0] * (kernel_size[0] // 2), dilation[1] * (kernel_size[1] // 2))
+
+        layers: list[nn.Module] = []
+        current_in = in_channels
+        for index in range(depth):
+            is_first = index == 0
+            is_last = index == depth - 1
+            if is_first:
+                layers.append(
+                    build2DUpSampleStage(
+                        current_in,
+                        out_channels,
+                        kernel_size,
+                        stride,
+                        padding,
+                        output_padding,
+                        dilation,
+                        upsample_mode=upsample_mode,
+                    )
+                )
+            else:
+                layers.append(
+                    nn.Conv2d(
+                        current_in,
+                        out_channels,
+                        kernel_size=kernel_size,
+                        stride=(1, 1),
+                        padding=same_padding,
+                        dilation=dilation,
+                    )
+                )
+            if normalization is not None and (not is_last or apply_output_normalization):
+                layers.append(normalization(out_channels))
+            if not is_last and activation is not None:
+                layers.append(activation())
+            current_in = out_channels
+        self.main = nn.Sequential(*layers)
+
+        self.needs_projection = in_channels != out_channels or stride != (1, 1)
+        if self.needs_projection:
+            if upsample_mode == "conv_transpose":
+                main_offset = computeConvTranspose2dLengthOffset(
+                    kernel_size, padding, output_padding, dilation
+                )
+                # The shortcut's own dilation is always fixed at (1, 1), so its
+                # "same"-style padding only depends on its own kernel_size (see
+                # Residual2DBlock's identical comment).
+                shortcut_padding = (shortcut_kernel_size[0] // 2, shortcut_kernel_size[1] // 2)
+                shortcut_output_padding = (
+                    main_offset[0] + 2 * shortcut_padding[0] - (shortcut_kernel_size[0] - 1),
+                    main_offset[1] + 2 * shortcut_padding[1] - (shortcut_kernel_size[1] - 1),
+                )
+                max_valid = (max(stride[0], 1), max(stride[1], 1))
+                if not (
+                    0 <= shortcut_output_padding[0] < max_valid[0]
+                    and 0 <= shortcut_output_padding[1] < max_valid[1]
+                ):
+                    raise ValueError(
+                        f"Residual2DUpBlock cannot build a conv_transpose shortcut that "
+                        f"reaches the main path's output shape for every input shape: doing "
+                        f"so would need output_padding={shortcut_output_padding} for the "
+                        f"shortcut (kernel_size={shortcut_kernel_size}), but it must satisfy "
+                        f"0 <= output_padding[axis] < {max_valid}[axis] given stride={stride}. "
+                        f"Adjust this block's padding/output_padding, or shortcut_kernel_size."
+                    )
+                shortcut_module = build2DUpSampleStage(
+                    in_channels,
+                    out_channels,
+                    shortcut_kernel_size,
+                    stride,
+                    shortcut_padding,
+                    shortcut_output_padding,
+                    (1, 1),
+                    upsample_mode="conv_transpose",
+                )
+            else:
+                main_offset = computeConv2dLengthOffset(kernel_size, padding, dilation)
+                shortcut_padding = (
+                    shortcut_kernel_size[0] // 2,
+                    shortcut_kernel_size[1] // 2,
+                )  # shortcut dilation fixed at (1, 1)
+                shortcut_offset = computeConv2dLengthOffset(
+                    shortcut_kernel_size, shortcut_padding, (1, 1)
+                )
+                if main_offset != shortcut_offset:
+                    raise ValueError(
+                        f"Residual2DUpBlock cannot build an interpolate_conv shortcut that "
+                        f"reaches the main path's output shape for every input shape: the "
+                        f"main path's post-upsample conv (kernel_size={kernel_size}, "
+                        f"padding={padding}, dilation={dilation}) has length offset "
+                        f"{main_offset}, but the shortcut (kernel_size={shortcut_kernel_size}, "
+                        f"padding={shortcut_padding}, dilation=(1, 1)) has offset "
+                        f"{shortcut_offset}. Adjust this block's padding, or "
+                        f"shortcut_kernel_size, so both offsets match on both axes (the "
+                        f"defaults, an odd kernel_size, always satisfy this)."
+                    )
+                shortcut_module = build2DUpSampleStage(
+                    in_channels,
+                    out_channels,
+                    shortcut_kernel_size,
+                    stride,
+                    shortcut_padding,
+                    (0, 0),
+                    (1, 1),
+                    upsample_mode="interpolate_conv",
+                )
+            shortcut_layers: list[nn.Module] = [shortcut_module]
+            if normalization is not None and apply_output_normalization:
+                shortcut_layers.append(normalization(out_channels))
+            self.shortcut: nn.Module = nn.Sequential(*shortcut_layers)
+        else:
+            self.shortcut = nn.Identity()
+
+        self.output_activation: nn.Module = (
+            activation() if activation is not None and apply_output_activation else nn.Identity()
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Run the block: `activation(main(x) + shortcut(x))`.
+
+        Args:
+            x: Input tensor, shape `(batch, in_channels, height, width)`.
+
+        Returns:
+            Output tensor, shape `(batch, out_channels, out_height, out_width)`.
         """
         main_output: torch.Tensor = self.main(x)
         shortcut_output: torch.Tensor = self.shortcut(x)

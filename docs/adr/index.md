@@ -5,13 +5,6 @@ the time it was made*. A changed decision gets a **new** ADR rather than an
 edit to an old one in place (see the
 [project specification](../global-vae-project-specification.md), §10).
 
-!!! note
-    The one-line topics below were reconstructed from how the codebase
-    itself cross-references each ADR (docstrings, README), not copied from
-    the ADR files directly. **0015 and 0016 are guesses from their filenames
-    alone** (I don't have their content) -- please correct these two, the
-    other fourteen I'm fairly confident about.
-
 | ADR | Topic |
 |---|---|
 | [0001 — Phase 1 default configuration](0001-phase1-default-configuration.md) | Why `EN-L1-DN` (per-modality encoders, one fused latent, per-modality decoders) is the recommended Phase-1 default among the 8 valid configurations (spec §2.1). |

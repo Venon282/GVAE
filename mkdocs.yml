@@ -34,21 +34,19 @@ nav:
       - Add a fusion / assembler / regularizer / transform / schedule: how-to/add-a-strategy.md
       - Train a model (Hydra config): how-to/train.md
       - Evaluate and visualize a checkpoint: how-to/evaluate.md
-  - Architecture Decisions: adr/index.md
+  - Architecture Decisions: adr/  # literate-nav: expands adr/SUMMARY.md, one sidebar entry per ADR
   - API Reference: reference/  # populated automatically at build time, see scripts/gen_ref_pages.py
-  - Changelog: changelog/SUMMARY.md
+  - Changelog: changelog/  # literate-nav: expands changelog/SUMMARY.md, one entry per version
   - About VAE:
       - En: guide-vae-accessible-en.md
       - Fr: guide-vae-accessible-fr.md
 
-# ADR pages and per-version changelog files are intentionally reached via
-# their own index page (adr/index.md, changelog/CHANGELOG.md), not listed
-# individually in the sidebar -- this silences the "not included in nav"
-# INFO messages for exactly those, without hiding a genuine mistake
-# elsewhere (a real orphaned page anywhere else still warns).
-# not_in_nav: |
-#   adr/*.md
-#   changelog/*.md
+# literate-nav only expands a SUMMARY.md when the nav entry points at its *directory*
+# (`adr/`, `changelog/`, `reference/`, trailing slash included). Pointing at the file
+# itself (`adr/SUMMARY.md`) makes mkdocs render it as one ordinary page titled
+# "SUMMARY", with none of the entries it lists showing up in the sidebar: this is what
+# the changelog entry used to do. tests/integration/test_docs_adr_navigation.py guards
+# both the directory form and the completeness of adr/SUMMARY.md.
 
 plugins:
   - search

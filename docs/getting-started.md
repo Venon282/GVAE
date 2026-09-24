@@ -23,6 +23,10 @@ side-by-side comparison of two named experiment variants, see
 `examples/02_config_driven_pipeline.py` (and `examples/README.md` for the
 full option list).
 
+For the multimodal case, `(signal, image) -> image` with a target that differs from
+every input, two encoders fused into one latent space and reconstruction from either
+input alone, see `examples/03_signal_image_to_image.py`.
+
 ## Train on your own data
 
 ```bash

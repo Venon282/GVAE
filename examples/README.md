@@ -5,16 +5,17 @@ Distinct from `scripts/` (CLI entry points that expect *you* to supply a model/d
 factory or a Hydra config) and `notebooks/` (interactive exploration): everything here
 runs top-to-bottom with `python examples/<file>.py` and no external data, using
 synthetic data generated in-memory, so a new contributor can run it immediately after
-cloning the repository. `_synthetic_signal_data.py` is shared scaffolding the two
-scripts below both import their data from (the leading underscore marks it as not
+cloning the repository. `_synthetic_signal_data.py` is shared scaffolding the first
+two scripts below both import their data from (the leading underscore marks it as not
 meant to be run directly, mirroring `tests/integration/_script_fixtures.py`'s own
-convention); it is not a third example of its own.
+convention); it is not an example of its own. `03_signal_image_to_image.py` generates
+its own data and needs no shared helper.
 
 ## `01_signal_vae_pipeline.py`
 
 The full spec §6.1 milestone 1 pipeline, end to end, on simple synthetic 1D signals
-(this is the only configuration the framework fully supports today: single modality,
-no fusion, no image encoder/decoder yet), built directly through the Python API (see
+(the single-modality case: no fusion; see `03_signal_image_to_image.py` below for two
+modalities fused into one latent space), built directly through the Python API (see
 `02_config_driven_pipeline.py` below for the same pipeline built from `configs/` YAML
 instead). Deliberately generates each curve on its own irregular grid, then uses
 `ResampleTransform(interpolation="scipy")` (spec §6.2) to resample every curve onto one
@@ -76,3 +77,52 @@ Every output is written to `<output-root>/<variant>/` (default
 above). Two variants of 100 epochs each (this script's own defaults) take noticeably
 longer on CPU than `01_signal_vae_pipeline.py` alone; use `--variants`/`--num-epochs`
 for a faster check.
+
+## `03_signal_image_to_image.py`
+
+The multimodal case: **`(signal, image) -> image`, where the output image is not the
+input image** (spec §2.1 `EN-L1-DN`, §4 fusion, §5 missing-modality robustness, §6
+image modality). Two encoders (`1d_cnn_resnet_encoder_v1` for the 1D signal,
+`2d_cnn_resnet_encoder_v1` for the image, the 2D pair of
+`docs/adr/0018-2d-residual-encoder-decoder.md`) feed one latent space through
+Product-of-Experts fusion, and a single decoder (`2d_cnn_resnet_decoder_v1`) produces
+the target image.
+
+The synthetic task is built so that neither input is enough alone: each sample is a
+Gaussian blob, the `signal` is its horizontal profile (blind to its vertical
+position), and `image_in` is a heavily noised, partly erased picture of it (carrying
+the vertical position, unreliably). The target `image_out` is the clean picture.
+Modality dropout (spec §5) hides either input at random during training, so the one
+fused latent learns to work from either alone. The script then reports, per input
+subset, what the decoder produces from `signal` alone, `image_in` alone, and both
+(`collectCrossModalReconstructions`, `docs/adr/0016-cross-modal-reconstruction-reporting.md`),
+next to the trivial baseline of returning the degraded input. Typical test-set R^2 with
+the defaults: about 0.33 from the signal alone, 0.57 from the image alone, **0.76 from
+both**, and strongly negative for the baseline.
+
+Two things it shows that the other examples cannot:
+
+- **A decoder target that is not an encoder input.** `Trainer` uses the batch both as
+  encoder input and as reconstruction target, and `GlobalVae.forward` rejects a key
+  without an encoder, so training on a separate `image_out` needs a small
+  `TranslationTrainer` subclass (defined in the script; see its docstring). The model
+  itself is built from an explicit `RoutingGraph` rather than `createSingleLatent`,
+  which ties decoder names to encoder names.
+- **The figure.** `translation_grid.png` lines up, for several test samples, the signal,
+  the degraded input, the target, and the output from each input subset. The
+  signal-only output is a blob smeared along y (right x, unknown y), the image-only
+  output can put the blob in the wrong place when it is occluded, and the fused output
+  gets both right. It is drawn by the script itself: the framework's cross-modal
+  matrix plot handles 1D series only.
+
+```bash
+pip install -e ".[dev]"
+python examples/03_signal_image_to_image.py
+python examples/03_signal_image_to_image.py --num-epochs 5 --num-train 256   # quick check
+python examples/03_signal_image_to_image.py --help                            # every option
+```
+
+Every output (best checkpoint, CSV metrics, `metrics_by_input_subset.json`,
+`translation_grid.png`, `loss_curves.png`) is written to
+`examples/outputs/03_signal_image_to_image/` (git-ignored, same pattern as above). The
+defaults (2048 training samples, 40 epochs) take a few minutes on CPU.

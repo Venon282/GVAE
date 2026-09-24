@@ -5,6 +5,11 @@ the time it was made*. A changed decision gets a **new** ADR rather than an
 edit to an old one in place (see the
 [project specification](../global-vae-project-specification.md), §10).
 
+Every ADR is also listed individually in the site sidebar, through
+`docs/adr/SUMMARY.md` (mirroring how the changelog is navigated). Adding an ADR
+means adding one row to the table below **and** one line to `SUMMARY.md`;
+`tests/integration/test_docs_adr_navigation.py` fails if either is forgotten.
+
 | ADR | Topic |
 |---|---|
 | [0001 — Phase 1 default configuration](0001-phase1-default-configuration.md) | Why `EN-L1-DN` (per-modality encoders, one fused latent, per-modality decoders) is the recommended Phase-1 default among the 8 valid configurations (spec §2.1). |
@@ -21,5 +26,7 @@ edit to an old one in place (see the
 | [0012 — Generic data transforms](0012-generic-data-transforms.md) | `data/transforms/`: `log` / `standardize` / `resample` as dimensionality-agnostic, invertible, registry-based transforms. |
 | [0013 — Coordinate-aware resampling](0013-coordinate-aware-resampling.md) | `ResampleTransform`'s `interpolation="scipy"` mode: explicit source/target positions, not just point counts. |
 | [0014 — Residual 1D encoder/decoder](0014-residual-1d-encoder-decoder.md) | `OneDCnnResidualEncoder` / `OneDCnnResidualDecoder`: configurable-depth residual blocks as an alternative backbone (spec §7). |
-| [0015 — Per-modality data transforms](0015-per-modality-data-transforms.md) | *Guess:* extending `DataConfig.transforms` from one shared pipeline to a per-modality mapping, likely needed once a second modality (image) is actually in play. |
-| [0016 — Cross-modal reconstruction reporting](0016-cross-modal-reconstruction-reporting.md) | *Guess:* evaluation/visualization support for reconstructing one modality from another modality's latent (e.g. image from signal), relevant once fusion is exercised end to end. |
+| [0015 — Per-modality data transforms](0015-per-modality-data-transforms.md) | `DataConfig.transforms` and `sequence_length` become per-modality mappings (modality name to steps/length), and `buildTransformPipeline` returns one invertible pipeline per modality, so two datasets sharing an encoder/decoder family can each have their own preprocessing (spec §6). |
+| [0016: Cross-modal reconstruction reporting](0016-cross-modal-reconstruction-reporting.md) | Running a trained model under several input-modality subsets and laying out what every decoder reconstructs (`collectCrossModalReconstructions`, `evaluation/cross_modal.py`), with no change to `GlobalVae.forward` (spec §5). |
+| [0017: 2D CNN encoder/decoder](0017-2d-cnn-encoder-decoder.md) | `TwoDCnnEncoder` / `TwoDCnnDecoder` for the image modality (spec §6), plus the `list`-means-per-stage / `tuple`-means-shared convention for shape-like hyperparameters (`broadcastPerStageShape`). |
+| [0018: 2D residual encoder/decoder](0018-2d-residual-encoder-decoder.md) | `TwoDCnnResidualEncoder` / `TwoDCnnResidualDecoder` built from `Residual2DBlock` / `Residual2DUpBlock`: the 2D generalization of ADR 0014, with the residual shortcut verified per axis (spec §7). |

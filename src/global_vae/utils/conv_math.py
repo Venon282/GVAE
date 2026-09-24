@@ -1,3 +1,19 @@
+"""Convolution, transposed-convolution, and pooling shape arithmetic (spec §6, §12).
+
+The one place in this codebase where the output-shape formulas of `Conv1d`/`Conv2d`,
+`ConvTranspose1d`/`ConvTranspose2d`, and pooling layers are written down. Every encoder,
+decoder, and residual block delegates here (`OneDCnnEncoder.computeMinimumInputLength`,
+`TwoDCnnDecoder.computeOutputShape`, the shortcut verification in
+`utils.conv_blocks.Residual1DBlock`/`Residual2DBlock`, ...), which is what lets a
+configuration be verified at construction time instead of discovered wrong at forward
+time. The formulas are checked against real PyTorch modules in
+`tests/integration/test_conv_math.py`.
+
+The 1D functions come first; the 2D functions (spec §6's image modality) follow, each one
+the corresponding 1D function applied once per axis (see the note above them).
+"""
+
+
 def computeConv1dOutputLength(
     input_length: int,
     kernel_size: int,
@@ -419,8 +435,7 @@ def solveConvTranspose2dOutputPadding(
     padding: tuple[int, int],
     dilation: tuple[int, int],
 ) -> tuple[int, int]:
-    """Solve, independently per axis, the `output_padding` that makes a `ConvTranspose2d`
-    hit `target_shape` exactly.
+    """Solve, per axis, the `output_padding` making a `ConvTranspose2d` hit `target_shape`.
 
     Each axis of a `ConvTranspose2d` is an independent 1D
     `ConvTranspose1d`-equivalent computation (see the module-level
@@ -461,8 +476,9 @@ def solveMinimumInputShapeForConv2d(
     padding: tuple[int, int],
     dilation: tuple[int, int],
 ) -> tuple[int, int]:
-    """Solve, independently per axis, the minimum input shape whose `Conv2d` output
-    shape reaches `min_output_shape`.
+    """Solve, per axis, the minimum input shape whose `Conv2d` output reaches a target.
+
+    The target is `min_output_shape`, reached independently on each axis.
 
     Also valid for 2D pooling layers (`MaxPool2d`/`AvgPool2d`), exactly
     as `solveMinimumInputLengthForConv1d` is for their 1D counterparts:

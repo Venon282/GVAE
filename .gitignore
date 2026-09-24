@@ -33,3 +33,7 @@ data/processed/
 .DS_Store
 .idea/
 .vscode/
+
+# other
+file_differents.py
+test.py

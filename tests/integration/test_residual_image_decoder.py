@@ -116,7 +116,11 @@ class TestFlexibleBlockDepths:
     def test_even_kernel_size_with_depth_greater_than_one_raises(self) -> None:
         with pytest.raises(ValueError, match="odd kernel_size"):
             TwoDCnnResidualDecoder(
-                latent_dim=8, output_shape=(64, 64), hidden_channels=(32,), kernel_sizes=4, block_depths=2
+                latent_dim=8,
+                output_shape=(64, 64),
+                hidden_channels=(32,),
+                kernel_sizes=4,
+                block_depths=2,
             )
 
 
@@ -332,9 +336,7 @@ class TestEncoderDecoderRoundTrip:
     def test_square_rgb_round_trip(self) -> None:
         from global_vae.encoders.TwoDCnnResidualEncoder import TwoDCnnResidualEncoder
 
-        encoder = TwoDCnnResidualEncoder(
-            latent_dim=12, in_channels=3, hidden_channels=(16, 32, 64)
-        )
+        encoder = TwoDCnnResidualEncoder(latent_dim=12, in_channels=3, hidden_channels=(16, 32, 64))
         decoder = TwoDCnnResidualDecoder(
             latent_dim=12,
             output_shape=(64, 64),

@@ -96,9 +96,7 @@ class TestFlexibleBlockDepths:
         assert logvar.shape == (2, 8)
 
     def test_shared_block_depth_applies_to_every_stage(self) -> None:
-        encoder = TwoDCnnResidualEncoder(
-            latent_dim=8, hidden_channels=(16, 32, 64), block_depths=3
-        )
+        encoder = TwoDCnnResidualEncoder(latent_dim=8, hidden_channels=(16, 32, 64), block_depths=3)
         mu, _ = encoder(torch.randn(2, 64, 64))
         assert mu.shape == (2, 8)
 
@@ -275,9 +273,7 @@ class TestMinimumInputShape:
         `OneDCnnResidualEncoder.computeMinimumInputLength` gives for the 1D case, and
         the same value `TwoDCnnEncoder.computeMinimumInputShape` gives for the plain
         (non-residual) 2D case, since odd-kernel internal layers add no requirement."""
-        min_shape = TwoDCnnResidualEncoder.computeMinimumInputShape(
-            hidden_channels=(32, 64, 128)
-        )
+        min_shape = TwoDCnnResidualEncoder.computeMinimumInputShape(hidden_channels=(32, 64, 128))
         assert min_shape == (8, 8)
 
     def test_property_matches_the_static_method(self) -> None:

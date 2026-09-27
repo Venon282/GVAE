@@ -16,6 +16,29 @@ without running a full evaluation pass, and adds a few capabilities
 field (`--label-key`), restricting which latent spaces get plotted, and plotting
 realized samples instead of the posterior mean (`--use-samples`).
 
+Both scripts do intentionally overlap on the latent scatter plot and the
+per-dimension KL bar chart: they are the two most useful lenses on a
+latent space regardless of whether the caller is running a full report
+or a quick check, so re-deriving them in each place would just be
+duplication of the exact same `visualization.latent_plot` calls. Run
+against the *same* checkpoint and the *same*, non-shuffled dataloader,
+the two are expected to produce the *same* figures: both restrict a
+batch to the model's own encoder inputs before the forward pass
+(`GlobalVae.selectEncoderInputs`, ADR 0019) and both plot the posterior
+mean, and PCA (the default projection whenever `latent_dim` is not
+already `n_components`) is an exact, deterministic decomposition
+(`torch.linalg.svd`), not the randomized approximation
+`torch.pca_lowrank` used to be. If the two ever do look different for
+the same checkpoint and dataloader, the most likely cause is a
+*shuffled* dataloader (a different subset/order of samples each run,
+especially under `--max-samples`), not the plotting code itself.
+
+The training-curve plot exercises `visualization.loss_curves.plotLossCurves`'s own
+two-axis capability by default (`--history-no-twin-axis` to disable it, and
+`--history-log-scale`/`--history-twin-log-scale` for either axis): regularization
+loss is frequently orders of magnitude smaller than reconstruction/total loss (spec
+§2.3) and gets visually crushed onto a thin band near a shared axis's edge otherwise.
+
 Model construction and data loading stay the caller's own responsibility everywhere
 else in this framework (data pipeline concerns are explicitly out of scope; no config
 schema exists for it, spec §11), so this script does not hardcode either: both are
@@ -109,6 +132,8 @@ def _collectLatentParamsAndLabels(
 
     with torch.no_grad():
         for raw_batch in dataloader:
+            # Mirrors GlobalVae.selectEncoderInputs (ADR 0019), inlined so only the
+            # keys actually needed are ever moved to `device`.
             model_inputs = {
                 name: tensor.to(device)
                 for name, tensor in raw_batch.items()
@@ -234,6 +259,26 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         help="Skip the training-curve plot even if the checkpoint carries a non-empty history.",
     )
     parser.add_argument(
+        "--history-no-twin-axis",
+        action="store_true",
+        help="Plot every loss curve on one shared axis instead of the default: "
+        "reconstruction/total loss on the primary axis, regularization loss on an "
+        "independently-scaled secondary axis. Regularization is frequently orders of "
+        "magnitude smaller than reconstruction (spec §2.3), and gets visually crushed "
+        "onto a thin band near the shared axis's edge otherwise; see "
+        "visualization.loss_curves's own module docstring for the full reasoning.",
+    )
+    parser.add_argument(
+        "--history-log-scale",
+        action="store_true",
+        help="Log-scale the primary loss-curve axis (forwarded to plotLossCurves).",
+    )
+    parser.add_argument(
+        "--history-twin-log-scale",
+        action="store_true",
+        help="Log-scale the secondary (regularization) loss-curve axis, if it is drawn.",
+    )
+    parser.add_argument(
         "--max-samples",
         type=int,
         default=None,
@@ -329,7 +374,25 @@ def main(argv: list[str] | None = None) -> None:
     if args.skip_history:
         pass
     elif metadata.history:
-        history_fig = plotLossCurves(metadata.history)
+        # Regularization is frequently much smaller than reconstruction/total loss
+        # (spec §2.3): give it its own, independently-scaled axis by default rather
+        # than letting it get crushed onto a shared one (visualization.loss_curves's
+        # own module docstring). Auto-detected from whatever keys this run's history
+        # actually has (e.g. "train/loss/regularization", and "val/..." too if a
+        # validation dataloader was used), so this works regardless of which of
+        # those happen to be present.
+        twin_metrics = (
+            None
+            if args.history_no_twin_axis
+            else [key for key in metadata.history[0] if "regularization" in key] or None
+        )
+        history_fig = plotLossCurves(
+            metadata.history,
+            twin_metrics=twin_metrics,
+            log_scale=args.history_log_scale,
+            twin_log_scale=args.history_twin_log_scale,
+            twin_ylabel="regularization loss (secondary axis)",
+        )
         history_path = output_dir / "loss_curves.png"
         history_fig.savefig(history_path)
         plt.close(history_fig)

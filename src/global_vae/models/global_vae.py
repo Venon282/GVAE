@@ -24,8 +24,16 @@ Each latent space also gets its own regularization strategy (spec
 §2.3), selected per latent space exactly like Fusion, defaulting to
 `"kl_standard_normal"` when unspecified. See
 `docs/adr/0003-pluggable-latent-regularization.md`.
+
+`forward()`'s own `inputs` dict must be restricted to registered
+encoder names; a raw per-modality batch that also carries decoder-only
+reconstruction targets (a translation-style `image_in -> image_out`
+model, where the target is not itself an encoder input) is filtered
+down via `selectEncoderInputs` before it ever reaches `forward()`. See
+`docs/adr/0019-decouple-encoder-inputs-from-decoder-targets.md`.
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 import torch
@@ -270,6 +278,52 @@ class GlobalVae(nn.Module):
                 result[latent_name].append(encoder_name)
         return result
 
+    def selectEncoderInputs(
+        self, batch: dict[str, torch.Tensor] | Mapping[str, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        """Restrict a per-modality batch to the keys this model can actually encode.
+
+        A batch dict conventionally carries one entry per modality
+        (spec §6.1), which is enough as long as every decoder shares
+        its name with an encoder. That stops being true the moment an
+        encoder's input and a decoder's reconstruction target are not
+        the same modality (e.g. a translation-style `image_in ->
+        image_out` model, ADR 0019): the batch then also carries
+        decoder-only target keys `forward()` has no encoder for, and
+        passing it straight through raises `KeyError` from
+        `self.encoders[encoder_name]`. This is the one place that
+        restriction happens, so every framework entry point that walks
+        a raw per-modality batch (`Trainer.computeLosses`,
+        `evaluation.evaluate.evaluate`, and the `visualization`
+        collectors) can call `model.selectEncoderInputs(batch)` before
+        `forward()` and stay correct regardless of whether inputs and
+        targets share a name.
+
+        Args:
+            batch: Modality name -> tensor: encoder inputs and any
+                decoder-only reconstruction targets alike. The caller
+                keeps its own reference to the unfiltered `batch` for
+                matching reconstructions against their targets; this
+                method only ever returns a subset, never mutates its
+                argument.
+
+        Returns:
+            The subset of `batch` whose key names one of `self.encoders`.
+
+        Raises:
+            ValueError: If no key of `batch` names one of this model's
+                encoders, i.e. there would be nothing left to encode.
+        """
+        encoder_inputs = {name: tensor for name, tensor in batch.items() if name in self.encoders}
+        if not encoder_inputs:
+            raise ValueError(
+                f"None of this batch's keys ({sorted(batch)}) match any of this model's "
+                f"encoders ({sorted(self.encoders)}). At least one encoder input is required; "
+                f"a decoder-only target with no matching encoder (ADR 0019) is fine as long as "
+                f"at least one other key names a real encoder."
+            )
+        return encoder_inputs
+
     def forward(
         self, inputs: dict[str, torch.Tensor], use_mean: bool = False
     ) -> dict[str, dict[str, torch.Tensor] | dict[str, tuple[torch.Tensor, torch.Tensor]]]:
@@ -279,7 +333,10 @@ class GlobalVae(nn.Module):
             inputs: Modality name -> raw input tensor. Any non-empty
                 subset of the configured modalities is accepted; actual
                 missing-modality robustness depends on the fusion
-                strategy in use for each latent space (spec §5).
+                strategy in use for each latent space (spec §5). Every
+                key must name a registered encoder (see
+                `selectEncoderInputs` for restricting a raw batch that
+                may also carry decoder-only target keys, ADR 0019).
             use_mean: If `False` (default, unchanged from every prior
                 behavior of this method), each latent space is sampled
                 via the reparameterization trick
@@ -305,9 +362,21 @@ class GlobalVae(nn.Module):
 
         Raises:
             ValueError: If `inputs` is empty.
+            KeyError: If some key of `inputs` names no registered
+                encoder (see `selectEncoderInputs`).
         """
         if not inputs:
             raise ValueError("GlobalVae.forward() requires at least one modality in `inputs`.")
+
+        unknown_keys = sorted(set(inputs) - set(self.encoders))
+        if unknown_keys:
+            raise KeyError(
+                f"GlobalVae.forward() received input key(s) {unknown_keys} with no matching "
+                f"encoder (available: {sorted(self.encoders)}). If these are decoder-only "
+                f"reconstruction targets rather than genuine encoder inputs (e.g. a "
+                f"translation-style 'image_in -> image_out' model, ADR 0019), restrict "
+                f"`inputs` first: model.selectEncoderInputs(batch)."
+            )
 
         encoder_outputs = {
             encoder_name: self.encoders[encoder_name](x) for encoder_name, x in inputs.items()

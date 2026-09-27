@@ -55,6 +55,33 @@ versioning follows [Semantic Versioning](https://semver.org/).
   directory form for the ADR and changelog nav entries, and (if the `docs` extra is installed)
   when the *built* sidebar does not list every ADR.
 - `docs/adr/SUMMARY.md`: one sidebar entry per ADR (see "Fixed").
+- `docs/adr/0019-decouple-encoder-inputs-from-decoder-targets.md`: `GlobalVae.selectEncoderInputs`,
+  the shared restriction every framework entry point (`Trainer`, `evaluation.evaluate.evaluate`,
+  the `visualization` collectors) now applies to a raw per-modality batch before its own forward
+  pass, so a decoder's reconstruction target no longer needs to also be one of the model's
+  encoder inputs anywhere in the framework, not only inside a caller's own workaround. See
+  "Fixed" for what this replaces.
+- `tests/integration/test_trainer.py` gained `TestTargetOnlyDecoderKeys` (a decoder target with
+  no matching encoder trains and evaluates through the stock `Trainer`, `GlobalVae.forward`
+  raises a clear `KeyError` if that restriction is skipped, `selectEncoderInputs` raises
+  `ValueError` if nothing in a batch matches any encoder) and
+  `TestModalityDropout.test_evaluate_never_applies_modality_dropout`.
+- `tests/integration/test_signal_image_example.py::TestTrainerHandlesTargetOnlyKeys` (replaces
+  `TestTranslationTrainer`, see "Fixed"): the same scenarios, against the stock `Trainer`.
+- `scripts/evaluate.py` gained `--inverse-transform-factory`: an optional
+  `"module.path:function_name"` returning a `dict[str, Callable[[Tensor], Tensor]]`, forwarded to
+  `exportEvaluationFigures`'/`exportCrossModalFigures`'s own `inverse_transforms` so
+  reconstruction figures can show original-scale values instead of whatever `data.transforms`
+  preprocessing (spec §6.2) was applied before training. `tests/integration/_script_fixtures.py`
+  gained `buildInverseTransformsForScript`; `test_evaluate_script.py` gained
+  `TestInverseTransformFactory`.
+- `scripts/visualize_latent.py` gained `--history-no-twin-axis`, `--history-log-scale`, and
+  `--history-twin-log-scale`: the loss-curve plot now defaults to splitting regularization loss
+  onto its own, independently-scaled secondary axis (`plotLossCurves`'s own `twin_metrics`,
+  already used by `examples/03_signal_image_to_image.py` but previously unused by this script;
+  spec §2.3 already notes regularization is frequently orders of magnitude smaller than
+  reconstruction/total loss). `tests/integration/test_visualize_latent_script.py` gained
+  `TestLossCurveAxes`.
 
 ### Changed
 
@@ -67,6 +94,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
   calls the single-modality pipeline "the only configuration the framework fully supports".
 - `TwoDCnnResidualEncoder.py`, `test_residual_image_encoder.py` and
   `test_residual_image_decoder.py` formatted with `ruff format`.
+- `examples/03_signal_image_to_image.py` no longer defines its own `TranslationTrainer`: the
+  stock `Trainer` now handles a decoder target with no matching encoder, and never applies
+  modality dropout during `evaluate()`, itself (ADR 0019). `main()` now builds a plain `Trainer`.
 
 ### Fixed
 
@@ -76,6 +106,46 @@ versioning follows [Semantic Versioning](https://semver.org/).
   ADR section showed a single page, and the changelog entry rendered `SUMMARY.md` as one ordinary
   page titled "SUMMARY". Both entries now use the directory form (`adr/`, `changelog/`); all 18
   ADRs and the 3 changelog pages appear in the built sidebar, and `mkdocs build --strict` passes.
+- **`Trainer` (and every other framework entry point) could not train or evaluate a model
+  whose decoder target is not also an encoder input** (a translation-style
+  `image_in -> image_out` model): `GlobalVae.forward` raised `KeyError` on the target-only
+  key the moment the whole batch was handed to it as `inputs`. Fixed by
+  `GlobalVae.selectEncoderInputs`, now called before every framework forward pass over a
+  raw batch (`Trainer.computeLosses`, `evaluation.evaluate.evaluate`,
+  `visualization.latent_plot.collectLatentParams`,
+  `visualization.reconstruction_plot.collectReconstructions`); see ADR 0019. This closes
+  `examples/03_signal_image_to_image.py`'s own `TranslationTrainer` workaround, removed
+  (see "Changed").
+- **`Trainer.evaluate` applied modality dropout during validation**, so the reported
+  `"val/..."` metrics depended on which modalities a given validation pass happened to
+  randomly hide, adding spurious noise to whatever `BestCheckpointCallback` or an
+  early-stopping rule compares across epochs. Fixed by `Trainer.computeLosses`'s new
+  `apply_dropout` parameter, which `evaluate()` sets to `False` (ADR 0019, which also
+  measures the effect: about a 45% reduction in run-to-run spread on a
+  two-modality/`modality_dropout_p=0.9` smoke case).
+- **`visualization.latent_plot`'s PCA projection was silently non-deterministic**:
+  `_pcaProject` used `torch.pca_lowrank`, a *randomized* low-rank SVD that draws an
+  internal `torch.randn(...)` sketch matrix, so two calls on the exact same latent
+  vectors could (and, measured directly, did: max absolute difference `5.6` on a toy
+  16-dimensional example, versus the data's own scale of order `1`) return visibly
+  different 2D projections depending only on the ambient RNG state at call time, not on
+  the data. This was the leading cause of `scripts/evaluate.py`'s and
+  `scripts/visualize_latent.py`'s latent scatter plots looking different for the exact
+  same checkpoint and dataloader, despite both collecting the identical `mu` values.
+  `_pcaProject` now uses `torch.linalg.svd` (exact, not randomized): repeated calls on the
+  same input are now bit-for-bit identical, matching what `projectLatentSamples`'s own
+  `seed` parameter docstring already (and now correctly) claimed for `"pca"`.
+
+**Verification note (ADR 0019).** `Trainer`'s and `GlobalVae`'s new behavior was checked with a
+real two-encoder/PoE model on real PyTorch: `computeLosses`/`evaluate` train and evaluate
+correctly on a batch carrying a decoder-only key, `forward` raises the documented `KeyError`
+when that restriction is skipped, and ten repeated `evaluate()` calls (no seed reset between
+them, mirroring how a real training loop's RNG stream keeps advancing epoch to epoch) show a
+measurably smaller spread than the old dropout-in-eval behavior on the same model and batch.
+The `torch.pca_lowrank` non-determinism above was confirmed directly (two calls, identical
+input, materially different output) before, and ruled out (identical output) after, switching
+to `torch.linalg.svd`. The full test suite (`pytest tests/`, 1535 tests) passes against real
+PyTorch 2.14 (CPU), apart from the same pre-existing `umap-learn`-dependent skip noted above.
 
 **Verification note.** The whole test suite was run against real PyTorch 2.14 (CPU) for the first time for the 2D
 pair, which ADRs 0017 and 0018 record as only verified against a shape-tracking stand-in:

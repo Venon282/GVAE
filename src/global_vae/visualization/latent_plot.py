@@ -5,7 +5,8 @@ Two families of function:
 - `projectLatentSamples`/`plotLatentSpace`: reduce a batch of latent vectors to 1, 2, or
   3 dimensions and scatter-plot them, optionally colored by a label. Direct (identity)
   when the latent space is already that size (spec's own framing: "directe si
-  latent_dim=2"), otherwise PCA (`torch.pca_lowrank`, no extra dependency), t-SNE
+  latent_dim=2"), otherwise PCA (exact, via `torch.linalg.svd`, no extra dependency;
+  see `_pcaProject`'s own docstring for why this replaced `torch.pca_lowrank`), t-SNE
   (scikit-learn, soft dependency), or UMAP (umap-learn, soft dependency).
 - `collectLatentParams`/`collectLatentSamples`: convenience helpers that run a
   `GlobalVae` over a dataloader and gather one latent space's `(mu, logvar)` or
@@ -31,11 +32,43 @@ _VALID_METHODS = ("auto", "pca", "tsne", "umap", "none")
 
 
 def _pcaProject(z: torch.Tensor, n_components: int) -> torch.Tensor:
-    """Project `z` via PCA (`torch.pca_lowrank`, no extra dependency beyond torch)."""
-    q = min(n_components, z.shape[0], z.shape[1])
+    """Project `z` via PCA, using an exact, deterministic SVD.
+
+    Previously used `torch.pca_lowrank`, a *randomized* low-rank SVD:
+    it draws an internal Gaussian sketch matrix (`torch.randn(...)`) to
+    approximate the decomposition, so two calls on the exact same `z`
+    can return two different (and, empirically, substantially
+    different) projections whenever the ambient RNG state differs
+    between them, e.g. across two separate script runs, or simply two
+    calls later in the same process after other code has drawn random
+    numbers. This is exactly the kind of divergence that made
+    `scripts/evaluate.py`'s and `scripts/visualize_latent.py`'s latent
+    scatter plots look meaningfully different even when run against the
+    identical checkpoint and dataloader: the underlying `mu` values
+    were the same, only the projection wasn't. `torch.linalg.svd` is
+    the plain, non-randomized decomposition: for the batch sizes this
+    function is used on (a collected batch of latent vectors for
+    visualization, not a training-time operation), the extra cost over
+    the randomized approximation is negligible, and the result is
+    bit-for-bit reproducible for the same input every time, matching
+    what `projectLatentSamples`'s own `seed` parameter already claims
+    for `"pca"` (previously true in name only).
+
+    Args:
+        z: Already-centered or raw latent vectors, shape `(N, dim)`;
+            centering happens here regardless.
+        n_components: Target dimensionality.
+
+    Returns:
+        Projected tensor, shape `(N, min(n_components, N, dim))`: fewer
+        columns than requested if there are not enough samples or
+        dimensions to fill them, matching this function's prior
+        behavior.
+    """
     centered = z - z.mean(dim=0, keepdim=True)
-    _, _, v = torch.pca_lowrank(centered, q=q, center=False)
-    return centered @ v[:, :n_components]
+    _, _, vh = torch.linalg.svd(centered, full_matrices=False)
+    projected: torch.Tensor = centered @ vh[:n_components].T
+    return projected
 
 
 def _tsneProject(
@@ -246,7 +279,11 @@ def collectLatentParams(
             decision to the caller (visualizing an in-progress training
             run might deliberately want train-mode statistics).
         dataloader: Yields `dict[str, torch.Tensor]` batches, the same
-            convention `Trainer` uses.
+            convention `Trainer` uses. Only the keys naming one of
+            `model`'s encoders are ever fed forward
+            (`GlobalVae.selectEncoderInputs`, ADR 0019); a decoder-only
+            target with no matching encoder (a translation-style
+            `image_in -> image_out` model) is simply not one of them.
         latent_name: Which latent space to collect (a key of
             `model.latent_spaces`, e.g. `"z_fused"` for
             `GlobalVae.createSingleLatent`'s default).
@@ -273,7 +310,7 @@ def collectLatentParams(
     with torch.no_grad():
         for raw_batch in dataloader:
             batch = {name: tensor.to(resolved_device) for name, tensor in raw_batch.items()}
-            outputs = model(batch)
+            outputs = model(model.selectEncoderInputs(batch))
             if latent_name not in outputs["latent_params"]:
                 continue
             mu, logvar = outputs["latent_params"][latent_name]

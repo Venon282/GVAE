@@ -17,3 +17,4 @@
 - [0016: Cross-modal reconstruction reporting](0016-cross-modal-reconstruction-reporting.md)
 - [0017: 2D CNN encoder/decoder](0017-2d-cnn-encoder-decoder.md)
 - [0018: 2D residual encoder/decoder](0018-2d-residual-encoder-decoder.md)
+- [0019: Decouple encoder inputs from decoder targets](0019-decouple-encoder-inputs-from-decoder-targets.md)

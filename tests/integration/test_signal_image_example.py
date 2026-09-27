@@ -5,9 +5,11 @@ The example trains `(signal, image_in) -> image_out`: two encoders fused by PoE 
 latent space, and a decoder whose target (`image_out`) is not any encoder's input. Most of
 what it demonstrates lives in small, separately testable pieces, so those are loaded
 in-process through `importlib` (the file name starts with a digit, so it cannot be
-imported normally) and tested directly: the synthetic data, the model wiring, and
-`TranslationTrainer`. One test additionally runs the whole script as a real subprocess,
-mirroring `test_config_driven_pipeline_example.py`.
+imported normally) and tested directly: the synthetic data, the model wiring, and the
+stock `Trainer`'s own handling of a decoder target that is not an encoder input (ADR
+0019; the example used to need a small `TranslationTrainer` subclass for this, removed
+once `Trainer` learned to do it itself). One test additionally runs the whole script as
+a real subprocess, mirroring `test_config_driven_pipeline_example.py`.
 
 The example imports nothing but `global_vae` and third-party packages (no sibling helper
 module), which is what makes loading it in-process safe here.
@@ -152,34 +154,40 @@ class TestModel:
         assert isinstance(example.buildModel().regularizers["z_fused"], FreeBitsKlRegularizer)
 
 
-class TestTranslationTrainer:
-    def test_the_stock_trainer_cannot_train_on_a_target_only_key(self, example: ModuleType) -> None:
-        """Documents why `TranslationTrainer` exists. If `Trainer` itself ever learns to
-        ignore batch keys that have no encoder, this test fails: delete `TranslationTrainer`
-        (keep its validation-without-dropout `evaluate` if still wanted) and this test."""
-        model = example.buildModel()
-        with pytest.raises(KeyError, match="image_out"):
-            Trainer(model, device="cpu").computeLosses(_batch(example), step=0)
+class TestTrainerHandlesTargetOnlyKeys:
+    """The stock `Trainer` handles a decoder target with no matching encoder itself
+    (ADR 0019, `GlobalVae.selectEncoderInputs`): this example used to need its own
+    `TranslationTrainer` subclass to work around a `KeyError` here; it does not
+    anymore (see git history for the version that still needed it).
+    """
 
-    def test_losses_are_computed_with_a_target_only_key(self, example: ModuleType) -> None:
-        trainer = example.TranslationTrainer(example.buildModel(), device="cpu")
-        losses = trainer.computeLosses(_batch(example), step=0)
+    def test_trainer_computes_finite_losses_directly_on_a_target_only_key(
+        self, example: ModuleType
+    ) -> None:
+        model = example.buildModel()
+        losses = Trainer(model, device="cpu").computeLosses(_batch(example), step=0)
         assert torch.isfinite(losses.total)
 
     def test_the_target_only_key_never_reaches_the_encoders(self, example: ModuleType) -> None:
-        trainer = example.TranslationTrainer(example.buildModel(), device="cpu")
-        kept = trainer._applyModalityDropout(_batch(example))
-        assert set(kept) == {"signal", "image_in"}
+        selected = example.buildModel().selectEncoderInputs(_batch(example))
+        assert set(selected) == {"signal", "image_in"}
 
-    def test_dropout_hides_encoder_inputs_but_always_keeps_one(self, example: ModuleType) -> None:
-        trainer = example.TranslationTrainer(
-            example.buildModel(), device="cpu", modality_dropout_p=1.0
-        )
+    def test_dropout_only_ever_hides_encoder_inputs_and_always_keeps_one(
+        self, example: ModuleType
+    ) -> None:
+        model = example.buildModel()
+        trainer = Trainer(model, device="cpu", modality_dropout_p=1.0)
+        seen: list[set[str]] = []
+        model.register_forward_pre_hook(lambda module, args: seen.append(set(args[0])))
+
         batch = _batch(example)
         for _ in range(20):
-            kept = trainer._applyModalityDropout(batch)
+            trainer.computeLosses(batch, step=0)
+
+        assert seen
+        for kept in seen:
             assert 1 <= len(kept) <= 2
-            assert set(kept) <= {"signal", "image_in"}
+            assert kept <= {"signal", "image_in"}
 
     def test_reconstruction_target_is_the_clean_image_not_the_input(
         self, example: ModuleType
@@ -188,7 +196,7 @@ class TestTranslationTrainer:
         real `image_out`: replacing `image_out` by zeros must change it."""
         model = example.buildModel()
         model.eval()
-        trainer = example.TranslationTrainer(model, device="cpu")
+        trainer = Trainer(model, device="cpu")
         batch = _batch(example)
         with torch.no_grad():
             real = trainer.computeLosses(batch, step=0).reconstruction.item()
@@ -197,11 +205,14 @@ class TestTranslationTrainer:
             ).reconstruction.item()
         assert real != pytest.approx(zeroed)
 
-    def test_validation_pass_uses_every_input_and_restores_the_dropout(
+    def test_validation_pass_uses_every_input_and_never_touches_modality_dropout_p(
         self, example: ModuleType
     ) -> None:
+        """`evaluate()` never applies dropout (ADR 0019): unlike the old
+        `TranslationTrainer`, which restored `modality_dropout_p` after temporarily
+        zeroing it, the stock `Trainer` never mutates it at all."""
         model = example.buildModel()
-        trainer = example.TranslationTrainer(model, device="cpu", modality_dropout_p=1.0)
+        trainer = Trainer(model, device="cpu", modality_dropout_p=1.0)
         seen: list[set[str]] = []
         model.register_forward_pre_hook(lambda module, args: seen.append(set(args[0])))
 
@@ -212,9 +223,7 @@ class TestTranslationTrainer:
 
     def test_training_runs_and_the_loss_is_finite(self, example: ModuleType) -> None:
         torch.manual_seed(0)
-        trainer = example.TranslationTrainer(
-            example.buildModel(), device="cpu", modality_dropout_p=0.3
-        )
+        trainer = Trainer(example.buildModel(), device="cpu", modality_dropout_p=0.3)
         dataset = example.toBatches(_batch(example, num_samples=16), batch_size=8)
         history = trainer.fit(dataset, num_epochs=2, val_dataloader=dataset)
         assert len(history) == 2

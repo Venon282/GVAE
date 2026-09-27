@@ -171,6 +171,53 @@ class TestMain:
             script.main(["--checkpoint", "somewhere.pt"])
 
 
+class TestInverseTransformFactory:
+    """`--inverse-transform-factory` (spec §6.2): reconstruction figures should show
+    original-scale values when the caller's data pipeline applied a transform.
+    """
+
+    def test_reconstruction_figure_differs_with_an_inverse_transform(
+        self, script: ModuleType, checkpoint_path: Path, tmp_path: Path
+    ) -> None:
+        plain_dir = tmp_path / "plain"
+        script.main(
+            [
+                "--checkpoint",
+                str(checkpoint_path),
+                "--model-factory",
+                _MODEL_FACTORY,
+                "--dataloader-factory",
+                _DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(plain_dir),
+            ]
+        )
+
+        transformed_dir = tmp_path / "transformed"
+        script.main(
+            [
+                "--checkpoint",
+                str(checkpoint_path),
+                "--model-factory",
+                _MODEL_FACTORY,
+                "--dataloader-factory",
+                _DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(transformed_dir),
+                "--inverse-transform-factory",
+                "tests.integration._script_fixtures:buildInverseTransformsForScript",
+            ]
+        )
+
+        plain_png = (plain_dir / "reconstructions_signal.png").read_bytes()
+        transformed_png = (transformed_dir / "reconstructions_signal.png").read_bytes()
+        assert plain_png != transformed_png
+
+
 class TestCrossModalFigures:
     """`scripts/evaluate.py`'s opt-in `exportCrossModalFigures` call (spec §5,
     `docs/adr/0016-cross-modal-reconstruction-reporting.md`): only writes a figure

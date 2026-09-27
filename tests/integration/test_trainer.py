@@ -21,6 +21,7 @@ from global_vae.encoders.base import AbstractEncoder
 from global_vae.encoders.registry import registerEncoder
 from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import registerFusion
+from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.constant import ConstantBetaSchedule
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
@@ -160,6 +161,28 @@ def _buildTwoModalityModel() -> GlobalVae:
         },
         latent_dim=LATENT_DIM,
         fusion_strategy="dummy_poe_trainer_test",
+    )
+
+
+def _buildTranslationModel() -> GlobalVae:
+    """A model whose only decoder's name is not also an encoder name (ADR 0019).
+
+    `createSingleLatent` always ties a modality's encoder and decoder
+    to the same key, so a genuine "encoder input name != decoder target
+    name" model needs the general `__init__` constructor with its own
+    explicit `RoutingGraph` instead. `"in"` feeds `"z"`, which only
+    `"out"` consumes: a batch for this model must carry `"in"` (an
+    encoder input) and `"out"` (a decoder-only reconstruction target
+    with no matching encoder), exactly the translation-style
+    `image_in -> image_out` shape spec'd in ADR 0019.
+    """
+    routing_graph = buildSingleLatentRoutingGraph(
+        encoder_names=["in"], decoder_names=["out"], latent_dim=LATENT_DIM, latent_name="z"
+    )
+    return GlobalVae(
+        encoder_configs={"in": "dummy_signal_encoder_trainer_test"},
+        decoder_configs={"out": "dummy_signal_decoder_trainer_test"},
+        routing_graph=routing_graph,
     )
 
 
@@ -410,6 +433,103 @@ class TestModalityDropout:
         model = _buildSingleModalityModel()
         with pytest.raises(ValueError, match="modality_dropout_p"):
             Trainer(model, modality_dropout_p=1.5)
+
+    def test_evaluate_never_applies_modality_dropout(self) -> None:
+        """`evaluate()` must not be a source of run-to-run variance from dropout.
+
+        Regression test: `Trainer.evaluate` used to forward straight
+        into `computeLosses` with dropout enabled, so which modalities
+        were actually seen this validation pass depended on the
+        RNG stream's position, not on the data itself. Calling
+        `computeLosses(..., apply_dropout=True)` directly (the old
+        behavior) on a high-dropout trainer swings noticeably across
+        repeated calls with no seed reset in between (modalities are
+        randomly hidden or not); `evaluate()` itself must not show that
+        same swing, since it always passes `apply_dropout=False`.
+        """
+        model = _buildTwoModalityModel()
+        trainer = Trainer(model, device="cpu", modality_dropout_p=0.9)
+        batch = {
+            "signal": torch.randn(BATCH_SIZE, INPUT_DIM),
+            "image": torch.randn(BATCH_SIZE, INPUT_DIM),
+        }
+
+        torch.manual_seed(0)
+        old_dropout_in_eval = [
+            trainer.computeLosses(batch, step=0, apply_dropout=True).total.item() for _ in range(10)
+        ]
+        fixed_eval = [trainer.evaluate([batch])["val/loss/total"] for _ in range(10)]
+
+        old_spread = max(old_dropout_in_eval) - min(old_dropout_in_eval)
+        fixed_spread = max(fixed_eval) - min(fixed_eval)
+        assert fixed_spread < old_spread, (
+            f"evaluate()'s spread ({fixed_spread}) should be smaller than the old "
+            f"dropout-in-eval spread ({old_spread}): dropping a whole modality is a much "
+            f"bigger perturbation than the residual reparameterization-sampling noise "
+            f"evaluate() still has by design (it estimates the same ELBO fitEpoch trains "
+            f"against, spec §10; evaluation.evaluate.evaluate's own use_mean=True default "
+            f"is the deterministic-report alternative, see its own docstring)."
+        )
+
+
+class TestTargetOnlyDecoderKeys:
+    """A decoder's reconstruction target need not also be an encoder input (ADR 0019):
+    a translation-style `image_in -> image_out` model works with no special-casing.
+    """
+
+    def test_select_encoder_inputs_drops_a_key_with_no_matching_encoder(self) -> None:
+        model = _buildTranslationModel()
+        batch = {
+            "in": torch.randn(BATCH_SIZE, INPUT_DIM),
+            "out": torch.randn(BATCH_SIZE, INPUT_DIM),
+        }
+        assert set(model.selectEncoderInputs(batch)) == {"in"}
+
+    def test_select_encoder_inputs_raises_if_nothing_matches(self) -> None:
+        model = _buildTranslationModel()
+        with pytest.raises(ValueError, match="encoders"):
+            model.selectEncoderInputs({"unrelated": torch.randn(BATCH_SIZE, INPUT_DIM)})
+
+    def test_forward_raises_a_clear_error_for_an_unfiltered_target_only_key(self) -> None:
+        model = _buildTranslationModel()
+        batch = {
+            "in": torch.randn(BATCH_SIZE, INPUT_DIM),
+            "out": torch.randn(BATCH_SIZE, INPUT_DIM),
+        }
+        with pytest.raises(KeyError, match="no matching encoder"):
+            model(batch)
+
+    def test_trainer_fits_when_the_decoder_target_is_not_an_encoder_input(self) -> None:
+        model = _buildTranslationModel()
+        trainer = Trainer(model, device="cpu")
+        dataset = [
+            {
+                "in": torch.randn(BATCH_SIZE, INPUT_DIM),
+                "out": torch.randn(BATCH_SIZE, INPUT_DIM),
+            }
+            for _ in range(3)
+        ]
+        history = trainer.fit(dataset, num_epochs=2)
+        assert len(history) == 2
+        for entry in history:
+            assert torch.isfinite(torch.tensor(entry["train/loss/total"]))
+
+    def test_trainer_evaluates_when_the_decoder_target_is_not_an_encoder_input(self) -> None:
+        model = _buildTranslationModel()
+        trainer = Trainer(model, device="cpu")
+        batch = {
+            "in": torch.randn(BATCH_SIZE, INPUT_DIM),
+            "out": torch.randn(BATCH_SIZE, INPUT_DIM),
+        }
+        metrics = trainer.evaluate([batch])
+        assert torch.isfinite(torch.tensor(metrics["val/loss/total"]))
+
+    def test_compute_losses_raises_if_batch_has_no_encoder_key_at_all(self) -> None:
+        model = _buildTranslationModel()
+        trainer = Trainer(model, device="cpu")
+        batch = {"out": torch.randn(BATCH_SIZE, INPUT_DIM)}
+        with pytest.raises(ValueError, match="encoders"):
+            trainer.computeLosses(batch, step=0)
 
 
 class TestGradientClipping:

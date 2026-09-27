@@ -14,12 +14,21 @@ raw tensor for the whole batch), the same per-modality convention
 `GlobalVae.forward` already uses. For the single-modality
 `signal -> z -> signal` case (spec §6.1 milestone 1) that dict has one
 key; for a paired signal+image setup (milestone 2) it has one key per
-modality. Whatever the caller's dataloader yields is used both as the
-encoder input (after modality dropout, if enabled) and as the decoder
-reconstruction target: this is what makes plain autoencoding batches
-trivial to feed in (a single dict, no separate "target" the caller has
-to construct) while still supporting spec §5's modality dropout
-without any extra plumbing on the caller's side.
+modality.
+
+The *whole* batch is always used as the reconstruction target (matched
+by decoder name), but only the keys that name a registered encoder
+(`GlobalVae.selectEncoderInputs`, ADR 0019) are ever used as encoder
+input, after modality dropout if enabled. For plain autoencoding this
+is the same dict either way (one key per modality, no separate
+"target" the caller has to construct), so nothing changes for spec
+§6.1's milestones. It is also what makes a translation-style model
+work with no special-casing on the caller's side: a batch
+`{"image_in": ..., "image_out": ...}` for a model whose only encoder
+is `image_in` and whose only decoder is `image_out` trains and
+evaluates exactly like any other batch, since `image_out` is simply
+never selected as encoder input, only ever matched as `image_out`'s
+own decoder target.
 """
 
 import logging
@@ -217,7 +226,9 @@ class Trainer:
 
         logger.info("Trainer initialized on device '%s'.", self.device)
 
-    def computeLosses(self, batch: dict[str, torch.Tensor], step: int) -> StepLosses:
+    def computeLosses(
+        self, batch: dict[str, torch.Tensor], step: int, apply_dropout: bool = True
+    ) -> StepLosses:
         """Run one forward pass and compute the weighted total loss for `batch`.
 
         Shared by `fitEpoch` (which calls `.backward()` on the result)
@@ -227,25 +238,43 @@ class Trainer:
         Args:
             batch: Modality name -> raw tensor, already moved to
                 `self.device`. Used as the reconstruction target
-                unchanged, and (after modality dropout, if enabled) as
-                the encoder input.
+                unchanged; the subset of it naming a registered encoder
+                (`GlobalVae.selectEncoderInputs`, ADR 0019) is used,
+                after modality dropout if enabled, as the encoder
+                input. A key with no matching encoder is simply never
+                encoded, only ever matched as its own decoder's target
+                (the translation-style `image_in -> image_out` case;
+                see this module's own docstring).
             step: Global step index used to resolve any per-latent-space
                 beta schedule for this call. `evaluate` passes the
                 current `self.global_step` without advancing it, so a
                 validation pass never itself moves a schedule forward.
+            apply_dropout: If `True` (default), `self.modality_dropout_p`
+                is applied to the encoder input, exactly as during
+                training. `evaluate()` passes `False`: modality dropout
+                is a *training-time* robustness technique (spec §5), and
+                applying it during validation would make the reported
+                validation loss depend on which modalities the random
+                dropout happened to keep for that call, i.e. a
+                different, non-reproducible number on every call even
+                for the exact same model and data.
 
         Returns:
             `StepLosses` still attached to the autograd graph.
 
         Raises:
-            ValueError: If `batch` is empty, or (via
-                `computeTotalReconstructionLoss`) if it is missing a
-                target for a decoder that produced a reconstruction.
+            ValueError: If `batch` is empty, or if none of its keys
+                names one of `self.model`'s encoders (via
+                `GlobalVae.selectEncoderInputs`).
+            KeyError: Via `computeTotalReconstructionLoss`, if `batch`
+                is missing a target for a decoder that produced a
+                reconstruction.
         """
         if not batch:
             raise ValueError("Trainer.computeLosses received an empty batch.")
 
-        inputs = self._applyModalityDropout(batch)
+        encoder_inputs = self.model.selectEncoderInputs(batch)
+        inputs = self._applyModalityDropout(encoder_inputs) if apply_dropout else encoder_inputs
         outputs = self.model(inputs)
 
         reconstruction_loss = computeTotalReconstructionLoss(
@@ -328,7 +357,15 @@ class Trainer:
         """Run one pass over `dataloader` without gradient updates.
 
         Usable both for periodic validation during `fit` and for a
-        standalone evaluation pass after training.
+        standalone evaluation pass after training. Never applies
+        modality dropout, regardless of `self.modality_dropout_p`:
+        dropout is a training-time robustness technique (spec §5), and
+        applying it here would make the returned loss a random function
+        of which modalities the dropout happened to keep on this call,
+        rather than a reproducible measurement of the model on
+        `dataloader`. Two calls with the same model and the same
+        (non-shuffled) `dataloader` therefore return the exact same
+        metrics.
 
         Args:
             dataloader: Yields one `dict[str, torch.Tensor]` batch at a
@@ -347,7 +384,7 @@ class Trainer:
         with torch.no_grad():
             for raw_batch in dataloader:
                 batch = self._moveBatchToDevice(raw_batch)
-                losses = self.computeLosses(batch, self.global_step)
+                losses = self.computeLosses(batch, self.global_step, apply_dropout=False)
                 for key, value in losses.asMetrics().items():
                     running_totals[key] = running_totals.get(key, 0.0) + value
                 num_batches += 1
@@ -503,9 +540,14 @@ class Trainer:
         nothing to encode.
 
         Args:
-            batch: Modality name -> raw tensor, the full batch (used
-                unchanged as the reconstruction target regardless of
-                what this method returns).
+            batch: Modality name -> raw tensor, already restricted to
+                the model's encoder inputs by the caller
+                (`GlobalVae.selectEncoderInputs`); a decoder-only
+                target key never reaches this method, so it can never
+                be the one modality "kept" by accident. The original,
+                unfiltered batch remains available to the caller for
+                the reconstruction target regardless of what this
+                method returns.
 
         Returns:
             `batch` unchanged if `self.modality_dropout_p == 0.0` or

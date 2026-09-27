@@ -339,3 +339,101 @@ class TestMain:
     def test_missing_required_argument_raises_system_exit(self, script: ModuleType) -> None:
         with pytest.raises(SystemExit):
             script.main(["--checkpoint", "somewhere.pt"])
+
+
+class TestLossCurveAxes:
+    """`plotLossCurves`'s two-axis capability, exercised by default (spec §2.3): a
+    regularization key is split onto its own, independently-scaled secondary axis.
+    """
+
+    def test_default_splits_regularization_onto_a_secondary_axis(
+        self,
+        script: ModuleType,
+        checkpoint_with_history: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+        original_plot_loss_curves = script.plotLossCurves
+
+        def _spy(*args: object, **kwargs: object) -> object:
+            fig = original_plot_loss_curves(*args, **kwargs)
+            captured["num_axes"] = len(fig.axes)
+            captured["twin_metrics"] = kwargs.get("twin_metrics")
+            return fig
+
+        monkeypatch.setattr(script, "plotLossCurves", _spy)
+        script.main(
+            [
+                "--checkpoint",
+                str(checkpoint_with_history),
+                "--model-factory",
+                _MODEL_FACTORY,
+                "--dataloader-factory",
+                _DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(tmp_path / "viz"),
+            ]
+        )
+        assert captured["num_axes"] == 2
+        twin_metrics = captured["twin_metrics"]
+        assert twin_metrics and all("regularization" in key for key in twin_metrics)  # type: ignore[union-attr]
+
+    def test_no_twin_axis_flag_keeps_every_curve_on_one_axis(
+        self,
+        script: ModuleType,
+        checkpoint_with_history: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+        original_plot_loss_curves = script.plotLossCurves
+
+        def _spy(*args: object, **kwargs: object) -> object:
+            fig = original_plot_loss_curves(*args, **kwargs)
+            captured["num_axes"] = len(fig.axes)
+            captured["twin_metrics"] = kwargs.get("twin_metrics")
+            return fig
+
+        monkeypatch.setattr(script, "plotLossCurves", _spy)
+        script.main(
+            [
+                "--checkpoint",
+                str(checkpoint_with_history),
+                "--model-factory",
+                _MODEL_FACTORY,
+                "--dataloader-factory",
+                _DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(tmp_path / "viz"),
+                "--history-no-twin-axis",
+            ]
+        )
+        assert captured["num_axes"] == 1
+        assert captured["twin_metrics"] is None
+
+    def test_log_scale_flags_do_not_raise(
+        self, script: ModuleType, checkpoint_with_history: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "viz"
+        script.main(
+            [
+                "--checkpoint",
+                str(checkpoint_with_history),
+                "--model-factory",
+                _MODEL_FACTORY,
+                "--dataloader-factory",
+                _DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(output_dir),
+                "--history-log-scale",
+                "--history-twin-log-scale",
+            ]
+        )
+        assert (output_dir / "loss_curves.png").exists()

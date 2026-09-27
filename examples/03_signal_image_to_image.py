@@ -33,20 +33,21 @@ that helper ties one decoder to every encoder name, whereas here the decoder is 
                                                                     -> image_out
     image_in -> 2d_cnn_resnet_encoder_v1 -+
 
-**Training with a target that is not an input.** `Trainer` feeds the whole batch to
-`GlobalVae.forward` and also uses it as the reconstruction target, and `forward` raises
-`KeyError` on a key that has no encoder (`image_out` here). `TranslationTrainer` below
-is the smallest fix: it overrides `_applyModalityDropout`, the one place `computeLosses`
-selects what the encoders see, to keep only encoder inputs. The full batch is still the
-reconstruction target, so nothing else changes. Modality dropout (spec §5) then randomly
-hides `signal` or `image_in` during training, so the single fused latent learns to work
-from either alone.
+**Training with a target that is not an input.** `Trainer` restricts what reaches the
+encoders to the batch keys that actually have an encoder (`GlobalVae.selectEncoderInputs`,
+ADR 0019) and uses the whole batch, unrestricted, as the reconstruction target; a target-only
+key such as `image_out` (a decoder name with no matching encoder) is simply never encoded,
+only ever matched against `image_out`'s own reconstruction. `Trainer.evaluate` also never
+applies modality dropout regardless of `modality_dropout_p` (ADR 0019), so the best-checkpoint
+callback's monitored validation loss does not depend on which modalities a given pass happened
+to drop. Modality dropout (spec §5) is applied during training only, randomly hiding `signal`
+or `image_in`, so the single fused latent learns to work from either alone.
 
 Stages, in order:
 
 1. Synthetic data generation.
 2. Model assembly (explicit routing graph, PoE fusion, `free_bits_kl` regularizer).
-3. Training (`TranslationTrainer`, beta warm-up, CSV log, best checkpoint).
+3. Training (`Trainer`, beta warm-up, CSV log, best checkpoint).
 4. Evaluation by input subset (`collectCrossModalReconstructions`,
    `computeCrossModalReconstructionMetrics`, ADR 0016): what does the decoder produce
    from `signal` alone, `image_in` alone, and both? Compared against the trivial
@@ -69,7 +70,6 @@ Everything this script writes goes under `examples/outputs/03_signal_image_to_im
 import argparse
 import json
 import logging
-from collections.abc import Iterable
 from pathlib import Path
 
 import matplotlib
@@ -299,52 +299,6 @@ def buildModel(latent_dim: int = LATENT_DIM) -> GlobalVae:
 # --- Stage 3: training ---------------------------------------------------------------------
 
 
-class TranslationTrainer(Trainer):
-    """`Trainer` for a model whose decoder target is not one of its encoder inputs.
-
-    `Trainer.computeLosses` passes the whole batch through `_applyModalityDropout` and
-    on to `GlobalVae.forward`, then uses the whole batch again as the reconstruction
-    target. That is right when every batch key is both an encoder input and a decoder
-    target (plain autoencoding), and fails with `KeyError` when a key such as
-    `image_out` is a target only. Restricting what reaches the encoders to the keys that
-    have an encoder fixes it and leaves the reconstruction target untouched.
-
-    Also turns modality dropout off during validation: `Trainer.evaluate` goes through
-    the same `computeLosses`, so with dropout on, the validation loss the best-checkpoint
-    callback monitors would depend on which modalities happened to be hidden that pass.
-    """
-
-    def _applyModalityDropout(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Keep only encoder inputs, then apply the usual modality dropout to them.
-
-        Args:
-            batch: Every key of the batch, targets included.
-
-        Returns:
-            The encoder inputs that survive dropout (at least one).
-        """
-        encoder_inputs = {
-            name: tensor for name, tensor in batch.items() if name in self.model.encoders
-        }
-        return super()._applyModalityDropout(encoder_inputs)
-
-    def evaluate(self, dataloader: Iterable[dict[str, torch.Tensor]]) -> dict[str, float]:
-        """Run the validation pass with every input modality present.
-
-        Args:
-            dataloader: Validation batches.
-
-        Returns:
-            Metrics averaged over every batch, keys prefixed `"val/"`.
-        """
-        training_dropout = self.modality_dropout_p
-        self.modality_dropout_p = 0.0
-        try:
-            return super().evaluate(dataloader)
-        finally:
-            self.modality_dropout_p = training_dropout
-
-
 # --- Stage 4: evaluation -------------------------------------------------------------------
 
 
@@ -527,7 +481,7 @@ def main(argv: list[str] | None = None) -> None:
 
     logger.info("Step 3/5: training with modality dropout p=%.2f.", MODALITY_DROPOUT_P)
     warmup_steps = WARMUP_EPOCHS * len(train_batches)
-    trainer = TranslationTrainer(
+    trainer = Trainer(
         model,
         device="cpu",
         optimizer_kwargs={"lr": LEARNING_RATE},

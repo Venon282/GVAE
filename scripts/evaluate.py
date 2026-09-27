@@ -32,6 +32,18 @@ Where, in your own code (anywhere importable on `PYTHONPATH`):
         # evaluation.evaluate's and evaluation.visual_export's own docstrings
         return DataLoader(MyTestDataset(...), batch_size=32)
 
+Reconstruction figures are plotted in whatever space the batch itself is in: if your own
+data pipeline applied a `data.transforms` step (`log`/`standardize`/`resample`, spec
+§6.2) before training, the figures show *that* space, not the original physical units,
+unless you also supply `--inverse-transform-factory`:
+
+    def build_inverse_transforms() -> dict[str, Callable[[torch.Tensor], torch.Tensor]]:
+        # decoder/modality name -> callable undoing that modality's own preprocessing.
+        # global_vae.config.data.buildTransformPipeline builds this straight from a
+        # DataConfig, if you have one: {name: pipeline.inverse for name, pipeline in
+        # buildTransformPipeline(data_config).items()}
+        return {"signal": my_signal_pipeline.inverse}
+
 Run `python scripts/evaluate.py --help` for the full option list.
 """
 
@@ -112,6 +124,17 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         choices=("auto", "pca", "tsne", "umap", "none"),
         help="Forwarded to exportEvaluationFigures's latent-space plot.",
     )
+    parser.add_argument(
+        "--inverse-transform-factory",
+        default=None,
+        help="Optional 'module.path:function_name' returning a "
+        "dict[str, Callable[[Tensor], Tensor]] (decoder/modality name -> inverse "
+        "preprocessing callable), forwarded to the reconstruction figures so they show "
+        "original-scale values instead of whatever preprocessing (data.transforms, spec "
+        "§6.2) was applied before training. Without this, reconstruction figures are "
+        "plotted in raw model-space (possibly transformed) units. See this script's own "
+        "module docstring for how to build this dict from a DataConfig.",
+    )
     return parser
 
 
@@ -144,6 +167,11 @@ def main(argv: list[str] | None = None) -> None:
     want_figures = args.output_dir is not None and not args.no_figures
     dataloader = list(dataloader_factory()) if want_figures else dataloader_factory()  # type: ignore[operator]
 
+    inverse_transforms = None
+    if args.inverse_transform_factory is not None:
+        inverse_transform_factory = _importCallable(args.inverse_transform_factory)
+        inverse_transforms = inverse_transform_factory()  # type: ignore[operator]
+
     results = evaluate(model, dataloader, device=resolved_device, max_samples=args.max_samples)
     print(results.summary())
 
@@ -160,12 +188,17 @@ def main(argv: list[str] | None = None) -> None:
                 device=resolved_device,
                 max_examples=args.max_examples,
                 latent_projection_method=args.latent_projection_method,
+                inverse_transforms=inverse_transforms,
             )
             # No-op for a single-modality model (spec §6.1 milestone 1): see
             # exportCrossModalFigures's own docstring and
             # docs/adr/0016-cross-modal-reconstruction-reporting.md.
             figure_paths += exportCrossModalFigures(
-                model, dataloader, args.output_dir, device=resolved_device
+                model,
+                dataloader,
+                args.output_dir,
+                device=resolved_device,
+                inverse_transforms=inverse_transforms,
             )
             logger.info("Saved %d figure(s) to '%s'.", len(figure_paths), args.output_dir)
 

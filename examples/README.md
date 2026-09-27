@@ -102,12 +102,13 @@ both**, and strongly negative for the baseline.
 
 Two things it shows that the other examples cannot:
 
-- **A decoder target that is not an encoder input.** `Trainer` uses the batch both as
-  encoder input and as reconstruction target, and `GlobalVae.forward` rejects a key
-  without an encoder, so training on a separate `image_out` needs a small
-  `TranslationTrainer` subclass (defined in the script; see its docstring). The model
-  itself is built from an explicit `RoutingGraph` rather than `createSingleLatent`,
-  which ties decoder names to encoder names.
+- **A decoder target that is not an encoder input.** The whole batch is still the
+  reconstruction target, but only the keys naming a registered encoder ever reach the
+  encoders (`GlobalVae.selectEncoderInputs`, `docs/adr/0019-decouple-encoder-inputs-from-decoder-targets.md`);
+  training on a separate `image_out` needs no subclass or special-casing on the
+  example's own side, the stock `Trainer` handles it directly. The model itself is
+  still built from an explicit `RoutingGraph` rather than `createSingleLatent`, which
+  ties decoder names to encoder names.
 - **The figure.** `translation_grid.png` lines up, for several test samples, the signal,
   the degraded input, the target, and the output from each input subset. The
   signal-only output is a blob smeared along y (right x, unknown y), the image-only

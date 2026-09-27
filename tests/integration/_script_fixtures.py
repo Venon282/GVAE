@@ -10,6 +10,8 @@ time and raise "already registered" (see `test_checkpoint.py`'s module docstring
 the same concern with a sibling test file).
 """
 
+from collections.abc import Callable
+
 import torch
 from torch import nn
 
@@ -82,6 +84,19 @@ def buildDataloaderForScript() -> list[dict[str, torch.Tensor]]:
     """Dataloader factory referenced by `--dataloader-factory` in the CLI test."""
     torch.manual_seed(0)
     return [{"signal": torch.randn(BATCH_SIZE, INPUT_DIM)} for _ in range(2)]
+
+
+def buildInverseTransformsForScript() -> dict[str, Callable[[torch.Tensor], torch.Tensor]]:
+    """Factory referenced by `--inverse-transform-factory` in the CLI test.
+
+    A deliberately large, easily-distinguished rescaling (`* 100`), so a
+    reconstruction figure exported with this inverse transform is
+    trivially distinguishable from one exported without it (a
+    completely different data range, hence a different y-axis and a
+    different rendered PNG), without needing to inspect pixel values
+    directly.
+    """
+    return {"signal": lambda tensor: tensor * 100.0}
 
 
 def buildLabeledDataloaderForScript() -> list[dict[str, torch.Tensor]]:

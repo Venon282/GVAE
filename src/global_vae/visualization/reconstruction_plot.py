@@ -256,8 +256,13 @@ def collectReconstructions(
         model: A `GlobalVae` instance. Does not call `model.eval()`
             itself; the caller decides the mode.
         dataloader: Yields `dict[str, torch.Tensor]` batches (modality
-            name -> raw tensor, used as both encoder input and
-            reconstruction target), the same convention `Trainer` uses.
+            name -> raw tensor). Every key is available as a
+            reconstruction target, matched by decoder name; only the
+            keys naming one of `model`'s encoders are ever fed forward
+            (`GlobalVae.selectEncoderInputs`, ADR 0019), so a
+            decoder-only target with no matching encoder (a
+            translation-style `image_in -> image_out` model) is
+            handled the same as any other batch.
         modality_name: Which modality/decoder to collect (a key of
             both the batch dicts and `model.decoders`).
         device: Batches are moved here before the forward pass.
@@ -281,7 +286,7 @@ def collectReconstructions(
     with torch.no_grad():
         for raw_batch in dataloader:
             batch = {name: tensor.to(resolved_device) for name, tensor in raw_batch.items()}
-            outputs = model(batch)
+            outputs = model(model.selectEncoderInputs(batch))
             if modality_name not in outputs["reconstructions"]:
                 continue
             collected_originals.append(batch[modality_name].cpu())

@@ -135,7 +135,13 @@ def evaluate(
     Args:
         model: The model to evaluate.
         dataloader: Yields `dict[str, torch.Tensor]` batches, the same
-            convention `Trainer` uses.
+            convention `Trainer` uses. Every key is matched as a
+            reconstruction target by decoder name; only the subset
+            naming a registered encoder (`GlobalVae.selectEncoderInputs`,
+            ADR 0019) is ever fed to the encoders, so a decoder-only
+            target with no matching encoder (a translation-style
+            `image_in -> image_out` model) is handled with no special
+            casing on the caller's side.
         reconstruction_weights: Forwarded to
             `computeTotalReconstructionLoss` for
             `total_reconstruction_loss` only (per-modality
@@ -170,7 +176,9 @@ def evaluate(
         `EvaluationResults`.
 
     Raises:
-        ValueError: If `dataloader` yields no batches.
+        ValueError: If `dataloader` yields no batches, or (via
+            `GlobalVae.selectEncoderInputs`) if some batch has no key
+            naming any of `model`'s encoders.
     """
     resolved_device = device if device is not None else next(model.parameters()).device
     resolved_metrics = reconstruction_metrics or DEFAULT_RECONSTRUCTION_METRICS
@@ -190,7 +198,7 @@ def evaluate(
     with torch.no_grad():
         for raw_batch in dataloader:
             batch = {name: tensor.to(resolved_device) for name, tensor in raw_batch.items()}
-            outputs = model(batch, use_mean=use_mean)
+            outputs = model(model.selectEncoderInputs(batch), use_mean=use_mean)
 
             total_reconstruction_loss_sum += computeTotalReconstructionLoss(
                 outputs["reconstructions"],

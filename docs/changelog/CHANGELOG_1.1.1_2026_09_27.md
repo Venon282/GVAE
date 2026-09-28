@@ -4,42 +4,10 @@ All notable changes to this project are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.1] - 2026-09-27
 
 ### Added
 
-- `fusion/moe.py` (`moe`), `fusion/concat_mlp.py` (`concat_mlp`) and
-  `fusion/cross_attention.py` (`cross_attention`): the three remaining fusion strategies of
-  spec §4, registered next to `poe` and selectable by name from `fusion_strategies` /
-  `latent.fusion.strategy` with no change to `GlobalVae` or the config layer. `moe` fuses
-  per-modality experts by closed-form moment matching of their mixture (fused variance grows
-  when experts disagree). `concat_mlp` concatenates every modality's `(mu, logvar)` through an
-  MLP and, per spec §5, handles a missing modality with an explicit scheme (zero imputation
-  plus an optional per-modality presence mask) while still reporting
-  `handlesMissingModalities=False`. `cross_attention` turns each active modality into one token
-  fused by a Transformer encoder and mean-pooled, so a missing modality is just an omitted
-  token. `latent_dim` (and `modality_dims` for `concat_mlp`) are passed through
-  `fusion.kwargs`, not auto-filled. See `docs/adr/0020-additional-fusion-strategies.md`.
-- `docs/how-to/choose-a-fusion-strategy.md` (new, added to the mkdocs nav): how to pick and configure a fusion strategy, with YAML and Python examples for each.
-- `fusion/residual.py` (`ResidualFusion`) and the `residual` flag of spec §4/§9, implemented for
-  every fusion strategy at once instead of some of them: `GlobalVae(..., fusion_residual={"z":
-  True})`, `GlobalVae.createSingleLatent(..., fusion_residual=True)` and `FusionConfig.residual`
-  (`residual: true` next to `strategy:` in YAML, as in spec §9). The fused posterior starts as the
-  mean of the active experts and a learned gate (initialized at 0) opens the strategy's own
-  correction: `fused = skip + gate * (strategy(params) - skip)`. `gate = 1` recovers the strategy
-  exactly, and missing-modality support is inherited from it. Off by default, so existing models,
-  configs and checkpoints are unchanged; enabling it changes the module tree, so checkpoints do not
-  cross the flag. The spec names the flag without defining it, so the definition is a decision:
-  see `docs/adr/0021-fusion-residual-connection.md`.
-- `tests/integration/test_fusion_residual.py` (new): the wrapper's properties (identity at
-  initialization, `gate = 1` recovers the strategy, interpolation, gradients, subsets, error
-  paths) against all four strategies, plus the `GlobalVae` wiring and the YAML path.
-- `tests/integration/test_yaml_shapes.py` (new): see the first entry under Fixed.
-- `tests/integration/test_fusion.py` (new): the fusion registry had no unit test although
-  spec §10 requires one, and `poe.py` had no direct test. Covers registration, lookup and the
-  duplicate/unknown-name paths, `poe` and `moe` against hand-computed formulas, missing-modality
-  behaviour, gradient flow for all four strategies, and each new strategy wired through
-  `GlobalVae.createSingleLatent` with every modality present and with one missing.
 - `encoders/TwoDCnnResidualEncoder.py` (`2d_cnn_resnet_encoder_v1`) and
   `decoders/TwoDCnnResidualDecoder.py` (`2d_cnn_resnet_decoder_v1`): the 2D residual
   ("ResNet-style") encoder/decoder pair for spec §6's image modality (spec §7), the 2D
@@ -132,16 +100,6 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- `TwoDCnnDecoder` and `TwoDCnnResidualDecoder` rejected a correct configuration when
-  `output_shape` (or `seed_shape`) came from a YAML/Hydra config: YAML has no tuple type, so
-  `[64, 64]` arrived as a `list`, and the exact-shape check compared the computed `tuple` against
-  it (`(64, 64) != [64, 64]`). Both decoders now normalize the two shapes to tuples up front (and
-  `computeOutputShape` does the same for `seed_shape`). The same root cause also affected
-  `utils.stage_config.resolveSpatialShape`, which silently turned `[64, 64]` into `([64, 64],
-  [64, 64])`: it now accepts a `list` as an explicit shape exactly like a `tuple`, which fixes a
-  per-stage entry written `[[3, 5], [3, 5]]` in YAML and `ResampleTransform(target_size=[16,
-  16])`. A top-level `list` is still the per-stage wrapper in `broadcastPerStageShape`,
-  unchanged. Covered by `tests/integration/test_yaml_shapes.py`, which fails without the fix.
 - The ADRs (and the per-version changelog pages) were not visible in the site sidebar.
   `mkdocs.yml` pointed the nav at a file (`adr/index.md`, `changelog/SUMMARY.md`), and
   `literate-nav` only expands a `SUMMARY.md` when the nav entry points at its *directory*: the

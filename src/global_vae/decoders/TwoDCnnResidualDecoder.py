@@ -13,7 +13,12 @@ from global_vae.utils.conv_math import (
     computeUpsampleStack2dOutputShape,
     solveConvTranspose2dOutputPadding,
 )
-from global_vae.utils.stage_config import ShapeLike, broadcastPerStage, broadcastPerStageShape
+from global_vae.utils.stage_config import (
+    ShapeLike,
+    broadcastPerStage,
+    broadcastPerStageShape,
+    resolveSpatialShape,
+)
 
 
 @registerDecoder("2d_cnn_resnet_decoder_v1")
@@ -59,11 +64,11 @@ class TwoDCnnResidualDecoder(AbstractDecoder):
     def __init__(
         self,
         latent_dim: int,
-        output_shape: tuple[int, int],
+        output_shape: tuple[int, int] | list[int],
         out_channels: int = 1,
         hidden_channels: tuple[int, ...] = (128, 64, 32),
         block_depths: int | Sequence[int] = 2,
-        seed_shape: tuple[int, int] = (8, 8),
+        seed_shape: tuple[int, int] | list[int] = (8, 8),
         kernel_sizes: ShapeLike | list[ShapeLike] = 3,
         strides: ShapeLike | list[ShapeLike] = 2,
         paddings: ShapeLike | list[ShapeLike] = 1,
@@ -88,6 +93,8 @@ class TwoDCnnResidualDecoder(AbstractDecoder):
             output_shape: `(height, width)` of the reconstructed image. The
                 chosen configuration must reach this exactly, on both axes (see
                 `output_paddings`); this class never resizes its way to it.
+                A `list` (what a YAML config produces, which has no tuple
+                type) is accepted and normalized to a `tuple`.
             out_channels: Number of output channels (`1` for a plain grayscale
                 image, `3` for RGB).
             hidden_channels: Channel width of the projected seed
@@ -104,6 +111,7 @@ class TwoDCnnResidualDecoder(AbstractDecoder):
                 on both axes (see `utils.conv_blocks.Residual2DUpBlock`).
             seed_shape: `(seed_height, seed_width)` of the projected seed
                 feature map, upsampled by the transition stack.
+                Accepts a `list` too, like `output_shape`.
             kernel_sizes: Upsampling kernel shape, per transition or shared,
                 applied to every layer within that transition's block. Both
                 components must be odd for any transition whose `block_depths`
@@ -176,6 +184,11 @@ class TwoDCnnResidualDecoder(AbstractDecoder):
                 `output_shape` (every other case).
         """
         super().__init__()
+        # A YAML/Hydra config has no tuple type: a shape written `[64, 64]` arrives as a
+        # list, and `list != tuple` would make the exact-shape check below reject a
+        # configuration whose computed shape is actually correct.
+        output_shape = cast("tuple[int, int]", resolveSpatialShape(output_shape, 2, "output_shape"))
+        seed_shape = cast("tuple[int, int]", resolveSpatialShape(seed_shape, 2, "seed_shape"))
         self._output_shape = output_shape
         self._modality_name = modality_name
         num_transitions = len(hidden_channels)
@@ -337,7 +350,7 @@ class TwoDCnnResidualDecoder(AbstractDecoder):
 
     @staticmethod
     def computeOutputShape(
-        seed_shape: tuple[int, int],
+        seed_shape: tuple[int, int] | list[int],
         hidden_channels: tuple[int, ...],
         kernel_sizes: ShapeLike | list[ShapeLike] = 3,
         strides: ShapeLike | list[ShapeLike] = 2,
@@ -383,6 +396,7 @@ class TwoDCnnResidualDecoder(AbstractDecoder):
             ValueError: If any per-transition shape argument does not resolve
                 cleanly, or if `upsample_mode` is not recognized.
         """
+        seed_shape = cast("tuple[int, int]", resolveSpatialShape(seed_shape, 2, "seed_shape"))
         num_transitions = len(hidden_channels)
         kernel_sizes_: tuple[tuple[int, int], ...] = cast(
             "tuple[tuple[int, int], ...]",
@@ -439,4 +453,9 @@ class TwoDCnnResidualDecoder(AbstractDecoder):
 
     @property
     def modality_name(self) -> str:
+        """Name of the modality this decoder reconstructs.
+
+        Returns:
+            The modality name given at construction (e.g. `"image"`).
+        """
         return self._modality_name

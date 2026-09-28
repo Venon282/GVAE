@@ -217,7 +217,7 @@ At inference time (once the model is trained), there are two distinct uses, both
 
 ## 11. Bonus: what about multiple modalities (signal + image)?
 
-A very quick overview, for the day when Fusion (`fusion/poe.py`) comes into play: when multiple encoders (one per modality) feed the **same** latent space, each produces its own `(mu, logvar)`, like independent "experts" on the same variable `z`. The **Product-of-Experts (PoE)** strategy combines these experts into a single fused posterior, *before* sampling, giving more weight to the most confident experts (those with the smallest variance). Everything else (reparameterize, decoder, losses) then works exactly as described above, on this already fused posterior. This is why the spec clearly distinguishes Fusion (combining distributions, before sampling) from the Assembler (combining already sampled vectors, after): two different steps in the pipeline.
+A very quick overview of Fusion (`fusion/`), for when several modalities come into play: when multiple encoders (one per modality) feed the **same** latent space, each produces its own `(mu, logvar)`, like independent "experts" on the same variable `z`. The **Product-of-Experts (PoE)** strategy combines these experts into a single fused posterior, *before* sampling, giving more weight to the most confident experts (those with the smallest variance). Other strategies do the same job differently: **Mixture-of-Experts** (`moe`) averages the experts instead of multiplying them, so the fused uncertainty grows when they disagree; **Concatenation + MLP** (`concat_mlp`) lets a small network learn the combination; **Cross-attention** (`cross_attention`) lets the modalities look at each other before being combined. Everything else (reparameterize, decoder, losses) then works exactly as described above, on this already fused posterior. This is why the spec clearly distinguishes Fusion (combining distributions, before sampling) from the Assembler (combining already sampled vectors, after): two different steps in the pipeline.
 
 ---
 
@@ -245,5 +245,5 @@ A very quick overview, for the day when Fusion (`fusion/poe.py`) comes into play
 | **Posterior collapse** | Failure mode where the encoder ignores `x` and always produces the prior; `z` no longer carries information. |
 | **Free bits** | A small KL budget, per dimension, that is never penalized, to avoid collapse. |
 | **Reconstruction loss** | Measure of the difference between `x` and `x̂` (often MSE). |
-| **Fusion (PoE, etc.)** | Combines multiple `(mu, logvar)` values (one per modality) into a single posterior, before sampling. |
+| **Fusion (PoE, MoE, ...)** | Combines multiple `(mu, logvar)` values (one per modality) into a single posterior, before sampling. |
 | **Assembler** | Combines multiple already sampled `z` values into a single vector, for the decoder. |

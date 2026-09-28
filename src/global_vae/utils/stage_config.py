@@ -80,32 +80,40 @@ def broadcastPerStage(value: _T | Sequence[_T], num_stages: int, name: str) -> t
     return (value,) * num_stages
 
 
-def resolveSpatialShape(value: ShapeLike, ndim: int, name: str) -> tuple[int, ...]:
+def resolveSpatialShape(value: ShapeLike | list[int], ndim: int, name: str) -> tuple[int, ...]:
     """Resolve a single spatial-shape hyperparameter to an explicit per-dimension tuple.
 
     Args:
         value: Either a single `int`, applied to every one of the
             `ndim` spatial dimensions (e.g. a square 2D kernel or a
-            cubic 3D kernel), or an explicit `tuple[int, ...]` of
-            length `ndim` (e.g. a non-square `(height, width)` kernel).
+            cubic 3D kernel), or an explicit sequence of length `ndim`
+            (e.g. a non-square `(height, width)` kernel). The sequence
+            may be a `tuple` or a `list`: a YAML/Hydra config has no
+            tuple type, so a shape written `[64, 64]` there reaches
+            this function as a `list`. Both mean exactly the same
+            single shape here (the `list`-versus-`tuple` distinction
+            only matters one level up, in `broadcastPerStageShape`,
+            where a *top-level* `list` is the per-stage wrapper).
         ndim: Number of spatial dimensions (`2` for this codebase's 2D
             building blocks).
         name: Parameter name, used only for the error message.
 
     Returns:
-        A tuple of length `ndim`.
+        A plain tuple of length `ndim`, whichever sequence type was
+        given, so callers can compare it against other shapes (a
+        `list` never equals a `tuple`) and hash it.
 
     Raises:
-        ValueError: If `value` is a tuple whose length does not equal
-            `ndim`.
+        ValueError: If `value` is a sequence whose length does not
+            equal `ndim`.
     """
-    if isinstance(value, tuple):
+    if isinstance(value, (tuple, list)):
         if len(value) != ndim:
             raise ValueError(
                 f"'{name}' gave a {len(value)}-dimensional shape {value}, but this "
                 f"building block is {ndim}-dimensional."
             )
-        return value
+        return tuple(value)
     return (value,) * ndim
 
 
@@ -131,7 +139,9 @@ def broadcastPerStageShape(
     for a single (not-yet-per-stage) shape:
       - a `list` is always the per-stage wrapper: exactly `num_stages`
         entries, one per stage, each independently resolved via
-        `resolveSpatialShape`;
+        `resolveSpatialShape` (so an entry may itself be a `tuple` or,
+        as a YAML config produces, a `list`: `[[3, 5], [3, 5]]` is two
+        stages of a `(3, 5)` kernel);
       - a `tuple` is always a single, explicit, multi-dimensional shape
         (`resolveSpatialShape`'s own single-value behavior) applied to
         every stage;
@@ -189,8 +199,9 @@ def broadcastPerStageOptionalShape(
     ndim: int,
     name: str,
 ) -> tuple[tuple[int, ...] | None, ...]:
-    """Like `broadcastPerStageShape`, but a per-stage or shared `None` is passed through
-    unchanged instead of being resolved by `resolveSpatialShape`.
+    """Like `broadcastPerStageShape`, but a `None` (per stage or shared) passes through.
+
+    A `None` is returned unchanged instead of being resolved by `resolveSpatialShape`.
 
     For hyperparameters where a given stage may have no shape at all,
     e.g. `pool_kernel_sizes`/`pool_strides` (a stage may skip pooling

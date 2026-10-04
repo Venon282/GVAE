@@ -8,6 +8,42 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `training/callbacks/` subpackage: `TrainerCallback` (relocated from
+  `training/callbacks.py`) and the checkpoint callbacks now self-register into a
+  unified `training.callbacks` registry (`registerCallback`/`getCallbackClass`/
+  `listRegisteredCallbacks`, mirroring every other pluggable strategy in this
+  codebase), instead of `CheckpointCallback`/`BestCheckpointCallback` living
+  ungoverned together in `training/checkpoint.py`. `TrainingConfig.callbacks:
+  dict[str, dict[str, Any] | None]` (registry name -> constructor kwargs) replaces
+  the old `checkpoint: CheckpointConfig` field: a run now opts into exactly the
+  checkpoint/scheduling-style callbacks it wants, in any order, instead of always
+  carrying one hardcoded field. Experiment loggers (`training/loggers/`,
+  `TrainingConfig.loggers`) are unaffected: they keep their own, separate
+  `registerLogger`/`getLoggerClass` registry and config field, unchanged by this
+  work. See `docs/adr/0022-callback-registry.md`.
+- `training/callbacks/reduce_lr_on_plateau.py` (`ReduceLrOnPlateau`, registered
+  `reduce_lr_on_plateau`): the same algorithm and constructor arguments as
+  `torch.optim.lr_scheduler.ReduceLROnPlateau` (`mode`, `factor`, `patience`, `threshold`,
+  `threshold_mode`, `cooldown`, `min_lr`, `eps`), reimplemented as a `TrainerCallback` so it
+  reads its monitored metric from `Trainer.fit`'s own epoch-metrics dict (`monitor`) and
+  lowers `trainer.optimizer`'s learning rate on a plateau, with no separate manual `.step()`
+  call needed.
+- `training/callbacks/early_stopping.py` (`EarlyStopping`, registered `early_stopping`):
+  plain `torch` ships no early-stopping class of its own, so this callback reuses the exact
+  same plateau-detection algorithm `ReduceLrOnPlateau` does (`training/callbacks/_plateau.py`'s
+  shared `PlateauTracker`) and stops training (`Trainer.should_stop = True`) instead of
+  lowering the learning rate once the monitored metric plateaus.
+- `Trainer.should_stop`: a new `bool` attribute (`False` by default, reset at the start of
+  every `fit()` call) a callback's `onEpochEnd` can set to end the run after the current
+  epoch's remaining callbacks have all run, rather than raising or returning a sentinel
+  `fit()` would have to interpret. The one `Trainer` change `EarlyStopping` needed.
+- `tests/integration/test_callback_registry.py`, `test_plateau_tracker.py`,
+  `test_early_stopping.py`, `test_reduce_lr_on_plateau.py`, `test_checkpoint_callbacks.py`
+  (new): registry mechanics and every built-in name (explicitly covering that experiment
+  loggers are *not* registered here), the shared plateau algorithm's own value correctness,
+  and each new callback's behavior both via direct calls and through a real `Trainer.fit()`
+  run. `test_trainer.py` gained a `TestShouldStop` class.
+
 - `fusion/moe.py` (`moe`), `fusion/concat_mlp.py` (`concat_mlp`) and
   `fusion/cross_attention.py` (`cross_attention`): the three remaining fusion strategies of
   spec §4, registered next to `poe` and selectable by name from `fusion_strategies` /
@@ -129,6 +165,22 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `examples/03_signal_image_to_image.py` no longer defines its own `TranslationTrainer`: the
   stock `Trainer` now handles a decoder target with no matching encoder, and never applies
   modality dropout during `evaluate()`, itself (ADR 0019). `main()` now builds a plain `Trainer`.
+- `CheckpointCallback`/`BestCheckpointCallback` moved from `training/checkpoint.py`, where
+  they lived together in one file, to two separate files:
+  `training/callbacks/checkpoint.py` (registered `checkpoint`) and
+  `training/callbacks/best_checkpoint.py` (registered `best_checkpoint`), one class per
+  file per spec §10's "Modularity" rule. The checkpoint file format itself
+  (`saveCheckpoint`/`loadCheckpoint`/`CheckpointMetadata`, imported the same way as before)
+  is unchanged and stays in `training/checkpoint.py`. `configs/training/default.yaml`
+  updated to the new `callbacks:` shape for these two entries, reproducing its previous
+  behavior exactly; its `loggers:` list is untouched. See `docs/adr/0022-callback-registry.md`.
+
+### Removed
+
+- `TrainingConfig.checkpoint` (`CheckpointConfig`): replaced by the registry-driven
+  `TrainingConfig.callbacks` field (see Changed, above, and
+  `docs/adr/0022-callback-registry.md`). `TrainingConfig.loggers` (`LoggerEntryConfig`) is
+  unaffected and was not removed.
 
 ### Fixed
 

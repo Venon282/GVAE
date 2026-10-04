@@ -1,4 +1,4 @@
-# Add a fusion, assembler, regularizer, transform, beta schedule, or logger
+# Add a fusion, assembler, regularizer, transform, beta schedule, callback, or logger
 
 Every one of these follows the exact same three-step pattern: subclass an
 abstract base class, decorate it to self-register under a name, and import
@@ -12,7 +12,19 @@ runs.
 | Latent regularizer | `AbstractLatentRegularizer` | `@registerRegularizer("name")` | `losses/regularizers/` | `losses/regularizers/__init__.py` |
 | Data transform | `AbstractTransform` | `@registerTransform("name")` | `data/transforms/` | `data/transforms/__init__.py` |
 | Beta schedule | `AbstractBetaSchedule` | `@registerBetaSchedule("name")` | `training/beta_schedules/` | `training/beta_schedules/__init__.py` |
+| Training callback | `TrainerCallback` | `@registerCallback("name")` | `training/callbacks/` | `training/callbacks/__init__.py` |
 | Experiment logger | `AbstractExperimentLogger` | `@registerLogger("name")` | `training/loggers/` | `training/loggers/__init__.py` |
+
+A logger is not a training callback for this table's purposes, even though
+`AbstractExperimentLogger` happens to subclass `TrainerCallback` so
+`Trainer.callbacks` can call its hooks uniformly (ADR 0008): that inheritance
+is plumbing, not registry membership. A `Logger` is a journalling service
+selected from `TrainingConfig.loggers`/`LoggerEntryConfig`, through its own
+`registerLogger`/`getLoggerClass` registry; a training callback (checkpoint,
+early stopping, learning-rate scheduling, or your own) is selected from
+`TrainingConfig.callbacks` (registry name -> kwargs), through the separate
+`training.callbacks` registry. See `docs/adr/0022-callback-registry.md` for
+why the two stay apart.
 
 ## Steps
 
@@ -37,3 +49,17 @@ tensor of *any* shape or dimensionality, and must never encode anything
 specific to one dataset or modality. Shape-dependent behavior goes through
 an explicit, caller-supplied parameter (like `ResampleTransform`'s
 `num_spatial_dims`), never a hardcoded branch on `x.dim()`.
+
+## A note specific to training callbacks
+
+Unlike every other row above, a callback is not chosen one-at-a-time: a
+training run typically wants several active together (checkpointing, early
+stopping, a learning-rate scheduler, all at once). `TrainingConfig.callbacks`
+is therefore a `dict[str, dict[str, Any] | None]` (registry name ->
+constructor kwargs), not a single `strategy` field, and `Trainer.callbacks`
+is a plain list (loggers from `TrainingConfig.loggers` are combined into the
+same list, ahead of these). If your callback's constructor declares a
+`config` parameter, `buildCallbacksFromConfig` passes it the full run config
+automatically (checked via the parameter's presence, not by special-casing
+your class), matching what `CheckpointCallback`/`BestCheckpointCallback`
+already do (spec §10: "config snapshotted with every run").

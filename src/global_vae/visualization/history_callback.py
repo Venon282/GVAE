@@ -1,7 +1,7 @@
 """In-memory metrics collection for visualization, without going through a file-based
 logger (`training/loggers/`) first.
 
-`HistoryCallback` is a `TrainerCallback` (`training/callbacks.py`), exactly like every
+`HistoryCallback` is a `TrainerCallback` (`training/callbacks/base.py`), exactly like every
 `AbstractExperimentLogger`, but it stores metrics in plain Python lists instead of
 writing anywhere. `Trainer.history` already covers the epoch-level case on its own
 (`docs/adr/0005-training-loop.md`); `HistoryCallback` additionally covers the
@@ -11,7 +11,7 @@ exactly the shape `visualization.loss_curves.plotStepCurves` expects.
 
 from typing import TYPE_CHECKING
 
-from global_vae.training.callbacks import TrainerCallback
+from global_vae.training.callbacks.base import TrainerCallback
 
 if TYPE_CHECKING:
     from global_vae.training.trainer import Trainer

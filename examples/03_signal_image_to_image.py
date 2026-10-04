@@ -85,7 +85,8 @@ from global_vae.evaluation.metrics import computeMse, computePearsonR, computeR2
 from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
-from global_vae.training.checkpoint import BestCheckpointCallback, loadCheckpoint
+from global_vae.training.callbacks.best_checkpoint import BestCheckpointCallback
+from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.training.loggers.csv_logger import CsvLogger
 from global_vae.training.trainer import Trainer
 from global_vae.utils.seed import setGlobalSeed

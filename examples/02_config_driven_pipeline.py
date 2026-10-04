@@ -119,7 +119,7 @@ EXPERIMENT_VARIANTS: dict[str, list[str]] = {
         "model.single_latent.regularizer.strategy=free_bits_kl",
         "+model.single_latent.regularizer.kwargs.free_bits=1.0",
         "training.beta_schedules.z_fused.kwargs.warmup_steps=1500",
-        "training.checkpoint.best_monitor=val/loss/reconstruction",
+        "training.callbacks.best_checkpoint.monitor=val/loss/reconstruction",
         "training.optimizer.kwargs.lr=0.002",
     ],
 }
@@ -320,7 +320,7 @@ def runVariant(
         "best-checkpoint monitor=%s, lr=%s.",
         cfg.model.name,
         regularizer_strategy,
-        cfg.training.checkpoint.best_monitor,
+        cfg.training.callbacks["best_checkpoint"]["monitor"],
         cfg.training.optimizer.kwargs.get("lr"),
     )
     setGlobalSeed(cfg.seed, deterministic=cfg.deterministic)
@@ -341,8 +341,9 @@ def runVariant(
     )
 
     best_model = buildModelFromConfig(cfg.model)
-    assert cfg.training.checkpoint.best_path is not None  # every variant sets one
-    loadCheckpoint(Path(cfg.training.checkpoint.best_path), model=best_model)
+    best_checkpoint_path = cfg.training.callbacks["best_checkpoint"]["path"]
+    assert best_checkpoint_path is not None  # every variant sets one
+    loadCheckpoint(Path(best_checkpoint_path), model=best_model)
 
     assert dataloaders.test is not None  # this example's loader_factory always populates it
     results = evaluate(best_model, dataloaders.test, device=trainer.device)

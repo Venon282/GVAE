@@ -3,20 +3,25 @@
 This is the mechanism `Trainer` uses to expose what is happening
 during training (loss values, epoch boundaries) to anything that wants
 to react to it: a metrics logger (TensorBoard, CSV, W&B, MLflow, spec
-§10), a checkpointer, an early-stopping rule, a live plot. None of
-those concerns belong inside `Trainer` itself, which only knows how to
-run the forward/backward loop; `TrainerCallback` is the seam between
-the two.
+§10), a checkpointer, an early-stopping rule, a learning-rate scheduler.
+None of those concerns belong inside `Trainer` itself, which only knows
+how to run the forward/backward loop; `TrainerCallback` is the seam
+between the two.
 
-Deliberately **not** a registry-based single-strategy extension point
-(unlike encoders, decoders, fusion, assemblers, regularizers, and beta
-schedules, each selected one-at-a-time by name from a registry):
-callbacks are meant to be composed, not chosen between. A training run
-commonly wants several active at once (say, a CSV logger and a
-checkpointer together), so `Trainer` takes a plain `list[TrainerCallback]`
-instead of a single registry-resolved name. This mirrors the callback
-pattern used by most training frameworks (Keras, PyTorch Lightning,
-Hugging Face `Trainer`).
+Concrete callbacks self-register by name via `@registerCallback(name)`
+(see `registry.py`), like every other pluggable piece of this framework,
+so a training run can pick any number of them from config
+(`TrainingConfig.callbacks`, `docs/adr/0022-callback-registry.md`)
+without `Trainer` or the config layer knowing about any concrete class.
+
+Unlike the single-strategy registries (encoders, decoders, fusion,
+assemblers, regularizers, beta schedules), where exactly one strategy is
+picked per role, callbacks are meant to be composed: a training run
+commonly wants several active at once (say, a CSV logger, a
+checkpointer, and early stopping together). `Trainer` therefore takes a
+plain `list[TrainerCallback]`, and the config selects several registry
+names at once. This mirrors the callback pattern used by most training
+frameworks (Keras, PyTorch Lightning, Hugging Face `Trainer`).
 """
 
 from typing import TYPE_CHECKING
@@ -38,6 +43,13 @@ class TrainerCallback:
     defined by which events it *chooses* to react to, and leaving the
     rest as no-ops is the normal, expected case, not an incomplete
     implementation.
+
+    A callback may also act on the `Trainer` it is handed, not only
+    observe it. Two such levers exist, both used by built-in callbacks:
+    `trainer.optimizer` (e.g. `ReduceLrOnPlateau` lowers its learning
+    rate) and `trainer.should_stop` (e.g. `EarlyStopping` sets it to
+    `True`; `Trainer.fit` then ends the run after every callback has
+    finished handling the current epoch).
     """
 
     def onTrainBegin(self, trainer: "Trainer") -> None:
@@ -76,6 +88,12 @@ class TrainerCallback:
     def onEpochEnd(self, trainer: "Trainer", epoch: int, metrics: dict[str, float]) -> None:
         """Called after every training epoch (and its validation pass, if any).
 
+        Callbacks are called in the order they were given to `Trainer`
+        (for a config-built run: the order of `TrainingConfig.callbacks`).
+        Setting `trainer.should_stop = True` here does not interrupt the
+        callbacks that come after this one for the same epoch: they all
+        run, then `Trainer.fit` stops before starting the next epoch.
+
         Args:
             trainer: The `Trainer` instance running this training run.
             epoch: Index of the epoch that just finished (0-based).
@@ -90,10 +108,10 @@ class TrainerCallback:
         """Called once, after `Trainer.fit` finishes.
 
         Always called, including when training exits early via an
-        exception (e.g. `KeyboardInterrupt`): `Trainer.fit` runs the
-        training loop in a `try`/`finally` so every callback gets a
-        chance to flush/close cleanly (e.g. a file-based logger closing
-        its file handle) regardless of how training ended.
+        exception (e.g. `KeyboardInterrupt`) or via `trainer.should_stop`:
+        `Trainer.fit` runs the training loop in a `try`/`finally` so every
+        callback gets a chance to flush/close cleanly (e.g. a file-based
+        logger closing its file handle) regardless of how training ended.
 
         Args:
             trainer: The `Trainer` instance running this training run.

@@ -1,5 +1,7 @@
 # Global Multimodal VAE
 
+[![CI](https://github.com/Venon282/GVAE/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/Venon282/GVAE/actions/workflows/ci.yaml)
+
 ## Documentation
 https://venon282.github.io/GVAE/
 
@@ -7,8 +9,11 @@ https://venon282.github.io/GVAE/
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,docs]"
 ```
+
+The `docs` extra is needed by the test that builds the documentation site; without it that
+test is skipped.
 
 ## Running the signal-VAE milestone (spec §6.1 milestone 1)
 
@@ -50,8 +55,14 @@ python scripts/evaluate.py \
 ruff check .
 ruff format --check .
 mypy
-pytest
+pytest --cov=global_vae --cov-fail-under=95
 ```
+
+GitHub Actions (`.github/workflows/ci.yaml`) runs the same checks on every push and pull
+request: `lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest` on Python 3.11
+and 3.13). The tests fail under a coverage floor of 95%, set one point below the measured
+value; raise it as coverage improves. The `lint` job is advisory until the ruff clean-up
+(roadmap P0-2) lands, the other jobs are blocking.
 
 ## Repository structure
 

@@ -4,8 +4,11 @@
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,docs]"
 ```
+
+The `docs` extra is only needed to build the documentation and to run the test that
+builds the site; leave it out if you do neither.
 
 ## Run the full pipeline on synthetic data (no setup needed)
 
@@ -51,5 +54,9 @@ See [Train a model](how-to/train.md) and
 ruff check .
 ruff format --check .
 mypy
-pytest
+pytest --cov=global_vae --cov-fail-under=95
 ```
+
+The same four commands run in CI on every push and pull request
+(`.github/workflows/ci.yaml`). `pytest` must keep coverage at or above the 95% floor, and the
+`ruff` job is advisory until the lint clean-up (roadmap P0-2) lands.

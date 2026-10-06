@@ -109,6 +109,8 @@ No single fusion strategy is hardcoded, and fusion is not a single model-wide ch
 
 This is implemented as a **strategy pattern**: an `AbstractFusion` interface with each strategy as a subclass, registered by name (e.g. `poe`, `moe`, `concat_mlp`, `cross_attention`) so a new one can be added without touching existing code.
 
+**Implementation status:** all four strategies above are implemented in `fusion/` and selectable by name (`docs/adr/0020-additional-fusion-strategies.md`, `docs/how-to/choose-a-fusion-strategy.md`). Because `AbstractFusion.forward` returns a single `(mu, logvar)` pair, MoE is realized as the Gaussian that matches the mixture's first two moments rather than as a true mixture; concat+MLP implements the explicit imputation/masking scheme §5 requires (zero imputation plus a presence mask) while still reporting `handlesMissingModalities=False`. The per-assignment `residual` flag is implemented for every strategy at once through `fusion.residual.ResidualFusion` (`docs/adr/0021-fusion-residual-connection.md`): the spec names the flag without defining it, so the ADR fixes one definition (skip path = mean of the active experts, learned gate initialized at 0). It is off by default.
+
 See §2.2 for the symmetric decoder-side mechanism (the Assembler) used when a decoder consumes more than one independent latent space, and for the Latent Head, the analogous mechanism on the encoder side when a single encoder feeds more than one latent space.
 
 ---

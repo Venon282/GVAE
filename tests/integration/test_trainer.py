@@ -25,7 +25,7 @@ from global_vae.latent.routing_graph_builders.single import buildSingleLatentRou
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.constant import ConstantBetaSchedule
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
-from global_vae.training.callbacks import TrainerCallback
+from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.trainer import Trainer
 
 INPUT_DIM = 16
@@ -608,3 +608,57 @@ class TestErrorPaths:
         trainer = Trainer(model, device="cpu")
         with pytest.raises(ValueError, match="num_epochs"):
             trainer.fit(_fixedDataset(num_batches=1), num_epochs=0)
+
+
+class _SetsShouldStopAtEpoch(TrainerCallback):
+    """Sets `trainer.should_stop = True` once a given epoch's `onEpochEnd` fires."""
+
+    def __init__(self, stop_at_epoch: int) -> None:
+        self.stop_at_epoch = stop_at_epoch
+
+    def onEpochEnd(self, trainer: Trainer, epoch: int, metrics: dict[str, float]) -> None:
+        if epoch == self.stop_at_epoch:
+            trainer.should_stop = True
+
+
+class TestShouldStop:
+    """`Trainer.should_stop`, the lever `EarlyStopping` (and any other callback) uses."""
+
+    def test_defaults_to_false(self) -> None:
+        model = _buildSingleModalityModel()
+        trainer = Trainer(model, device="cpu")
+        assert trainer.should_stop is False
+
+    def test_a_callback_setting_should_stop_ends_the_run_before_num_epochs(self) -> None:
+        model = _buildSingleModalityModel()
+        callback = _SetsShouldStopAtEpoch(stop_at_epoch=1)
+        trainer = Trainer(model, device="cpu", callbacks=[callback])
+
+        history = trainer.fit(_fixedDataset(num_batches=2), num_epochs=5)
+
+        assert len(history) == 2  # epochs 0 and 1 ran; 2, 3, 4 did not
+        assert trainer.should_stop is True
+
+    def test_every_onepochend_callback_still_runs_for_the_stopping_epoch(self) -> None:
+        model = _buildSingleModalityModel()
+        recorder = _RecordingCallback()
+        stopper = _SetsShouldStopAtEpoch(stop_at_epoch=0)
+        # stopper listed before recorder: recorder must still observe epoch 0.
+        trainer = Trainer(model, device="cpu", callbacks=[stopper, recorder])
+
+        trainer.fit(_fixedDataset(num_batches=2), num_epochs=5)
+
+        assert [epoch for epoch, _ in recorder.epoch_end_calls] == [0]
+
+    def test_resets_to_false_at_the_start_of_a_fresh_fit_call(self) -> None:
+        model = _buildSingleModalityModel()
+        callback = _SetsShouldStopAtEpoch(stop_at_epoch=0)
+        trainer = Trainer(model, device="cpu", callbacks=[callback])
+
+        trainer.fit(_fixedDataset(num_batches=2), num_epochs=3)
+        assert trainer.should_stop is True
+
+        trainer.callbacks = []  # nothing sets should_stop again
+        history = trainer.fit(_fixedDataset(num_batches=2), num_epochs=2)
+        assert trainer.should_stop is False
+        assert len(history) == 3  # 1 (from the first fit) + 2 (from this one)

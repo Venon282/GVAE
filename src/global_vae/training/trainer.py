@@ -46,7 +46,7 @@ from global_vae.losses.reconstruction import LossFn, computeTotalReconstructionL
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedule_resolution import resolveBetaSchedules
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
-from global_vae.training.callbacks import TrainerCallback
+from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.checkpoint import loadCheckpoint as loadCheckpointFile
 from global_vae.training.checkpoint import saveCheckpoint as saveCheckpointFile
 from global_vae.utils.autograd import backward
@@ -98,12 +98,23 @@ class Trainer:
     """Raw PyTorch training loop: forward, reconstruction + regularization loss, backward, step.
 
     Owns exactly the concerns spec §10 assigns to the training loop
-    for now (model optimization, device placement, per-step/per-epoch
+    itself (model optimization, device placement, per-step/per-epoch
     metrics) and nothing else: no data loading (the caller's
-    `Iterable`), no experiment tracking (`TrainerCallback`, spec §10's
-    "Experiment tracking" item, deferred to a dedicated logger
-    subpackage that plugs into the same callback seam), no
-    checkpointing (a separate, not-yet-built milestone).
+    `Iterable`), no experiment tracking, checkpointing, learning-rate
+    scheduling, or early stopping inline in this class. Every one of
+    those is a `TrainerCallback` instead (`training/callbacks/`, spec
+    §10, ADR 0022), each self-registered by name so a training run
+    opts into exactly the callbacks it wants, in whatever combination,
+    from `TrainingConfig.callbacks` (`config/training.py`) or by
+    constructing them directly and passing `callbacks=[...]` here.
+
+    Attributes:
+        should_stop: `False` by default (and reset to `False` at the
+            start of every `fit()` call); a callback's `onEpochEnd`
+            (e.g. `training.callbacks.early_stopping.EarlyStopping`)
+            sets this to `True` to end the run after the current
+            epoch's callbacks have all finished, rather than raising
+            or returning a sentinel `fit()` would have to interpret.
     """
 
     def __init__(
@@ -179,9 +190,13 @@ class Trainer:
                 is applied with this max norm before every optimizer
                 step. `None` (default) disables clipping.
             callbacks: `TrainerCallback` instances to notify at every
-                training-loop event (`training/callbacks.py`). Several
-                may be active at once (e.g. a metrics logger and a
-                checkpointer). `None` (default) means no callbacks.
+                training-loop event (`training/callbacks/`). Several
+                may be active at once (e.g. a metrics logger, a
+                checkpointer, early stopping, and a learning-rate
+                scheduler, all together). `None` (default) means no
+                callbacks. `global_vae.config.training.buildCallbacksFromConfig`
+                builds this list from `TrainingConfig.callbacks` (and
+                `TrainingConfig.loggers`) for a config-driven run.
             log_every_n_steps: How often (in global steps) `Trainer`
                 logs step-level progress via the standard `logging`
                 module (never `print`, spec §10). Every epoch boundary
@@ -223,6 +238,7 @@ class Trainer:
         self.global_step = 0
         self.start_epoch = 0
         self.history: list[dict[str, float]] = []
+        self.should_stop = False
 
         logger.info("Trainer initialized on device '%s'.", self.device)
 
@@ -433,6 +449,7 @@ class Trainer:
         if num_epochs <= 0:
             raise ValueError(f"num_epochs must be positive, got {num_epochs}.")
 
+        self.should_stop = False
         for callback in self.callbacks:
             callback.onTrainBegin(self)
 
@@ -451,6 +468,12 @@ class Trainer:
                 self.start_epoch = epoch + 1
                 for callback in self.callbacks:
                     callback.onEpochEnd(self, epoch, epoch_metrics)
+
+                if self.should_stop:
+                    logger.info(
+                        "epoch %d: a callback set trainer.should_stop; stopping early.", epoch
+                    )
+                    break
         finally:
             for callback in self.callbacks:
                 callback.onTrainEnd(self)

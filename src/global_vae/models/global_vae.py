@@ -42,7 +42,9 @@ from torch import nn
 from global_vae.assemblers.registry import getAssemblerClass
 from global_vae.decoders.registry import getDecoderClass
 from global_vae.encoders.registry import getEncoderClass
+from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import getFusionClass
+from global_vae.fusion.residual import ResidualFusion
 from global_vae.latent.base import RoutingGraph, validateRoutingGraph
 from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
 from global_vae.losses.regularization import computeTotalRegularizationLoss
@@ -79,6 +81,7 @@ class GlobalVae(nn.Module):
         decoder_kwargs: dict[str, dict[str, Any]] | None = None,
         fusion_kwargs: dict[str, dict[str, Any]] | None = None,
         regularizer_kwargs: dict[str, dict[str, Any]] | None = None,
+        fusion_residual: dict[str, bool] | None = None,
     ) -> None:
         """Build a `GlobalVae` instance from a routing graph.
 
@@ -113,11 +116,19 @@ class GlobalVae(nn.Module):
                 for fusion modules.
             regularizer_kwargs: Optional per-latent-space constructor
                 kwargs for regularizer modules.
+            fusion_residual: Optional latent space name -> whether that
+                latent space's fusion gets a residual connection (spec
+                §4, `fusion.residual.ResidualFusion`). Absent or `False`
+                leaves the strategy unwrapped, exactly as before. `True`
+                is only valid for a latent space that actually has a
+                fusion, i.e. one fed by more than one encoder.
 
         Raises:
-            ValueError: If `routing_graph` is invalid (spec §2.2), or
-                if a latent space fed by more than one encoder has no
-                entry in `fusion_strategies`.
+            ValueError: If `routing_graph` is invalid (spec §2.2), if a
+                latent space fed by more than one encoder has no entry
+                in `fusion_strategies`, or if `fusion_residual` asks for
+                a residual connection on a latent space with no fusion
+                (unknown, or fed by fewer than two encoders).
             NotImplementedError: If any encoder in `routing_graph` is
                 assigned to more than one latent space (fan-out is not
                 yet supported).
@@ -149,6 +160,25 @@ class GlobalVae(nn.Module):
         self.latent_spaces = routing_graph.latent_specs
         self._feeding_encoders = self._encodersFeeding(routing_graph)
 
+        fusion_residual = fusion_residual or {}
+        fused_latent_names = {
+            latent_name
+            for latent_name, encoder_names in self._feeding_encoders.items()
+            if len(encoder_names) > 1
+        }
+        no_fusion = sorted(
+            name
+            for name, enabled in fusion_residual.items()
+            if enabled and name not in fused_latent_names
+        )
+        if no_fusion:
+            raise ValueError(
+                f"`fusion_residual` enables a residual connection for {no_fusion}, but a "
+                f"residual connection wraps a fusion, and those latent spaces have none: "
+                f"each is unknown or fed by fewer than two encoders. Latent spaces with a "
+                f"fusion: {sorted(fused_latent_names)}."
+            )
+
         self.encoders = nn.ModuleDict(
             {
                 name: getEncoderClass(registry_name)(**encoder_kwargs.get(name, {}))
@@ -172,7 +202,10 @@ class GlobalVae(nn.Module):
                     f"encoders {encoder_names}, but has no entry in `fusion_strategies`."
                 )
             strategy = fusion_strategies[latent_name]
-            fusions[latent_name] = getFusionClass(strategy)(**fusion_kwargs.get(latent_name, {}))
+            fusion: AbstractFusion = getFusionClass(strategy)(**fusion_kwargs.get(latent_name, {}))
+            if fusion_residual.get(latent_name, False):
+                fusion = ResidualFusion(fusion)
+            fusions[latent_name] = fusion
         self.fusions = nn.ModuleDict(fusions)
 
         self.regularizers = nn.ModuleDict(
@@ -199,6 +232,7 @@ class GlobalVae(nn.Module):
         fusion_strategy: str | None = None,
         latent_name: str = "z_fused",
         regularizer_strategy: str = "kl_standard_normal",
+        fusion_residual: bool = False,
         **kwargs: Any,
     ) -> "GlobalVae":
         """Convenience constructor for the `EN-L1-DN` Phase-1 default.
@@ -231,6 +265,11 @@ class GlobalVae(nn.Module):
                 (spec §2.3) used for the single latent space. Defaults
                 to `"kl_standard_normal"`, the plain VAE regularization
                 term.
+            fusion_residual: Whether the single latent space's fusion gets
+                a residual connection (spec §4). Only valid together with
+                a fusion, i.e. more than one modality; `True` on a
+                single-modality model raises `ValueError` (delegated to
+                `__init__`).
             **kwargs: Forwarded to `__init__` (`encoder_kwargs`,
                 `decoder_kwargs`, `fusion_kwargs`, `regularizer_kwargs`).
 
@@ -259,6 +298,7 @@ class GlobalVae(nn.Module):
             routing_graph=routing_graph,
             fusion_strategies=fusion_strategies,
             regularizer_strategies={latent_name: regularizer_strategy},
+            fusion_residual={latent_name: True} if fusion_residual else None,
             **kwargs,
         )
 

@@ -89,7 +89,8 @@ from global_vae.data.transforms.standardize import StandardizeTransform
 from global_vae.evaluation.evaluate import evaluate
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
-from global_vae.training.checkpoint import BestCheckpointCallback, loadCheckpoint
+from global_vae.training.callbacks.best_checkpoint import BestCheckpointCallback
+from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.training.loggers.csv_logger import CsvLogger
 from global_vae.training.trainer import Trainer
 from global_vae.utils.seed import setGlobalSeed

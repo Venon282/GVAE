@@ -1,7 +1,7 @@
 """Integration tests for `global_vae.config` (spec §9, §10 "Config management").
 
 Uses the repository's real `configs/` directory and real built-in encoder/decoder/
-regularizer/beta-schedule/logger implementations throughout (unlike most other
+regularizer/beta-schedule/logger/callback implementations throughout (unlike most other
 integration tests in this suite, which register trivial dummies): the whole point of
 this config layer is turning `configs/model/signal_single_latent.yaml` +
 `configs/data/signal.yaml` + `configs/training/default.yaml` into a real, working
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from hydra.errors import MissingConfigException
+from hydra.errors import ConfigCompositionException, MissingConfigException
 from omegaconf.errors import MissingMandatoryValue
 
 import global_vae.config  # noqa: F401  (registers structured configs with Hydra's ConfigStore)
@@ -27,7 +27,6 @@ from global_vae.config.experiment import ExperimentConfig, loadExperimentConfig
 from global_vae.config.model import ModelConfig, buildModelFromConfig
 from global_vae.config.training import (
     BetaScheduleConfig,
-    CheckpointConfig,
     LoggerEntryConfig,
     TrainingConfig,
     buildBetaSchedules,
@@ -40,7 +39,8 @@ from global_vae.config.training import (
 )
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
-from global_vae.training.checkpoint import BestCheckpointCallback, CheckpointCallback
+from global_vae.training.callbacks.best_checkpoint import BestCheckpointCallback
+from global_vae.training.callbacks.checkpoint import CheckpointCallback
 from global_vae.training.loggers.csv_logger import CsvLogger
 from global_vae.training.loggers.tensorboard_logger import TensorBoardLogger
 from global_vae.training.trainer import Trainer
@@ -74,8 +74,10 @@ class TestLoadExperimentConfig:
         """`${output_dir}` inside configs/training/default.yaml must resolve against the
         experiment-level output_dir, not fail or stay a literal string."""
         cfg = _loadSignalVaeConfig(overrides=["output_dir=/tmp/some_run"])
-        assert cfg.training.checkpoint.directory == "/tmp/some_run/checkpoints"
-        assert cfg.training.checkpoint.best_path == "/tmp/some_run/checkpoints/best.pt"
+        assert cfg.training.callbacks["checkpoint"]["directory"] == "/tmp/some_run/checkpoints"
+        assert (
+            cfg.training.callbacks["best_checkpoint"]["path"] == "/tmp/some_run/checkpoints/best.pt"
+        )
         logger_paths = {entry.name: entry.kwargs for entry in cfg.training.loggers}
         assert logger_paths["csv"]["path"] == "/tmp/some_run/metrics.csv"
         assert logger_paths["tensorboard"]["log_dir"] == "/tmp/some_run/tensorboard"
@@ -93,6 +95,27 @@ class TestLoadExperimentConfig:
         assert cfg.training.optimizer.kwargs["lr"] == pytest.approx(0.005)
         assert cfg.data.batch_size == 64
         assert cfg.model.single_latent.dim == 32
+
+    def test_overriding_an_already_present_callback_needs_no_plus_prefix(self) -> None:
+        cfg = _loadSignalVaeConfig(
+            overrides=["training.callbacks.best_checkpoint.monitor=val/loss/reconstruction"]
+        )
+        assert cfg.training.callbacks["best_checkpoint"]["monitor"] == "val/loss/reconstruction"
+
+    def test_adding_a_brand_new_callback_from_the_cli_needs_a_plus_prefix(self) -> None:
+        """Hydra's own struct-mode rule for any dict field, not specific to `callbacks`:
+        a dotlist override can change an existing key, but adding a key absent from every
+        composed YAML file needs the `+` prefix. Writing the same key directly into a YAML
+        config file (rather than a CLI override) needs no such prefix."""
+        with pytest.raises(ConfigCompositionException, match="early_stopping"):
+            _loadSignalVaeConfig(
+                overrides=["training.callbacks.early_stopping.monitor=val/loss/total"]
+            )
+
+        cfg = _loadSignalVaeConfig(
+            overrides=["+training.callbacks.early_stopping.monitor=val/loss/total"]
+        )
+        assert cfg.training.callbacks["early_stopping"] == {"monitor": "val/loss/total"}
 
     def test_missing_required_data_fields_raises(self) -> None:
         with pytest.raises(MissingMandatoryValue):
@@ -379,22 +402,91 @@ class TestBuildCallbacksFromConfig:
         callbacks = buildCallbacksFromConfig(config)
         assert [type(callback) for callback in callbacks] == [CsvLogger, TensorBoardLogger]
 
-    def test_checkpoint_directory_adds_checkpoint_callback(self, tmp_path: Path) -> None:
-        config = TrainingConfig(checkpoint=CheckpointConfig(directory=str(tmp_path)))
-        callbacks = buildCallbacksFromConfig(config)
-        assert len(callbacks) == 1
-        assert isinstance(callbacks[0], CheckpointCallback)
-
-    def test_best_path_adds_best_checkpoint_callback(self, tmp_path: Path) -> None:
-        config = TrainingConfig(checkpoint=CheckpointConfig(best_path=str(tmp_path / "best.pt")))
-        callbacks = buildCallbacksFromConfig(config)
-        assert len(callbacks) == 1
-        assert isinstance(callbacks[0], BestCheckpointCallback)
-
     def test_unknown_logger_name_raises_key_error(self) -> None:
         config = TrainingConfig(loggers=[LoggerEntryConfig(name="does_not_exist")])
         with pytest.raises(KeyError, match="does_not_exist"):
             buildCallbacksFromConfig(config)
+
+    def test_callbacks_are_instantiated_in_order(self, tmp_path: Path) -> None:
+        config = TrainingConfig(
+            callbacks={
+                "best_checkpoint": {"path": str(tmp_path / "best.pt")},
+                "checkpoint": {"directory": str(tmp_path)},
+            }
+        )
+        callbacks = buildCallbacksFromConfig(config)
+        assert [type(callback) for callback in callbacks] == [
+            BestCheckpointCallback,
+            CheckpointCallback,
+        ]
+
+    def test_reordering_the_mapping_reorders_the_callbacks(self, tmp_path: Path) -> None:
+        config = TrainingConfig(
+            callbacks={
+                "checkpoint": {"directory": str(tmp_path)},
+                "best_checkpoint": {"path": str(tmp_path / "best.pt")},
+            }
+        )
+        callbacks = buildCallbacksFromConfig(config)
+        assert [type(callback) for callback in callbacks] == [
+            CheckpointCallback,
+            BestCheckpointCallback,
+        ]
+
+    def test_loggers_always_come_before_registry_callbacks(self, tmp_path: Path) -> None:
+        config = TrainingConfig(
+            loggers=[LoggerEntryConfig(name="csv", kwargs={"path": str(tmp_path / "m.csv")})],
+            callbacks={"checkpoint": {"directory": str(tmp_path)}},
+        )
+        callbacks = buildCallbacksFromConfig(config)
+        assert [type(callback) for callback in callbacks] == [CsvLogger, CheckpointCallback]
+
+    def test_checkpoint_entry_builds_a_checkpoint_callback(self, tmp_path: Path) -> None:
+        config = TrainingConfig(callbacks={"checkpoint": {"directory": str(tmp_path)}})
+        callbacks = buildCallbacksFromConfig(config)
+        assert len(callbacks) == 1
+        assert isinstance(callbacks[0], CheckpointCallback)
+
+    def test_best_checkpoint_entry_builds_a_best_checkpoint_callback(self, tmp_path: Path) -> None:
+        config = TrainingConfig(callbacks={"best_checkpoint": {"path": str(tmp_path / "best.pt")}})
+        callbacks = buildCallbacksFromConfig(config)
+        assert len(callbacks) == 1
+        assert isinstance(callbacks[0], BestCheckpointCallback)
+
+    def test_none_value_means_every_default(self, tmp_path: Path) -> None:
+        """A bare `some_name:` key in YAML (no nested kwargs) parses to `None`."""
+        config = TrainingConfig(callbacks={"early_stopping": None})
+        callbacks = buildCallbacksFromConfig(config)
+        assert len(callbacks) == 1
+        assert callbacks[0].monitor == "val/loss/total"  # EarlyStopping's own default
+
+    def test_unknown_callback_name_raises_key_error(self) -> None:
+        config = TrainingConfig(callbacks={"does_not_exist": {}})
+        with pytest.raises(KeyError, match="does_not_exist"):
+            buildCallbacksFromConfig(config)
+
+    def test_config_snapshot_is_forwarded_only_to_callbacks_that_accept_it(
+        self, tmp_path: Path
+    ) -> None:
+        """`CheckpointCallback` declares a `config` parameter and receives the snapshot;
+        `EarlyStopping` does not, and is built with no such kwarg (it would raise
+        `TypeError` if one were forwarded)."""
+        config = TrainingConfig(
+            callbacks={
+                "early_stopping": {},
+                "checkpoint": {"directory": str(tmp_path)},
+            }
+        )
+        callbacks = buildCallbacksFromConfig(config, config_snapshot={"some": "snapshot"})
+        checkpoint_callback = next(c for c in callbacks if isinstance(c, CheckpointCallback))
+        assert checkpoint_callback.config == {"some": "snapshot"}
+
+    def test_an_explicit_config_kwarg_is_not_overridden(self, tmp_path: Path) -> None:
+        config = TrainingConfig(
+            callbacks={"checkpoint": {"directory": str(tmp_path), "config": "explicit"}}
+        )
+        callbacks = buildCallbacksFromConfig(config, config_snapshot={"some": "snapshot"})
+        assert callbacks[0].config == "explicit"
 
 
 class TestBuildTrainerFromConfig:

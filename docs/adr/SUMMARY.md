@@ -18,3 +18,6 @@
 - [0017: 2D CNN encoder/decoder](0017-2d-cnn-encoder-decoder.md)
 - [0018: 2D residual encoder/decoder](0018-2d-residual-encoder-decoder.md)
 - [0019: Decouple encoder inputs from decoder targets](0019-decouple-encoder-inputs-from-decoder-targets.md)
+- [0020: Additional fusion strategies](0020-additional-fusion-strategies.md)
+- [0021: Fusion residual connection](0021-fusion-residual-connection.md)
+- [0022: Training callback registry](0022-callback-registry.md)

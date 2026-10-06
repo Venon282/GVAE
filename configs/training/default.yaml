@@ -37,10 +37,16 @@ loggers:
     kwargs:
       log_dir: ${output_dir}/tensorboard
 
-checkpoint:
-  directory: ${output_dir}/checkpoints
-  every_n_epochs: 10
-  keep_last_n: 3
-  best_path: ${output_dir}/checkpoints/best.pt
-  best_monitor: val/loss/total
-  best_mode: min
+# Registry name -> constructor kwargs (docs/adr/0022-callback-registry.md); any
+# combination of global_vae.training.callbacks.registry.listRegisteredCallbacks() may
+# be listed, in any order, including none at all. Instantiated, and called by Trainer,
+# in this mapping's own order, after every logger above.
+callbacks:
+  checkpoint:
+    directory: ${output_dir}/checkpoints
+    every_n_epochs: 10
+    keep_last_n: 3
+  best_checkpoint:
+    path: ${output_dir}/checkpoints/best.pt
+    monitor: val/loss/total
+    mode: min

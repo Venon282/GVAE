@@ -1,7 +1,7 @@
 """Abstract interface for experiment-tracking backends (spec §10: "Weights & Biases or
 MLflow, logging losses, latent-space visualizations, and reconstructions per run").
 
-An `AbstractExperimentLogger` is a `TrainerCallback` (`training/callbacks.py`) specialized
+An `AbstractExperimentLogger` is a `TrainerCallback` (`training/callbacks/base.py`) specialized
 for exactly this job: it translates `Trainer`'s generic per-step/per-epoch events into the
 handful of calls a concrete tracking backend actually needs to implement (`logScalar`, and
 optionally `logImage`/`logFigure`/`close`), instead of every backend reimplementing the
@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from global_vae.training.callbacks import TrainerCallback
+from global_vae.training.callbacks.base import TrainerCallback
 
 if TYPE_CHECKING:
     from global_vae.training.trainer import Trainer

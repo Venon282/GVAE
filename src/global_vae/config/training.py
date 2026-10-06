@@ -1,12 +1,27 @@
-"""Structured config schema for the training domain (spec §9, §10 "Config management"),
-plus the builder functions that turn a validated `TrainingConfig` into a real `Trainer`
-with real optimizer, beta schedules, and callbacks wired in.
+"""Structured config schema for the training domain (spec §9, §10 "Config management").
 
-Every registry-backed field here (`beta_schedules[...].strategy`, `loggers[...].name`)
-is resolved through this project's existing registries
-(`training.beta_schedules.registry`, `training.loggers.registry`), never hardcoded, so
-adding a new schedule or logger strategy elsewhere in the codebase makes it usable from
-config automatically, with zero changes needed here (spec §10, §12).
+Also holds the builder functions that turn a validated `TrainingConfig` into a real
+`Trainer` with real optimizer, beta schedules, and callbacks wired in.
+
+Every registry-backed field here (`beta_schedules[...].strategy`, `loggers[...].name`,
+the keys of `callbacks`) is resolved through this project's existing registries
+(`training.beta_schedules.registry`, `training.loggers.registry`,
+`training.callbacks.registry`), never hardcoded, so adding a new schedule, logger, or
+callback strategy elsewhere in the codebase makes it usable from config automatically,
+with zero changes needed here (spec §10, §12).
+
+`callbacks` (ADR 0022) replaces what used to be a single, hardcoded `checkpoint:
+CheckpointConfig` field covering both checkpoint callbacks at once: a plain
+`dict[str, dict[str, Any] | None]`, registry name -> constructor kwargs, resolved
+through the `training.callbacks` registry every non-logger `TrainerCallback` (built-in
+or a caller's own) self-registers into. This is what makes a callback genuinely
+opt-in, in any combination, by name, the same way every other pluggable strategy in
+this codebase already works, rather than a fixed, hardcoded field this module has to
+grow every time a new kind of callback is added. `loggers` (predating this field,
+ADR 0008, unchanged by ADR 0022) stays its own, separate `list[LoggerEntryConfig]`:
+a `Logger` is a journalling service, not a member of this registry, even though
+`AbstractExperimentLogger` happens to subclass `TrainerCallback` for the hook plumbing;
+see `docs/adr/0022-callback-registry.md` for why the two stay apart.
 
 `optimizer.name` and `reconstruction_loss` are the two exceptions: they select a plain
 `torch.optim.Optimizer` subclass or a `torch.nn.functional` loss function, neither of
@@ -17,6 +32,7 @@ common cases; nothing stops a caller from constructing a `Trainer` directly (byp
 config entirely) for an optimizer or loss this lookup does not cover.
 """
 
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -30,8 +46,8 @@ from global_vae.losses.reconstruction import LossFn
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
 from global_vae.training.beta_schedules.registry import getBetaScheduleClass
-from global_vae.training.callbacks import TrainerCallback
-from global_vae.training.checkpoint import BestCheckpointCallback, CheckpointCallback
+from global_vae.training.callbacks.base import TrainerCallback
+from global_vae.training.callbacks.registry import getCallbackClass
 from global_vae.training.loggers.registry import getLoggerClass
 from global_vae.training.trainer import Trainer
 
@@ -97,39 +113,10 @@ class LoggerEntryConfig:
 
 
 @dataclass
-class CheckpointConfig:
-    """Checkpointing configuration (spec §10 "Reproducibility"), covering both
-    `CheckpointCallback` (periodic, for resuming) and `BestCheckpointCallback`
-    (metric-driven, for model selection); see
-    `docs/adr/0006-reproducibility-seed-and-checkpointing.md` and
-    `docs/adr/0007-best-checkpoint-callback.md` for why these are two separate
-    callbacks rather than one. Either, both, or neither can be enabled.
-
-    Attributes:
-        directory: Directory for periodic checkpoints
-            (`CheckpointCallback`). `None` (default) disables periodic
-            checkpointing entirely.
-        every_n_epochs: Forwarded to `CheckpointCallback`.
-        keep_last_n: Forwarded to `CheckpointCallback`.
-        best_path: File path for the single best-so-far checkpoint
-            (`BestCheckpointCallback`). `None` (default) disables it.
-        best_monitor: Forwarded to `BestCheckpointCallback`.
-        best_mode: Forwarded to `BestCheckpointCallback` (`"min"` or
-            `"max"`).
-    """
-
-    directory: str | None = None
-    every_n_epochs: int = 1
-    keep_last_n: int | None = None
-    best_path: str | None = None
-    best_monitor: str = "val/loss/total"
-    best_mode: str = "min"
-
-
-@dataclass
 class TrainingConfig:
-    """Top-level training configuration, matching `Trainer`'s own constructor almost
-    field-for-field (spec §9, §10).
+    """Top-level training configuration, matching `Trainer`'s constructor almost field-for-field.
+
+    Spec §9, §10.
 
     Attributes:
         num_epochs: Forwarded to `Trainer.fit`.
@@ -157,7 +144,56 @@ class TrainingConfig:
         loggers: Experiment loggers to attach (spec §10 "Experiment
             tracking"). Empty (default) means no logger; several may
             be listed at once (`docs/adr/0008-experiment-loggers.md`).
-        checkpoint: See `CheckpointConfig`.
+            Resolved through the separate `training.loggers` registry
+            (`getLoggerClass`), not through `callbacks` below: a
+            `Logger` is a journalling service, not a callback
+            selection (`docs/adr/0022-callback-registry.md`).
+        callbacks: `training.callbacks` registry name -> constructor
+            kwargs (`None`, or an empty mapping, both mean "every
+            default"; ADR 0022). Empty (default) means no such
+            callback at all: nothing is enabled unless explicitly
+            named here. Any combination of the built-ins
+            (`"checkpoint"`, `"best_checkpoint"`, `"early_stopping"`,
+            `"reduce_lr_on_plateau"`) or a caller's own
+            `@registerCallback(...)`-decorated class may be listed, in
+            any order; callbacks are instantiated, and `Trainer` calls
+            them, in this mapping's own iteration order (a plain
+            `dict`, so the order given in YAML), after every logger
+            from `loggers` above. Example::
+
+                loggers:
+                  - name: csv
+                    kwargs:
+                      path: ${output_dir}/metrics.csv
+                callbacks:
+                  checkpoint:
+                    directory: ${output_dir}/checkpoints
+                    every_n_epochs: 10
+                  early_stopping:
+                    monitor: val/loss/total
+                    patience: 5
+
+            Listing the same registry name twice is not expressible
+            this way (a `dict` key is unique); construct a `Trainer`
+            directly with an explicit `callbacks=[...]` list for that
+            rare case (e.g. two `CheckpointCallback`s writing to
+            different directories).
+
+            Note on Hydra CLI overrides specifically (not a limitation
+            of this field itself, nor of a config *file* adding a new
+            entry, which always just works): Hydra's structured-config
+            "struct mode" only lets a `dotlist` override change a key
+            that already exists somewhere in the composed config.
+            Adding a callback entirely absent from every composed YAML
+            file (e.g. `training.callbacks.early_stopping...` when no
+            `early_stopping:` key is in `configs/training/*.yaml`)
+            needs Hydra's own `+` prefix from the command line:
+            `+training.callbacks.early_stopping.monitor=val/loss/total`.
+            Overriding a field of an *already-present* entry (e.g.
+            `training.callbacks.best_checkpoint.monitor=...` when
+            `best_checkpoint:` is already in `configs/training/default.yaml`)
+            needs no `+`, exactly like overriding any other already-present
+            config field.
     """
 
     num_epochs: int = 100
@@ -171,7 +207,7 @@ class TrainingConfig:
     device: str | None = None
     log_every_n_steps: int = 50
     loggers: list[LoggerEntryConfig] = field(default_factory=list)
-    checkpoint: CheckpointConfig = field(default_factory=CheckpointConfig)
+    callbacks: dict[str, dict[str, Any] | None] = field(default_factory=dict)
 
 
 def listSupportedOptimizerNames() -> list[str]:
@@ -251,49 +287,65 @@ def buildBetaSchedules(config: TrainingConfig) -> dict[str, AbstractBetaSchedule
 def buildCallbacksFromConfig(
     config: TrainingConfig, config_snapshot: Any = None
 ) -> list[TrainerCallback]:
-    """Instantiate every logger and checkpoint callback described by `config`.
+    """Instantiate every logger and callback described by `config` (spec §10, ADR 0022).
+
+    Two independent mechanisms are combined, in this order:
+
+    1. `config.loggers`: each `LoggerEntryConfig` resolved through the separate
+       `training.loggers` registry (`getLoggerClass`), exactly as before ADR 0022
+       (`docs/adr/0008-experiment-loggers.md`). Unaffected by `config.callbacks`.
+    2. `config.callbacks`: each entry (`registry name -> constructor kwargs`, `None`
+       or an empty mapping both meaning "every default") resolved through the
+       unified `training.callbacks` registry (`training/callbacks/registry.py`)
+       exactly like every other pluggable strategy in this codebase: adding a new
+       callback (built-in, or a caller's own via `@registerCallback(...)`) makes it
+       selectable from config with no change needed here. Callbacks are
+       instantiated in `config.callbacks`' own iteration order (a plain `dict`, so
+       YAML key order), and `Trainer` then calls them in that same order, after
+       every logger from step 1.
+
+    A callback from `config.callbacks` whose constructor accepts a `config`
+    parameter, and whose own kwargs did not already supply one, receives
+    `config_snapshot` automatically. This is checked via `inspect.signature`
+    against the constructor itself, not by special-casing
+    `CheckpointCallback`/`BestCheckpointCallback` (or any other specific class) by
+    name: any callback, built-in or a caller's own, opts into receiving the run's
+    own config snapshot (spec §10: "config snapshotted with every run") simply by
+    declaring a `config` parameter. Loggers (step 1) never receive
+    `config_snapshot`: a logger's constructor has no such parameter, matching its
+    behavior before ADR 0022.
 
     Args:
         config: A `TrainingConfig`.
-        config_snapshot: Forwarded to `CheckpointCallback`/
-            `BestCheckpointCallback`'s own `config` parameter (spec
-            §10: "config snapshotted with every run"), typically the
+        config_snapshot: Forwarded to any `config.callbacks` entry whose
+            constructor accepts a `config` parameter (see above), typically the
             full `ExperimentConfig` this training run was built from.
 
     Returns:
-        `config.loggers` instances (in order), followed by
-        `CheckpointCallback` if `config.checkpoint.directory` is set,
-        followed by `BestCheckpointCallback` if
-        `config.checkpoint.best_path` is set. Empty list if none of
-        the above are configured.
+        One logger instance per entry of `config.loggers` (in order), followed by
+        one callback instance per entry of `config.callbacks` (in order). Empty
+        list if both are empty.
 
     Raises:
         KeyError: If any `LoggerEntryConfig.name` is not a registered
-            `training.loggers` strategy.
+            `training.loggers` strategy, or any key of `config.callbacks` is not a
+            registered `training.callbacks` strategy.
+        TypeError: If a callback's kwargs do not match its constructor
+            (propagated unchanged from that callback's own `__init__`).
     """
     callbacks: list[TrainerCallback] = [
         getLoggerClass(entry.name)(**entry.kwargs) for entry in config.loggers
     ]
 
-    checkpoint = config.checkpoint
-    if checkpoint.directory is not None:
-        callbacks.append(
-            CheckpointCallback(
-                checkpoint.directory,
-                every_n_epochs=checkpoint.every_n_epochs,
-                config=config_snapshot,
-                keep_last_n=checkpoint.keep_last_n,
-            )
-        )
-    if checkpoint.best_path is not None:
-        callbacks.append(
-            BestCheckpointCallback(
-                checkpoint.best_path,
-                monitor=checkpoint.best_monitor,
-                mode=checkpoint.best_mode,
-                config=config_snapshot,
-            )
-        )
+    for name, raw_kwargs in config.callbacks.items():
+        kwargs = dict(raw_kwargs) if raw_kwargs else {}
+        callback_cls = getCallbackClass(name)
+        if config_snapshot is not None and "config" not in kwargs:
+            constructor_params = inspect.signature(callback_cls.__init__).parameters
+            if "config" in constructor_params:
+                kwargs["config"] = config_snapshot
+        callbacks.append(callback_cls(**kwargs))
+
     return callbacks
 
 
@@ -320,8 +372,8 @@ def buildTrainerFromConfig(
 
     Raises:
         KeyError: If `config.optimizer.name`, `config.reconstruction_loss`,
-            any `beta_schedules[...].strategy`, or any `loggers[...].name`
-            is not a supported/registered name.
+            any `beta_schedules[...].strategy`, any `loggers[...].name`, or
+            any key of `config.callbacks` is not a supported/registered name.
     """
     optimizer_cls = resolveOptimizerClass(config.optimizer.name)
     reconstruction_loss_fn = resolveReconstructionLossFn(config.reconstruction_loss)

@@ -1,4 +1,6 @@
-"""Structured config schema for `GlobalVae` (spec §9, §10 "Config management"), plus
+"""Structured config schema for `GlobalVae` and the builder that instantiates it.
+
+Covers spec §9 and §10 ("Config management"): the dataclass schema, plus
 `buildModelFromConfig`, the one function that turns a validated `ModelConfig` into a
 real `GlobalVae` instance.
 
@@ -74,8 +76,10 @@ class DecoderConfig:
 
 @dataclass
 class ModalityConfig:
-    """One modality's encoder and decoder pair, matching `GlobalVae.createSingleLatent`'s
-    `modality_configs` shape (spec §9: `modalities.<name>.{encoder,decoder}`).
+    """One modality's encoder and decoder pair.
+
+    Matches `GlobalVae.createSingleLatent`'s `modality_configs` shape (spec §9:
+    `modalities.<name>.{encoder,decoder}`).
     """
 
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
@@ -87,12 +91,27 @@ class FusionConfig:
     """Fusion strategy for a latent space fed by more than one encoder (spec §4).
 
     Attributes:
-        strategy: Registry key, e.g. `"poe"`.
-        kwargs: Forwarded to the fusion module's constructor.
+        strategy: Registry key: `"poe"`, `"moe"`, `"concat_mlp"`, or
+            `"cross_attention"` (or any further strategy registered in
+            `fusion/`). See `docs/how-to/choose-a-fusion-strategy.md`.
+        kwargs: Forwarded unchanged to the fusion module's constructor.
+            Unlike `EncoderConfig.kwargs`/`DecoderConfig.kwargs`,
+            `latent_dim` is not auto-filled here, since fusion strategies
+            have unrelated signatures (`poe`/`moe` accept no `latent_dim`;
+            `concat_mlp` and `cross_attention` require it, and
+            `concat_mlp` also requires `modality_dims`): give it
+            explicitly for the strategies that need it.
+        residual: Whether to add a residual connection around the
+            strategy (spec §4, §9: `residual: true` next to `strategy:`).
+            Applies to every strategy alike, through
+            `fusion.residual.ResidualFusion`: the fused posterior starts
+            as the mean of the experts and a learned gate opens the
+            strategy's own correction. Off by default.
     """
 
     strategy: str = MISSING
     kwargs: dict[str, Any] = field(default_factory=dict)
+    residual: bool = False
 
 
 @dataclass
@@ -244,6 +263,9 @@ def buildModelFromConfig(config: ModelConfig) -> GlobalVae:
         modality_configs=modality_configs,
         latent_dim=latent_dim,
         fusion_strategy=fusion_strategy,
+        fusion_residual=single_latent.fusion.residual
+        if single_latent.fusion is not None
+        else False,
         latent_name=single_latent.name,
         regularizer_strategy=single_latent.regularizer.strategy,
         encoder_kwargs=encoder_kwargs,

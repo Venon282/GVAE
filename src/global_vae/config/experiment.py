@@ -56,7 +56,7 @@ class ExperimentConfig:
             (checkpoint/logger paths in `TrainingConfig` are set
             independently), but useful as a single value config groups
             can interpolate against (e.g.
-            `training.checkpoint.directory: ${output_dir}/checkpoints`)
+            `training.callbacks.checkpoint.directory: ${output_dir}/checkpoints`)
             and as part of the snapshotted config (spec §10).
     """
 

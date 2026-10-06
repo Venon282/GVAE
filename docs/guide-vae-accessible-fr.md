@@ -217,7 +217,7 @@ En reliant tout ce qu'on vient de voir, voici le trajet exact qu'un batch d'entr
 
 ## 11. Bonus : et avec plusieurs modalités (signal + image) ?
 
-Un aperçu très rapide, pour le jour où la Fusion (`fusion/poe.py`) entre en jeu : quand plusieurs encoders (un par modalité) alimentent le **même** espace latent, chacun produit son propre `(mu, logvar)`, comme des "experts" indépendants sur la même variable `z`. La stratégie **Product-of-Experts (PoE)** combine ces experts en un seul posterior fusionné, *avant* l'échantillonnage, en donnant plus de poids aux experts les plus confiants (ceux dont la variance est la plus petite). Tout le reste (reparameterize, decoder, pertes) fonctionne ensuite exactement comme décrit plus haut, sur ce posterior déjà fusionné. C'est pour ça que la spec distingue bien la Fusion (combiner des distributions, avant échantillonnage) de l'Assembler (combiner des vecteurs déjà échantillonnés, après) : deux étapes différentes du pipeline.
+Un aperçu très rapide, sur la Fusion (`fusion/`), quand plusieurs modalités entrent en jeu : quand plusieurs encoders (un par modalité) alimentent le **même** espace latent, chacun produit son propre `(mu, logvar)`, comme des "experts" indépendants sur la même variable `z`. La stratégie **Product-of-Experts (PoE)** combine ces experts en un seul posterior fusionné, *avant* l'échantillonnage, en donnant plus de poids aux experts les plus confiants (ceux dont la variance est la plus petite). D'autres stratégies font le même travail autrement : **Mixture-of-Experts** (`moe`) fait la moyenne des experts au lieu de les multiplier, donc l'incertitude fusionnée augmente quand ils ne sont pas d'accord ; **Concaténation + MLP** (`concat_mlp`) laisse un petit réseau apprendre la combinaison ; **Cross-attention** (`cross_attention`) laisse les modalités se regarder entre elles avant d'être combinées. Tout le reste (reparameterize, decoder, pertes) fonctionne ensuite exactement comme décrit plus haut, sur ce posterior déjà fusionné. C'est pour ça que la spec distingue bien la Fusion (combiner des distributions, avant échantillonnage) de l'Assembler (combiner des vecteurs déjà échantillonnés, après) : deux étapes différentes du pipeline.
 
 ---
 
@@ -245,5 +245,5 @@ Un aperçu très rapide, pour le jour où la Fusion (`fusion/poe.py`) entre en j
 | **Posterior collapse** | Panne où l'encoder ignore `x` et produit toujours le prior ; `z` ne porte plus d'information. |
 | **Free bits** | Un petit budget de KL, par dimension, jamais pénalisé, pour éviter le collapse. |
 | **Reconstruction loss** | Mesure de l'écart entre `x` et `x̂` (souvent la MSE). |
-| **Fusion (PoE, etc.)** | Combine plusieurs `(mu, logvar)` (un par modalité) en un seul posterior, avant échantillonnage. |
+| **Fusion (PoE, MoE, ...)** | Combine plusieurs `(mu, logvar)` (un par modalité) en un seul posterior, avant échantillonnage. |
 | **Assembler** | Combine plusieurs `z` déjà échantillonnés en un seul vecteur, pour le decoder. |

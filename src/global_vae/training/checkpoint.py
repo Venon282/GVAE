@@ -29,23 +29,26 @@ without any training state at all:
 Security note: like any `torch.save`/`torch.load` file, a checkpoint is
 a pickle under the hood. Only load checkpoints from sources you trust,
 the same caution PyTorch's own documentation gives for `torch.load`.
+
+This module owns only the checkpoint *file format*. The two
+`TrainerCallback`s that call into it on a schedule (`CheckpointCallback`)
+or on metric improvement (`BestCheckpointCallback`) live in
+`training/callbacks/checkpoint.py` and `training/callbacks/best_checkpoint.py`
+respectively, one class per file (spec §10 "Modularity", ADR 0022); import
+them from there, not from here.
 """
 
 import logging
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import torch
 from torch import nn
 from torch.optim import Optimizer
 
 import global_vae
-from global_vae.training.callbacks import TrainerCallback
-
-if TYPE_CHECKING:
-    from global_vae.training.trainer import Trainer
 
 try:
     import numpy as np
@@ -255,187 +258,3 @@ def loadCheckpoint(
         global_vae_version=checkpoint.get("global_vae_version"),
         rng_state_restored=rng_state_restored,
     )
-
-
-class CheckpointCallback(TrainerCallback):
-    """Periodically saves a training checkpoint via `onEpochEnd`, for resuming an interrupted run.
-
-    This callback's job is narrower than it might first look: it
-    exists to let a **long training run be resumed close to where it
-    was** after an interruption (a crash, a cluster preemption, a
-    manual stop), with `global_step`, optimizer momentum, and RNG state
-    intact, so the run does not have to restart from scratch. It is
-    **not** a way to recover the best model for evaluation: the most
-    recently saved epoch is not necessarily the best one (validation
-    performance can get worse in later epochs), and `keep_last_n`
-    prunes by save order, not by quality. Resuming from a "best" epoch
-    instead of the most recent one would also throw away every epoch
-    of progress made after it, defeating the point of resuming at all.
-
-    For "give me the best model to evaluate or visualize", use
-    `BestCheckpointCallback` instead (or alongside this one; they solve
-    different problems and are not mutually exclusive).
-
-    The running example `training/callbacks.py`'s own docstring already
-    used ("a checkpointer only overrides `onEpochEnd`"), made concrete:
-    delegates to `Trainer.saveCheckpoint` (which in turn calls
-    `saveCheckpoint` above with the trainer's own model, optimizer,
-    step, epoch, and history), so the checkpoint format is identical
-    whether saved through this callback or called directly.
-    """
-
-    def __init__(
-        self,
-        directory: str | Path,
-        every_n_epochs: int = 1,
-        config: Any = None,
-        keep_last_n: int | None = None,
-        filename_pattern: str = "checkpoint_epoch_{epoch:04d}.pt",
-    ) -> None:
-        """Initialize the callback.
-
-        Args:
-            directory: Directory to save checkpoints into (created if
-                missing).
-            every_n_epochs: Save every `N` epochs (`1`, the default,
-                saves after every epoch).
-            config: Forwarded unchanged to `Trainer.saveCheckpoint`
-                every time this callback saves (spec §10: "config
-                snapshotted with every run").
-            keep_last_n: If given, delete older checkpoints beyond the
-                most recently saved `keep_last_n`, so disk usage does
-                not grow unbounded over a long run. `None` (default)
-                keeps every checkpoint ever saved by this callback.
-                Deletes by save order (oldest first); keeping the best
-                `N` by some validation metric instead is a natural
-                future extension, not built here, since "best" requires
-                choosing a metric and a comparison direction this
-                callback has no way to know generically.
-            filename_pattern: `str.format` pattern for each
-                checkpoint's filename, receiving `epoch` as a keyword
-                argument (the epoch index that just finished, matching
-                `TrainerCallback.onEpochEnd`'s own `epoch` argument).
-
-        Raises:
-            ValueError: If `every_n_epochs` is not positive, or if
-                `keep_last_n` is given and not positive.
-        """
-        if every_n_epochs <= 0:
-            raise ValueError(f"every_n_epochs must be positive, got {every_n_epochs}.")
-        if keep_last_n is not None and keep_last_n <= 0:
-            raise ValueError(f"keep_last_n must be positive when given, got {keep_last_n}.")
-
-        self.directory = Path(directory)
-        self.every_n_epochs = every_n_epochs
-        self.config = config
-        self.keep_last_n = keep_last_n
-        self.filename_pattern = filename_pattern
-        self._saved_paths: list[Path] = []
-
-    def onEpochEnd(self, trainer: "Trainer", epoch: int, metrics: dict[str, float]) -> None:
-        """Save a checkpoint if `epoch` lands on an `every_n_epochs` boundary.
-
-        Args:
-            trainer: The `Trainer` instance running this training run.
-            epoch: Index of the epoch that just finished (0-based).
-            metrics: Unused; present only to match `TrainerCallback`'s
-                signature.
-        """
-        if (epoch + 1) % self.every_n_epochs != 0:
-            return
-
-        path = self.directory / self.filename_pattern.format(epoch=epoch)
-        trainer.saveCheckpoint(path, config=self.config)
-        self._saved_paths.append(path)
-
-        if self.keep_last_n is not None:
-            while len(self._saved_paths) > self.keep_last_n:
-                stale_path = self._saved_paths.pop(0)
-                stale_path.unlink(missing_ok=True)
-
-
-class BestCheckpointCallback(TrainerCallback):
-    """Saves a checkpoint only when a monitored metric improves, via `onEpochEnd`.
-
-    This is the "give me the best model" callback: unlike
-    `CheckpointCallback` (which saves on a schedule, for resuming an
-    interrupted run), this one saves purely based on whether
-    `monitor` improved this epoch, always overwriting the **same**
-    file, so `path` is always exactly the best model seen so far, no
-    pruning logic needed. Load it at any time via `loadCheckpoint(path,
-    model=...)` (or `Trainer.loadCheckpoint(path)`) to evaluate or
-    visualize the best model without retraining.
-
-    Typically monitors a validation metric (e.g. `"val/loss/total"`,
-    which requires `val_dataloader` to be passed to `Trainer.fit`).
-    Monitoring a training metric instead is allowed but usually less
-    useful for model selection: training loss tends to keep improving
-    even as the model overfits, so "best training loss" is often close
-    to just "the last epoch".
-    """
-
-    def __init__(
-        self,
-        path: str | Path,
-        monitor: str = "val/loss/total",
-        mode: str = "min",
-        config: Any = None,
-    ) -> None:
-        """Initialize the callback.
-
-        Args:
-            path: File path for the single best-so-far checkpoint.
-                Every improvement overwrites this same file.
-            monitor: Metric key to track, as it appears in the epoch
-                metrics dict `Trainer.fit` builds (e.g.
-                `"val/loss/total"`, `"train/loss/reconstruction"`).
-            mode: `"min"` (default; lower is better, e.g. a loss) or
-                `"max"` (higher is better, e.g. an accuracy or a
-                custom metric a `TrainerCallback` might add).
-            config: Forwarded to `Trainer.saveCheckpoint` every time
-                this callback saves.
-
-        Raises:
-            ValueError: If `mode` is not `"min"` or `"max"`.
-        """
-        if mode not in ("min", "max"):
-            raise ValueError(f"mode must be 'min' or 'max', got '{mode}'.")
-
-        self.path = Path(path)
-        self.monitor = monitor
-        self.mode = mode
-        self.config = config
-        self.best_value: float | None = None
-
-    def onEpochEnd(self, trainer: "Trainer", epoch: int, metrics: dict[str, float]) -> None:
-        """Save a checkpoint if `self.monitor` improved this epoch.
-
-        Args:
-            trainer: The `Trainer` instance running this training run.
-            epoch: Index of the epoch that just finished (0-based).
-            metrics: This epoch's metrics; must contain `self.monitor`.
-
-        Raises:
-            KeyError: If `self.monitor` is not present in `metrics`
-                (e.g. monitoring a `"val/..."` key without passing
-                `val_dataloader` to `Trainer.fit`).
-        """
-        if self.monitor not in metrics:
-            raise KeyError(
-                f"BestCheckpointCallback is monitoring '{self.monitor}', but it is not present "
-                f"in this epoch's metrics ({sorted(metrics)}). If you are monitoring a "
-                f"'val/...' key, make sure Trainer.fit was called with a val_dataloader."
-            )
-
-        value = metrics[self.monitor]
-        improved = self.best_value is None or (
-            value < self.best_value if self.mode == "min" else value > self.best_value
-        )
-        if not improved:
-            return
-
-        self.best_value = value
-        trainer.saveCheckpoint(self.path, config=self.config)
-        logger.info(
-            "New best %s=%.6f at epoch %d, saved to '%s'.", self.monitor, value, epoch, self.path
-        )

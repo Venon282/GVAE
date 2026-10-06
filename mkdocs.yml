@@ -29,6 +29,7 @@ nav:
   - Getting Started: getting-started.md
   - Concepts:
       - Project Specification: global-vae-project-specification.md
+      - Roadmap: roadmap.md
   - How-to Guides:
       - Add a new modality: how-to/add-a-modality.md
       - Add a fusion / assembler / regularizer / transform / schedule: how-to/add-a-strategy.md

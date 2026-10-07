@@ -35,7 +35,7 @@ class FreeBitsKlRegularizer(AbstractLatentRegularizer):
     non-negative on its own (the multivariate KL is an additive sum of
     independent per-dimension 1D KLs), so clamping at a `0` minimum is
     a no-op. This is verified by
-    `tests/integration/test_regularizers.py`.
+    `tests/unit/test_regularizers.py`.
     """
 
     def __init__(self, free_bits: float = 0.5, per_dimension: bool = True) -> None:

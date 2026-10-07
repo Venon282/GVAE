@@ -127,6 +127,7 @@ class TestProjectLatentSamples:
         projected = projectLatentSamples(z, method="tsne", n_components=2, seed=0, perplexity=5)
         assert projected.shape == (30, 2)
 
+    @pytest.mark.slow
     def test_umap_projects_to_the_requested_dimensionality(self) -> None:
         z = torch.randn(30, 5)
         projected = projectLatentSamples(z, method="umap", n_components=2, seed=0, n_neighbors=5)

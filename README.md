@@ -58,6 +58,25 @@ mypy
 pytest --cov=global_vae --cov-fail-under=95
 ```
 
+### Test layout and fast loops
+
+`tests/unit/` holds the tests of one component at a time (a class, a function, a registry),
+built from hand-made tensors: no training loop, no files on disk, no subprocess.
+`tests/integration/` holds everything that wires several components together: a model
+assembled from the registries, a `Trainer` run, a config composed through Hydra, a script or an
+example, the docs build. A module that mixes both levels stays in `tests/integration/`.
+
+The `slow` marker tags the tests that run a script or an example in a subprocess, build the
+docs site or run UMAP. Two fast loops for day-to-day work:
+
+```bash
+pytest tests/unit        # the unit tests only
+pytest -m "not slow"     # every test except the slow ones
+```
+
+Markers are strict (`--strict-markers` in `pyproject.toml`): a marker that is not registered
+there is an error, not a warning. CI runs the whole suite, slow tests included.
+
 GitHub Actions (`.github/workflows/ci.yaml`) runs the same checks on every push and pull
 request: `lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest` on Python 3.11
 and 3.13). The tests fail under a coverage floor of 95%, set one point below the measured
@@ -91,8 +110,8 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
 4. Add a config entry referencing the two registry names (see
    `configs/model/default.yaml` for the shape, once config loading is
    wired up).
-5. Add a test — a unit test for the encoder/decoder shapes, and ideally
-   an entry in the relevant integration test.
+5. Add a test: a unit test for the encoder/decoder shapes (in `tests/unit/`), and
+   ideally an entry in the relevant integration test (in `tests/integration/`).
 
 No core framework file should need to change. If it does, that's a
 signal the registry pattern is being bypassed somewhere — flag it

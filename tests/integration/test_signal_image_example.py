@@ -263,6 +263,7 @@ class TestEvaluationHelpers:
 
 
 class TestScriptEndToEnd:
+    @pytest.mark.slow
     def test_runs_as_a_subprocess_and_writes_every_output(self, tmp_path: Path) -> None:
         """Tiny sizes: this checks the wiring of the whole pipeline, not its accuracy."""
         output_dir = tmp_path / "run"

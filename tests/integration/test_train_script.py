@@ -28,6 +28,9 @@ _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "train.py"
 _REPO_ROOT = _SCRIPT_PATH.parents[1]
 _LOADER_FACTORY = "tests.integration._train_script_fixtures:buildDummyDataloaders"
 
+# Every test in this module runs `scripts/train.py` in a subprocess.
+pytestmark = pytest.mark.slow
+
 
 def _runTrainScript(
     tmp_path: Path, extra_overrides: list[str] | None = None

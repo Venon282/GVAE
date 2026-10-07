@@ -1,4 +1,4 @@
-"""Integration tests for `training.callbacks.registry` (spec §10, ADR 0022).
+"""Unit tests for `training.callbacks.registry` (spec §10, ADR 0022).
 
 Covers the registry mechanism itself: registration, lookup, the duplicate/
 unknown-name error paths (spec §10's own testing checklist item, "Unit tests

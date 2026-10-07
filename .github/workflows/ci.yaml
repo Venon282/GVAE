@@ -118,6 +118,9 @@ jobs:
 
       # -rs lists every skipped test with its reason, so a skip that should not happen
       # (a missing optional dependency) shows up in the log instead of passing unnoticed.
+      # There is no `-m "not slow"` here on purpose: CI runs the whole suite, unit and
+      # integration, slow tests included. The fast loops (`pytest tests/unit`,
+      # `pytest -m "not slow"`) are for local work only, see README.md.
       - name: pytest
         run: >
           pytest -rs

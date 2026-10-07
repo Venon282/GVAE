@@ -22,7 +22,7 @@ dev = [
     "matplotlib>=3.7",    # exercised for real by tests/integration/test_visualization*.py
     "scikit-learn>=1.3",  # exercised for real by tests/integration/test_latent_plot.py (t-SNE)
     "umap-learn>=0.5",    # exercised for real by tests/integration/test_latent_plot.py (UMAP)
-    "scipy>=1.10",        # exercised for real by tests/integration/test_transforms.py (ResampleTransform coordinate-aware mode)
+    "scipy>=1.10",        # exercised for real by tests/unit/test_transforms.py (ResampleTransform coordinate-aware mode)
 ]
 # Soft dependency: only needed to actually construct TrainerCallback.training.loggers.
 # TensorBoardLogger; importing global_vae or the loggers subpackage never requires it
@@ -114,3 +114,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# `--strict-markers` turns a misspelled or unregistered marker into an error at collection
+# time, instead of a silent warning that leaves a test outside the group it was meant for.
+addopts = "--strict-markers"
+markers = [
+    "slow: runs a script or example in a subprocess, builds the docs site or runs UMAP (skip: -m 'not slow')",
+]

@@ -7,7 +7,7 @@ decoder, and residual block delegates here (`OneDCnnEncoder.computeMinimumInputL
 `utils.conv_blocks.Residual1DBlock`/`Residual2DBlock`, ...), which is what lets a
 configuration be verified at construction time instead of discovered wrong at forward
 time. The formulas are checked against real PyTorch modules in
-`tests/integration/test_conv_math.py`.
+`tests/unit/test_conv_math.py`.
 
 The 1D functions come first; the 2D functions (spec §6's image modality) follow, each one
 the corresponding 1D function applied once per axis (see the note above them).

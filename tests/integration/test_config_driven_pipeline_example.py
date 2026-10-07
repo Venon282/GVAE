@@ -23,7 +23,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "examples" / "02_config_driven_pipeline.py"
+
+# Every test in this module runs the example in a subprocess.
+pytestmark = pytest.mark.slow
 
 
 def _runExample(

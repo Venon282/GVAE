@@ -113,6 +113,7 @@ def test_mkdocs_nav_uses_the_directory_form_so_literate_nav_expands_the_summary(
 _DOCS_TOOLCHAIN = ("mkdocs", "mkdocs_literate_nav", "mkdocs_gen_files", "mkdocstrings")
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(
     any(importlib.util.find_spec(name) is None for name in _DOCS_TOOLCHAIN),
     reason="the optional 'docs' extra (mkdocs, literate-nav, ...) is not installed",

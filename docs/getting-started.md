@@ -60,3 +60,14 @@ pytest --cov=global_vae --cov-fail-under=95
 The same four commands run in CI on every push and pull request
 (`.github/workflows/ci.yaml`). `pytest` must keep coverage at or above the 95% floor, and the
 `ruff` job is advisory until the lint clean-up (roadmap P0-2) lands.
+
+Two shorter loops are available while you work. `tests/unit/` holds the tests of one component
+at a time and `tests/integration/` the ones that wire several together; the `slow` marker tags
+the tests that run a script or an example in a subprocess, build the docs site or run UMAP.
+
+```bash
+pytest tests/unit        # the unit tests only
+pytest -m "not slow"     # every test except the slow ones
+```
+
+CI runs the whole suite, slow tests included.

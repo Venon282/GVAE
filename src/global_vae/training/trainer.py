@@ -279,9 +279,13 @@ class Trainer:
             `StepLosses` still attached to the autograd graph.
 
         Raises:
-            ValueError: If `batch` is empty, or if none of its keys
-                names one of `self.model`'s encoders (via
-                `GlobalVae.selectEncoderInputs`).
+            ValueError: If `batch` is empty, if none of its keys names
+                one of `self.model`'s encoders (via
+                `GlobalVae.selectEncoderInputs`), or (via
+                `computeTotalReconstructionLoss`) if a decoder's
+                reconstruction and its target in `batch` differ in
+                shape, e.g. a `(B, 1, H, W)` target against the 2D
+                decoder's `(B, H, W)` output.
             KeyError: Via `computeTotalReconstructionLoss`, if `batch`
                 is missing a target for a decoder that produced a
                 reconstruction.

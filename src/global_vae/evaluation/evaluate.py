@@ -176,9 +176,11 @@ def evaluate(
         `EvaluationResults`.
 
     Raises:
-        ValueError: If `dataloader` yields no batches, or (via
-            `GlobalVae.selectEncoderInputs`) if some batch has no key
-            naming any of `model`'s encoders.
+        ValueError: If `dataloader` yields no batches, if (via
+            `GlobalVae.selectEncoderInputs`) some batch has no key
+            naming any of `model`'s encoders, or if (via
+            `computeTotalReconstructionLoss`) a reconstruction and its
+            target in some batch differ in shape.
     """
     resolved_device = device if device is not None else next(model.parameters()).device
     resolved_metrics = reconstruction_metrics or DEFAULT_RECONSTRUCTION_METRICS

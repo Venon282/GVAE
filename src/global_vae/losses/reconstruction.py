@@ -46,7 +46,13 @@ def computeTotalReconstructionLoss(
         averaged over the batch.
 
     Raises:
-        ValueError: If `reconstructions` is empty.
+        ValueError: If `reconstructions` is empty, or if a reconstruction
+            and its target differ in shape. `torch.nn.functional`'s own
+            losses only warn about a mismatch and then broadcast, so a
+            `(B, 1, H, W)` target against a `(B, H, W)` reconstruction
+            would silently become a `(B, B, H, W)` comparison of every
+            reconstruction with every target in the batch. Squeeze or
+            unsqueeze the target to the reconstruction's shape instead.
         KeyError: If `reconstructions` references a name absent from
             `targets`, or (when `loss_fn` is a per-modality dict) absent
             from `loss_fn`.
@@ -65,7 +71,16 @@ def computeTotalReconstructionLoss(
             modality_loss_fn = loss_fn[name]
         else:
             modality_loss_fn = loss_fn
-        term = weight * modality_loss_fn(reconstruction, targets[name])
+        target = targets[name]
+        if reconstruction.shape != target.shape:
+            raise ValueError(
+                f"Reconstruction '{name}' has shape {tuple(reconstruction.shape)} but its "
+                f"target has shape {tuple(target.shape)}. A shape mismatch is rejected "
+                f"because the loss would otherwise broadcast the two tensors against each "
+                f"other and compare the wrong elements. Reshape the target (or the decoder "
+                f"output) so that both have the same shape."
+            )
+        term = weight * modality_loss_fn(reconstruction, target)
         total = term if total is None else total + term
 
     assert total is not None  # guaranteed by the emptiness check above

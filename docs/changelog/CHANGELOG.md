@@ -17,8 +17,36 @@ versioning follows [Semantic Versioning](https://semver.org/).
   (CPU build of torch), so the test that builds the real docs site no longer skips. A CI
   status badge is added to the README, and the Setup and Running checks sections of the
   README and of `docs/getting-started.md` now match the workflow.
+- Tests for the gaps spec section 10 names (roadmap P0-4), 316 new tests in total. In
+  `tests/unit/`: `test_routing_graph_validation.py` covers each of the four rejections of
+  `validateRoutingGraph` (a latent space with no encoder, one with no decoder, a decoder over
+  several latent spaces with no assembler, `sum` or `average` over different dimensions) and the
+  accepting cases; `test_assemblers.py` checks the values, gradients and failure modes of
+  `concat`, `sum` and `average` and the assembler registry error paths;
+  `test_registry_contract.py` runs one parametrized contract over all nine registries (encoders,
+  decoders, fusion, assemblers, regularizers, transforms, beta schedules, callbacks, loggers):
+  register, look up, duplicate name raises `ValueError`, unknown name raises `KeyError` listing
+  the available names, listing is sorted, built-ins are registered; `test_routing_graph_presets.py`
+  covers `buildSingleLatentRoutingGraph` and `buildSharedPrivateRoutingGraph`. In
+  `tests/integration/`: `test_configuration_matrix.py` is stage 1 of the configuration matrix
+  (roadmap P1-6), the four `EN-*` rows without encoder fan-out built from the real 1D and 2D
+  modules, with `concat`, `sum` and `average` on the two multi-latent rows, checking
+  reconstruction and latent shapes, what each assembler received and returned, a finite loss and
+  a gradient on every parameter, and failing if a row is dropped from its list;
+  `test_global_vae_construction_guards.py` checks that `GlobalVae` validates the routing graph at
+  construction and raises `NotImplementedError` for an encoder that feeds two latent spaces
+  (roadmap P1-2 inverts that one). Coverage of `latent/` goes from 57% to 100% and of
+  `assemblers/` from 79% to 100%; overall coverage of the full run is 97.5%.
 
 ### Changed
+
+- `computeTotalReconstructionLoss` now raises `ValueError` when a reconstruction and its target
+  differ in shape (roadmap P0-4(g)). `torch.nn.functional.mse_loss` and the other built-in losses
+  only warn and then broadcast, so a `(B, 1, H, W)` target against the 2D decoder's `(B, H, W)`
+  output silently became a `(B, B, H, W)` comparison of every reconstruction with every target
+  in the batch. The error names the modality and both shapes, and is raised before the loss
+  function is called. `Trainer.computeLosses` and `evaluate` inherit it. A target with an extra
+  channel axis now has to be squeezed to the decoder's output shape before it is used.
 
 - Test layout and markers (roadmap P0-5, spec sections 8 and 10). 18 modules of pure unit tests
   moved from `tests/integration/` to `tests/unit/` with `git mv`, so their history is kept:

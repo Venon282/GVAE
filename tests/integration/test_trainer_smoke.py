@@ -1,6 +1,7 @@
-"""Trainer smoke test (spec §10, C11): a handful of optimizer steps on dummy data,
-verifying the loss actually decreases and that no parameter's gradient is left
-`None` after a step.
+"""Trainer smoke test (spec §10, C11).
+
+A handful of optimizer steps on dummy data, verifying the loss actually decreases and that no
+parameter's gradient is left `None` after a step.
 
 Distinct from `test_trainer.py`'s own, more exhaustive suite (optimizer
 configurability, callbacks, beta schedules, checkpoints, modality dropout,
@@ -82,8 +83,10 @@ def _buildModel() -> GlobalVae:
 
 
 def _fixedBatches(num_batches: int, seed: int = 0) -> list[dict[str, torch.Tensor]]:
-    """A small, fixed, re-iterable "dataset" (spec's own "poignée de steps sur
-    données factices"): plain random tensors, not any real signal/dataset."""
+    """A small, fixed, re-iterable "dataset" (spec's own "poignée de steps sur données factices").
+
+    Plain random tensors, not any real signal/dataset.
+    """
     torch.manual_seed(seed)
     return [{"signal": torch.randn(BATCH_SIZE, INPUT_DIM)} for _ in range(num_batches)]
 
@@ -130,9 +133,11 @@ class TestTrainerSmokeTest:
         assert not missing_grads, f"parameters with no gradient after a step: {missing_grads}"
 
     def test_no_gradient_is_none_across_several_steps(self) -> None:
-        """Repeats the no-None-gradient check across every step of a short run, not
-        only the first, since a bug could plausibly only surface after the
-        optimizer has moved parameters away from their initial values."""
+        """Repeats the no-None-gradient check across every step of a short run, not only the first.
+
+        A bug could plausibly only surface after the optimizer has moved parameters away
+        from their initial values.
+        """
         torch.manual_seed(1)
         model = _buildModel()
         trainer = Trainer(model, device="cpu")

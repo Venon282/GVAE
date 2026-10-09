@@ -1,6 +1,8 @@
-"""Integration tests for `training.callbacks.checkpoint.CheckpointCallback` and
-`training.callbacks.best_checkpoint.BestCheckpointCallback` (spec §10
-"Reproducibility", ADR 0022), one class per file per spec §10's "Modularity" rule.
+"""Integration tests for the checkpoint and best-checkpoint callbacks.
+
+Covers `training.callbacks.checkpoint.CheckpointCallback` and
+`training.callbacks.best_checkpoint.BestCheckpointCallback` (spec §10 "Reproducibility", ADR 0022),
+one class per file per spec §10's "Modularity" rule.
 
 Checkpoint *format* correctness (`saveCheckpoint`/`loadCheckpoint` roundtrips, RNG
 state, error paths) is covered by `test_checkpoint.py`; this file only covers the two

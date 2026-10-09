@@ -1,5 +1,7 @@
-"""Abstract interface for experiment-tracking backends (spec §10: "Weights & Biases or
-MLflow, logging losses, latent-space visualizations, and reconstructions per run").
+"""Abstract interface for experiment-tracking backends.
+
+See spec §10: "Weights & Biases or MLflow, logging losses, latent-space visualizations,
+and reconstructions per run".
 
 An `AbstractExperimentLogger` is a `TrainerCallback` (`training/callbacks/base.py`) specialized
 for exactly this job: it translates `Trainer`'s generic per-step/per-epoch events into the

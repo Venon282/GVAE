@@ -45,8 +45,8 @@ class AbstractEncoder(nn.Module, ABC):
     def modality_name(self) -> str:
         """Name of the modality this encoder.
 
-            Returns:
-            The modality name (e.g. `"signal"`, `"image"`).
+        Returns:
+        The modality name (e.g. `"signal"`, `"image"`).
         """
         raise NotImplementedError
 

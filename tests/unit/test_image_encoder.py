@@ -33,8 +33,10 @@ def test_handles_varying_input_shape() -> None:
 
 
 def test_handles_non_square_input() -> None:
-    """Height and width are independent axes throughout; a rectangular image is not
-    a special case."""
+    """Height and width are independent axes throughout.
+
+    A rectangular image is not a special case.
+    """
     encoder = TwoDCnnEncoder(latent_dim=16)
     mu, logvar = encoder(torch.randn(2, 48, 96))
     assert mu.shape == (2, 16)
@@ -48,8 +50,10 @@ def test_multi_channel_input() -> None:
 
 
 def test_latent_dim_property() -> None:
-    """`latent_dim` (camelCase) is the property `AbstractEncoder` requires; a `latent_dim`
-    property alone would leave the class abstract and unable to be instantiated."""
+    """`latent_dim` (camelCase) is the property `AbstractEncoder` requires.
+
+    A `latent_dim` property alone would leave the class abstract and unable to be instantiated.
+    """
     encoder = TwoDCnnEncoder(latent_dim=32)
     assert encoder.latent_dim == 32
 
@@ -75,10 +79,13 @@ def test_registered_under_2d_cnn_encoder_v1() -> None:
 
 
 class TestPerStageShapeFlexibility:
-    """`kernel_sizes`/`strides`/`paddings`/`dilations`/`pool_*` each accept a shared
-    `int`, a shared non-square `tuple[int, int]`, or a per-stage `list` (spec §12);
-    see `utils.stage_config.broadcastPerStageShape` for why `list` and `tuple` mean
-    different things here."""
+    """The 2D shape hyperparameters accept an `int`, a shared `tuple[int, int]` or a `list`.
+
+    That covers `kernel_sizes`/`strides`/`paddings`/`dilations`/`pool_*` (spec §12): a shared
+    `int`, a shared non-square `tuple[int, int]`, or a per-stage `list`; see
+    `utils.stage_config.broadcastPerStageShape` for why `list` and `tuple` mean different things
+    here.
+    """
 
     def test_shared_non_square_kernel_tuple_applies_to_every_stage(self) -> None:
         encoder = TwoDCnnEncoder(
@@ -104,8 +111,10 @@ class TestPerStageShapeFlexibility:
         assert mu.shape == (2, 8)
 
     def test_per_stage_differing_numeric_values_require_a_list_not_a_tuple(self) -> None:
-        """The key 1D->2D API difference: a bare tuple is always a *shared* shape now
-        (never per-stage); genuinely differing per-stage values must use a list."""
+        """The key 1D->2D API difference: a bare tuple is always a *shared* shape now.
+
+        It is never per-stage; genuinely differing per-stage values must use a list.
+        """
         encoder = TwoDCnnEncoder(
             latent_dim=8, hidden_channels=(16, 32, 64), strides=[1, 1, 2], poolings=None
         )
@@ -208,8 +217,10 @@ def test_head_hidden_dims_inserts_an_mlp_before_the_heads() -> None:
 
 
 def test_custom_module_stage_escape_hatch() -> None:
-    """`hidden_channels` may contain an already-built `nn.Module` stage in place of a
-    plain int, exactly like `OneDCnnEncoder`."""
+    """`hidden_channels` may contain an already-built `nn.Module` stage in place of a plain int.
+
+    This works exactly like `OneDCnnEncoder`.
+    """
     encoder = TwoDCnnEncoder(
         latent_dim=8,
         hidden_channels=(nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1), 32),
@@ -222,8 +233,10 @@ def test_custom_module_stage_escape_hatch() -> None:
 
 class TestMinimumInputShape:
     def test_matches_the_1d_reference_value_on_both_axes_for_a_square_config(self) -> None:
-        """Same hyperparameters on both axes must reduce to exactly the same number
-        `OneDCnnEncoder.computeMinimumInputLength` gives for the 1D case."""
+        """Same hyperparameters on both axes must reduce to exactly the 1D result.
+
+        That is the number `OneDCnnEncoder.computeMinimumInputLength` gives for the 1D case.
+        """
         min_shape = TwoDCnnEncoder.computeMinimumInputShape(hidden_channels=(32, 64, 128))
         assert min_shape == (8, 8)
 
@@ -233,13 +246,19 @@ class TestMinimumInputShape:
 
     def test_minimal_input_length_is_the_max_of_both_axes(self) -> None:
         encoder = TwoDCnnEncoder(
-            latent_dim=8, hidden_channels=(32, 64, 128), kernel_sizes=(5, 3), pool_kernel_sizes=(2, 3)
+            latent_dim=8,
+            hidden_channels=(32, 64, 128),
+            kernel_sizes=(5, 3),
+            pool_kernel_sizes=(2, 3),
         )
         assert encoder.minimal_input_length == max(encoder.minimal_input_shape)
 
     def test_non_square_hyperparameters_give_a_non_square_minimum(self) -> None:
         min_shape = TwoDCnnEncoder.computeMinimumInputShape(
-            hidden_channels=(32, 64, 128), kernel_sizes=(5, 3), poolings="max", pool_kernel_sizes=(2, 3)
+            hidden_channels=(32, 64, 128),
+            kernel_sizes=(5, 3),
+            poolings="max",
+            pool_kernel_sizes=(2, 3),
         )
         assert min_shape[0] != min_shape[1]
 

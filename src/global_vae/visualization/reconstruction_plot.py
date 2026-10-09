@@ -1,5 +1,7 @@
-"""Reconstruction visualization: original vs. reconstructed 1D series (spec §10
-"reconstructions"; spec §6.1 milestone 1's `signal -> z -> signal` case).
+"""Reconstruction visualization: original vs. reconstructed 1D series.
+
+See spec §10 "reconstructions" and spec §6.1 milestone 1's `signal -> z -> signal`
+case.
 
 A line-overlay plot, not an image comparison: the only concrete decoder built so far
 (`OneDCnnDecoder`) reconstructs a 1D series, matching spec §6's Phase-1 signal
@@ -350,8 +352,9 @@ def collectCrossModalReconstructions(
     use_mean: bool = True,
     max_samples: int | None = None,
 ) -> dict[frozenset[str], dict[str, tuple[torch.Tensor, torch.Tensor]]]:
-    """Run `model` under several input-modality subsets and collect every
-    resulting `(original, reconstruction)` pair (spec §5).
+    """Collect `(original, reconstruction)` pairs under several input-modality subsets (spec §5).
+
+    Runs `model` once per subset in `input_subsets`.
 
     For every batch and every subset in `input_subsets`, only that subset of
     the batch is fed to `model.forward` as `inputs`, mirroring
@@ -514,8 +517,9 @@ def plotCrossModalReconstructionMatrix(
     ylabel: str = "value",
     figsize_per_plot: tuple[float, float] = (4.0, 2.5),
 ) -> Figure:
-    """Lay out every (input subset, decoder) cell of `collected` as a grid of
-    original/reconstruction overlays (spec §5).
+    """Lay out every (input subset, decoder) cell of `collected` as a grid (spec §5).
+
+    Each cell overlays the original and the reconstruction.
 
     Rows are input-modality subsets (`collected`'s keys); columns are every
     decoder name appearing in any of them. A cell is left blank (axis turned

@@ -32,8 +32,9 @@ DEFAULT_COMMON_GRID_LENGTH = 128
 
 
 def generateSyntheticCurve(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-    """Generate one synthetic curve: a single positive-valued peak plus noise, on its
-    own randomly-perturbed grid.
+    """Generate one synthetic curve: a single positive-valued peak plus noise.
+
+    The curve is sampled on its own randomly-perturbed grid.
 
     This mimics a common real situation (e.g. two measurements taken over slightly
     different ranges, at a different resolution, or with a different number of
@@ -127,8 +128,10 @@ def buildResampleTransform(common_grid: torch.Tensor) -> ResampleTransform:
 def resampleOntoCommonGrid(
     curves: list[tuple[np.ndarray, np.ndarray]], resample_transform: ResampleTransform
 ) -> torch.Tensor:
-    """Resample every curve (its own grid, its own length) onto the shared common
-    grid `resample_transform.target_coords`, one sample at a time.
+    """Resample every curve onto the shared common grid, one sample at a time.
+
+    Each curve keeps its own grid and its own length; the common grid is
+    `resample_transform.target_coords`.
 
     Per-sample, not batched: each curve has different `source_coords`, exactly the
     case `ResampleTransform`'s per-call `source_coords` override exists for (see its
@@ -229,8 +232,9 @@ def _buildSyntheticSignalArtifacts(
 
 
 def buildSyntheticSignalDataloaders(config: DataConfig) -> DataloaderBundle:
-    """`loader_factory` for `02_config_driven_pipeline.py` (spec §9): `data.loader_factory`
-    points at this function's dotted path, and
+    """`loader_factory` for `02_config_driven_pipeline.py` (spec §9).
+
+    `data.loader_factory` points at this function's dotted path, and
     `global_vae.config.data.buildDataloadersFromConfig` resolves and calls it with the
     composed `DataConfig`.
 

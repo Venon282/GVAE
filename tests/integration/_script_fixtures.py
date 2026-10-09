@@ -100,9 +100,10 @@ def buildInverseTransformsForScript() -> dict[str, Callable[[torch.Tensor], torc
 
 
 def buildLabeledDataloaderForScript() -> list[dict[str, torch.Tensor]]:
-    """Like `buildDataloaderForScript`, plus a "label" batch key the model never
-    consumes (not one of its modality names): exercises
-    `scripts/visualize_latent.py`'s `--label-key` coloring option.
+    """Like `buildDataloaderForScript`, plus a "label" batch key the model never consumes.
+
+    The key is not one of its modality names; it exercises `scripts/visualize_latent.py`'s
+    `--label-key` coloring option.
     """
     torch.manual_seed(0)
     return [
@@ -212,9 +213,10 @@ class _DummyProductOfExperts(AbstractFusion):
 
 
 def buildTwoModalityModelForScript() -> GlobalVae:
-    """Model factory for the cross-modal-figures CLI test: two modalities ("x", "y")
-    fused via a dummy Product-of-Experts, so `scripts/evaluate.py`'s opt-in
-    `exportCrossModalFigures` call actually has something to report (spec §5,
+    """Model factory for the cross-modal-figures CLI test.
+
+    Two modalities ("x", "y") fused via a dummy Product-of-Experts, so `scripts/evaluate.py`'s
+    opt-in `exportCrossModalFigures` call actually has something to report (spec §5,
     `docs/adr/0016-cross-modal-reconstruction-reporting.md`).
     """
     return GlobalVae.createSingleLatent(

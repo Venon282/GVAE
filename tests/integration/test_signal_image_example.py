@@ -1,5 +1,6 @@
-"""Integration tests for `examples/03_signal_image_to_image.py` (spec §2.1 `EN-L1-DN`, §4,
-§5, §6).
+"""Integration tests for `examples/03_signal_image_to_image.py`.
+
+See spec §2.1 `EN-L1-DN`, §4, §5 and §6.
 
 The example trains `(signal, image_in) -> image_out`: two encoders fused by PoE into one
 latent space, and a decoder whose target (`image_out`) is not any encoder's input. Most of
@@ -95,8 +96,10 @@ class TestSyntheticData:
     def test_signal_is_blind_to_the_vertical_position(
         self, example: ModuleType, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Same `cx` and `sigma`, different `cy`: identical signal. This blindness is what
-        makes `signal` and the degraded image complementary."""
+        """Same `cx` and `sigma`, different `cy`: identical signal.
+
+        This blindness is what makes `signal` and the degraded image complementary.
+        """
         monkeypatch.setattr(example, "SIGNAL_NOISE_STD", 0.0)
         params = np.array([[0.4, 0.3, 0.1], [0.4, 0.7, 0.1]])
         profiles = example.renderXProfiles(params, np.random.default_rng(0))
@@ -155,10 +158,11 @@ class TestModel:
 
 
 class TestTrainerHandlesTargetOnlyKeys:
-    """The stock `Trainer` handles a decoder target with no matching encoder itself
-    (ADR 0019, `GlobalVae.selectEncoderInputs`): this example used to need its own
-    `TranslationTrainer` subclass to work around a `KeyError` here; it does not
-    anymore (see git history for the version that still needed it).
+    """The stock `Trainer` handles a decoder target with no matching encoder itself.
+
+    See ADR 0019 and `GlobalVae.selectEncoderInputs`. This example used to need its own
+    `TranslationTrainer` subclass to work around a `KeyError` here; it does not anymore (see git
+    history for the version that still needed it).
     """
 
     def test_trainer_computes_finite_losses_directly_on_a_target_only_key(
@@ -192,8 +196,10 @@ class TestTrainerHandlesTargetOnlyKeys:
     def test_reconstruction_target_is_the_clean_image_not_the_input(
         self, example: ModuleType
     ) -> None:
-        """With the encoder inputs zeroed, the loss must still be measured against the
-        real `image_out`: replacing `image_out` by zeros must change it."""
+        """With zeroed encoder inputs, the loss must still be measured against the real `image_out`.
+
+        Replacing `image_out` by zeros must change it.
+        """
         model = example.buildModel()
         model.eval()
         trainer = Trainer(model, device="cpu")
@@ -208,9 +214,11 @@ class TestTrainerHandlesTargetOnlyKeys:
     def test_validation_pass_uses_every_input_and_never_touches_modality_dropout_p(
         self, example: ModuleType
     ) -> None:
-        """`evaluate()` never applies dropout (ADR 0019): unlike the old
-        `TranslationTrainer`, which restored `modality_dropout_p` after temporarily
-        zeroing it, the stock `Trainer` never mutates it at all."""
+        """`evaluate()` never applies dropout (ADR 0019).
+
+        Unlike the old `TranslationTrainer`, which restored `modality_dropout_p` after
+        temporarily zeroing it, the stock `Trainer` never mutates it at all.
+        """
         model = example.buildModel()
         trainer = Trainer(model, device="cpu", modality_dropout_p=1.0)
         seen: list[set[str]] = []

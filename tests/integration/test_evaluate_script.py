@@ -172,8 +172,9 @@ class TestMain:
 
 
 class TestInverseTransformFactory:
-    """`--inverse-transform-factory` (spec §6.2): reconstruction figures should show
-    original-scale values when the caller's data pipeline applied a transform.
+    """`--inverse-transform-factory` (spec §6.2): reconstruction figures show original-scale values.
+
+    This applies when the caller's data pipeline applied a transform.
     """
 
     def test_reconstruction_figure_differs_with_an_inverse_transform(
@@ -219,9 +220,10 @@ class TestInverseTransformFactory:
 
 
 class TestCrossModalFigures:
-    """`scripts/evaluate.py`'s opt-in `exportCrossModalFigures` call (spec §5,
-    `docs/adr/0016-cross-modal-reconstruction-reporting.md`): only writes a figure
-    for a model with more than one modality.
+    """`scripts/evaluate.py`'s opt-in `exportCrossModalFigures` call (spec §5).
+
+    It only writes a figure for a model with more than one modality
+    (`docs/adr/0016-cross-modal-reconstruction-reporting.md`).
     """
 
     def test_two_modality_model_writes_a_cross_modal_figure(

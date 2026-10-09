@@ -71,8 +71,11 @@ class TestLoadExperimentConfig:
         assert cfg.model.single_latent.fusion is None  # single modality: no fusion needed
 
     def test_output_dir_interpolation_reaches_nested_training_fields(self) -> None:
-        """`${output_dir}` inside configs/training/default.yaml must resolve against the
-        experiment-level output_dir, not fail or stay a literal string."""
+        """`${output_dir}` in configs/training/default.yaml must resolve against `output_dir`.
+
+        It resolves against the experiment-level output_dir: it must not fail or stay a
+        literal string.
+        """
         cfg = _loadSignalVaeConfig(overrides=["output_dir=/tmp/some_run"])
         assert cfg.training.callbacks["checkpoint"]["directory"] == "/tmp/some_run/checkpoints"
         assert (
@@ -103,10 +106,12 @@ class TestLoadExperimentConfig:
         assert cfg.training.callbacks["best_checkpoint"]["monitor"] == "val/loss/reconstruction"
 
     def test_adding_a_brand_new_callback_from_the_cli_needs_a_plus_prefix(self) -> None:
-        """Hydra's own struct-mode rule for any dict field, not specific to `callbacks`:
-        a dotlist override can change an existing key, but adding a key absent from every
+        """Hydra's own struct-mode rule for any dict field, not specific to `callbacks`.
+
+        A dotlist override can change an existing key, but adding a key absent from every
         composed YAML file needs the `+` prefix. Writing the same key directly into a YAML
-        config file (rather than a CLI override) needs no such prefix."""
+        config file (rather than a CLI override) needs no such prefix.
+        """
         with pytest.raises(ConfigCompositionException, match="early_stopping"):
             _loadSignalVaeConfig(
                 overrides=["training.callbacks.early_stopping.monitor=val/loss/total"]
@@ -163,8 +168,10 @@ class TestBuildModelFromConfig:
         assert logvar.shape == (3, 16)
 
     def test_latent_dim_is_auto_injected_into_encoder_and_decoder_kwargs(self) -> None:
-        """The whole point of the auto-fill: signal_single_latent.yaml never repeats
-        latent_dim in the encoder/decoder kwargs, yet it must still end up correct."""
+        """signal_single_latent.yaml never repeats latent_dim in the encoder/decoder kwargs.
+
+        That is the whole point of the auto-fill: it must still end up correct.
+        """
         cfg = _loadSignalVaeConfig(overrides=["model.single_latent.dim=24"])
         model = buildModelFromConfig(cfg.model)
         assert model.encoders["signal"].latent_dim == 24
@@ -184,8 +191,11 @@ class TestBuildModelFromConfig:
         assert model.encoders["signal"].latent_dim == 8
 
     def test_two_modality_config_needs_a_fusion_strategy(self) -> None:
-        """default.yaml's two-modality example is schema-valid; only its unregistered
-        image encoder/decoder makes it unbuildable today (see next test)."""
+        """default.yaml's two-modality example is schema-valid.
+
+        Only its unregistered image encoder/decoder makes it unbuildable today (see next
+        test).
+        """
         cfg = loadExperimentConfig(
             config_name="experiment/signal_vae",
             overrides=[*_BASE_OVERRIDES, "model=default"],
@@ -228,14 +238,15 @@ class TestBuildModelFromConfig:
 
 
 class TestSignalResnetVaeExperiment:
-    """`configs/model/signal_resnet_single_latent.yaml` and
-    `configs/experiment/signal_resnet_vae.yaml` (spec §7, `docs/adr/
-    0014-residual-1d-encoder-decoder.md`): the same spec §6.1 milestone 1 shape as
-    `signal_vae.yaml`/`signal_single_latent.yaml`, but composing the residual
-    encoder/decoder instead of the plain conv stack. Selectable either as its own
-    named experiment file, or as a `model=...` override on top of the existing
-    `signal_vae.yaml` (both ways are exercised below, since both are documented as
-    supported entry points).
+    """The residual-variant configs: the same spec §6.1 milestone 1 shape, residual modules.
+
+    `configs/model/signal_resnet_single_latent.yaml` and
+    `configs/experiment/signal_resnet_vae.yaml` (spec §7,
+    `docs/adr/0014-residual-1d-encoder-decoder.md`) have the same spec §6.1 milestone 1 shape as
+    `signal_vae.yaml`/`signal_single_latent.yaml`, but compose the residual encoder/decoder
+    instead of the plain conv stack. They are selectable either as their own named experiment
+    file, or as a `model=...` override on top of the existing `signal_vae.yaml` (both ways are
+    exercised below, since both are documented as supported entry points).
     """
 
     def test_dedicated_experiment_file_selects_the_resnet_model(self) -> None:
@@ -247,10 +258,11 @@ class TestSignalResnetVaeExperiment:
         assert cfg.model.modalities["signal"].decoder.name == "1d_cnn_resnet_decoder_v1"
 
     def test_model_group_override_selects_the_same_resnet_model(self) -> None:
-        """The second documented way to reach the same model: overriding the `model`
-        config group directly on top of the default experiment file, exactly like
-        `test_two_modality_config_needs_a_fusion_strategy` already does for
-        `model=default`."""
+        """The second documented way to reach the same model: override the `model` config group.
+
+        This is done directly on top of the default experiment file, exactly like
+        `test_two_modality_config_needs_a_fusion_strategy` already does for `model=default`.
+        """
         cfg = _loadSignalVaeConfig(overrides=["model=signal_resnet_single_latent"])
         assert cfg.model.name == "global_vae_signal_resnet_single_latent"
 
@@ -275,8 +287,10 @@ class TestSignalResnetVaeExperiment:
         assert logvar.shape == (3, 16)
 
     def test_per_stage_block_depths_reach_the_model(self) -> None:
-        """The whole point of the residual variant: block_depths must actually reach
-        the constructed modules, not just be schema-valid."""
+        """`block_depths` must actually reach the constructed modules, not just be schema-valid.
+
+        This is the whole point of the residual variant.
+        """
         cfg = loadExperimentConfig(
             config_name="experiment/signal_resnet_vae", overrides=_BASE_OVERRIDES
         )
@@ -468,9 +482,11 @@ class TestBuildCallbacksFromConfig:
     def test_config_snapshot_is_forwarded_only_to_callbacks_that_accept_it(
         self, tmp_path: Path
     ) -> None:
-        """`CheckpointCallback` declares a `config` parameter and receives the snapshot;
+        """`CheckpointCallback` declares a `config` parameter and receives the snapshot.
+
         `EarlyStopping` does not, and is built with no such kwarg (it would raise
-        `TypeError` if one were forwarded)."""
+        `TypeError` if one were forwarded).
+        """
         config = TrainingConfig(
             callbacks={
                 "early_stopping": {},

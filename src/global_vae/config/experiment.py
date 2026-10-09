@@ -1,5 +1,6 @@
-"""Top-level experiment configuration (spec §9, §10 "Config management"): combines
-`ModelConfig`, `DataConfig`, and `TrainingConfig` into one composed, validated config,
+"""Top-level experiment configuration (spec §9, §10 "Config management").
+
+Combines `ModelConfig`, `DataConfig`, and `TrainingConfig` into one composed, validated config,
 plus `loadExperimentConfig`, the one function that turns a Hydra config directory and a
 config name into a real, typed `ExperimentConfig` instance.
 

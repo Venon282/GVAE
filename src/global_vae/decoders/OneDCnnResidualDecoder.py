@@ -405,4 +405,5 @@ class OneDCnnResidualDecoder(AbstractDecoder):
 
     @property
     def modality_name(self) -> str:
+        """Name of the modality this decoder reconstructs."""
         return self._modality_name

@@ -14,8 +14,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "ruff>=0.4",
-    "mypy>=1.9",
+    "ruff~=0.16.0",
+    "mypy~=2.4.0",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "tensorboard>=2.14",  # exercised for real by tests/integration/test_loggers.py
@@ -50,7 +50,7 @@ docs = [
     "mkdocs-gen-files>=0.5",
     "mkdocs-literate-nav>=0.6",
     "mkdocs-section-index>=0.3",
-    "ruff>=0.4",
+    "ruff~=0.16.0",
 ]
 # Soft dependency of ResampleTransform(interpolation="scipy") only (data/transforms/resample.py,
 # spec §6.2): coordinate-aware resampling (explicit source_coords/target_coords, and interpolation
@@ -83,6 +83,13 @@ select = ["E", "F", "I", "N", "UP", "B", "D"]
 # §10 "Naming convention" and README.md "Naming convention"). Without this
 # override, ruff would silently "fix" camelCase names back to snake_case.
 ignore = ["N802", "N803", "N806"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests: D101 to D104 (missing docstring on a public class, method, function or package) are
+# ignored on purpose (roadmap decision D-10). A test name already states what it checks, and
+# 795 of the former 987 findings in tests/ were these four rules. D100 (module docstring) and
+# the style rules D2xx/D4xx still apply, so every test module keeps its docstring.
+"tests/**" = ["D101", "D102", "D103", "D104"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

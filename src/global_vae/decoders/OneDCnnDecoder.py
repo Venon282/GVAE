@@ -1,5 +1,4 @@
-"""1D CNN decoder (spec §6, §12).
-"""
+"""1D CNN decoder (spec §6, §12)."""
 
 from collections.abc import Callable, Sequence
 
@@ -20,8 +19,8 @@ from global_vae.utils.stage_config import broadcastPerStage
 
 @registerDecoder("1d_cnn_decoder_v1")
 class OneDCnnDecoder(AbstractDecoder):
-    """1D convolutional decoder reconstructing a fixed-length series.
-    """
+    """1D convolutional decoder reconstructing a fixed-length series."""
+
     def __init__(
         self,
         latent_dim: int,
@@ -113,8 +112,10 @@ class OneDCnnDecoder(AbstractDecoder):
                 inserted between the latent vector and the seed projection.
                 Empty tuple (default) keeps today's behavior: a single
                 linear layer straight from `z` to the seed.
-            head_activation: Optional activation layer to use for the head
-            modality_name:
+            head_activation: Optional activation layer to use for the
+                head.
+            modality_name: Name of the modality this decoder
+                reconstructs.
 
         Raises:
             ValueError: If any per-transition sequence argument does
@@ -321,4 +322,5 @@ class OneDCnnDecoder(AbstractDecoder):
 
     @property
     def modality_name(self) -> str:
+        """Name of the modality this decoder reconstructs."""
         return self._modality_name

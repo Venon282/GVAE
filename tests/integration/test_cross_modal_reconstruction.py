@@ -1,6 +1,7 @@
-"""Integration tests for cross-modal reconstruction reporting
-(`visualization.reconstruction_plot`'s `resolveDefaultInputSubsets`,
-`collectCrossModalReconstructions`, `plotCrossModalReconstructionMatrix`; spec §5,
+"""Integration tests for cross-modal reconstruction reporting.
+
+Covers `visualization.reconstruction_plot`'s `resolveDefaultInputSubsets`,
+`collectCrossModalReconstructions` and `plotCrossModalReconstructionMatrix` (spec §5,
 `docs/adr/0016-cross-modal-reconstruction-reporting.md`).
 
 Uses its own trivial linear dummy encoders/decoders and a dummy Product-of-Experts
@@ -263,8 +264,7 @@ class TestResolveDefaultInputSubsets:
         }
 
     def test_single_modality_model_gives_only_its_own_singleton(self) -> None:
-        """No duplicate "full set" entry when it would be identical to the one
-        singleton already present."""
+        """No duplicate "full set" entry when it would be identical to the existing singleton."""
         model = _buildSingleModalityModel()
         subsets = resolveDefaultInputSubsets(model)
         assert subsets == [frozenset({"a"})]
@@ -277,8 +277,10 @@ class TestCollectCrossModalReconstructions:
         assert set(collected) == {frozenset({"a"}), frozenset({"b"}), frozenset({"a", "b"})}
 
     def test_every_decoder_reconstructs_from_a_single_modality_subset(self) -> None:
-        """The actual point (spec §5): feeding only 'a' in must still produce a
-        reconstruction for decoder 'b', not only for 'a'."""
+        """The actual point (spec §5): feeding only 'a' in must still reconstruct decoder 'b'.
+
+        The reconstruction must exist for decoder 'b', not only for 'a'.
+        """
         model = _buildTwoModalityModel()
         collected = collectCrossModalReconstructions(
             model, [_fixedBatch()], input_subsets=[{"a"}], device="cpu"
@@ -286,8 +288,10 @@ class TestCollectCrossModalReconstructions:
         assert set(collected[frozenset({"a"})]) == {"a", "b"}
 
     def test_ground_truth_always_comes_from_the_full_batch(self) -> None:
-        """The original paired against decoder 'b' under the {'a'}-only subset must
-        equal batch['b'] itself, not some restricted/absent value."""
+        """The original paired with decoder 'b' under the {'a'}-only subset must equal batch['b'].
+
+        It must be batch['b'] itself, not some restricted/absent value.
+        """
         model = _buildTwoModalityModel()
         batch = _fixedBatch()
         collected = collectCrossModalReconstructions(

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone evaluation script (spec: "un script/mode d'éval distinct de l'entraînement").
+r"""Standalone evaluation script (spec: "un script/mode d'éval distinct de l'entraînement").
 
 Loads a checkpoint into a model built by a user-supplied factory function, evaluates it
 against a user-supplied test-dataloader factory function, prints a summary, and
@@ -16,10 +16,10 @@ this script assuming any particular encoder/decoder/routing-graph choice or data
 format.
 
 Usage:
-    python scripts/evaluate.py \\
-        --checkpoint runs/model.pt \\
-        --model-factory mypackage.models:build_model \\
-        --dataloader-factory mypackage.data:build_test_dataloader \\
+    python scripts/evaluate.py \
+        --checkpoint runs/model.pt \
+        --model-factory mypackage.models:build_model \
+        --dataloader-factory mypackage.data:build_test_dataloader \
         --output-dir results/
 
 Where, in your own code (anywhere importable on `PYTHONPATH`):

@@ -1,5 +1,4 @@
-"""1D CNN encoder
-"""
+"""1D CNN encoder."""
 
 from collections.abc import Callable, Sequence, Sized
 from typing import Any, cast
@@ -9,9 +8,10 @@ from torch import nn
 
 from global_vae.encoders.base import AbstractEncoder
 from global_vae.encoders.registry import registerEncoder
-from global_vae.utils.stage_config import broadcastPerStage
 from global_vae.utils.builders import build1DPoolLayer
 from global_vae.utils.conv_math import solveMinimumInputLengthForConv1d
+from global_vae.utils.stage_config import broadcastPerStage
+
 
 @registerEncoder("1d_cnn_encoder_v1")
 class OneDCnnEncoder(AbstractEncoder):
@@ -26,25 +26,19 @@ class OneDCnnEncoder(AbstractEncoder):
 
     Every per-stage hyperparameter (`kernel_sizes`, `strides`,
     `paddings`, `dilations`, `poolings` and its own sub-parameters,
-    `paddings`, `dilations`) accepts either one value shared by every
     `activations`, `normalizations`) accepts either one value shared by every
     stage or a sequence of exactly `len(hidden_channels)` values, one
     per stage (see `utils.stage_config.broadcastPerStage`).
 
     Note: if a stage's `poolings` entry is not `None`, that stage's
-    sequence length; if `strides` greater than 1 are also used, both
     pooling step reduces sequence length; if that stage's `strides` is
-    reductions compound. The input length must stay large enough,
-    also greater than 1, both reductions compound. The input length
-    after however much downsampling the chosen configuration performs,
-    must stay large enough, after however much downsampling the chosen
-    that no intermediate feature map collapses to zero length. This is
+    also greater than 1, both reductions compound. The input length must
+    stay large enough, after however much downsampling the chosen
     configuration performs, that no intermediate feature map collapses
-    a real constraint of any strided/pooled conv stack, not something
     to zero length. This is a real constraint of any strided/pooled
-    silently handled.
     conv stack, not something silently handled.
     """
+
     def __init__(
         self,
         latent_dim: int,
@@ -58,9 +52,13 @@ class OneDCnnEncoder(AbstractEncoder):
         pool_kernel_sizes: int | None | Sequence[int | None] = 2,
         pool_strides: int | None | Sequence[int | None] = None,
         pool_paddings: int | Sequence[int] = 0,
-        pool_kwargs: dict[str, Any] | Sequence[dict[str, Any]] = {},
-        activations: Callable[[], nn.Module] | Sequence[Callable[[], nn.Module] | None] | None = nn.ReLU,
-        normalizations: Callable[[int], nn.Module] | Sequence[Callable[[int], nn.Module] | None] | None = nn.BatchNorm1d,
+        pool_kwargs: dict[str, Any] | Sequence[dict[str, Any]] | None = None,
+        activations: Callable[[], nn.Module]
+        | Sequence[Callable[[], nn.Module] | None]
+        | None = nn.ReLU,
+        normalizations: Callable[[int], nn.Module]
+        | Sequence[Callable[[int], nn.Module] | None]
+        | None = nn.BatchNorm1d,
         global_pool: str = "avg",
         head_hidden_dims: tuple[int, ...] = (),
         head_activation: Callable[[], nn.Module] | None = nn.ReLU,
@@ -75,7 +73,9 @@ class OneDCnnEncoder(AbstractEncoder):
                 are stacked, e.g. multiple detectors).
             hidden_channels: Output channel width of each conv stage,
                 applied in order. Its length fixes the number of
-                stages. Or directly a layer.
+                stages. An entry may also be a ready-made layer
+                (an `nn.Module` exposing `out_channels` or
+                `out_features`), used as is for that stage.
             kernel_sizes: Convolution kernel size, per stage or shared.
             strides: Convolution stride, per stage or shared. Use this
                 (with `poolings=None`) to downsample via strided
@@ -110,15 +110,16 @@ class OneDCnnEncoder(AbstractEncoder):
                 or shared. Pass `None` the same way to disable
                 normalization for a stage.
             global_pool: `"avg"` or `"max"`: which adaptive pooling
-                            reduces the final feature map to a single fixed-size
-                            vector, regardless of input length.
+                reduces the final feature map to a single fixed-size
+                vector, regardless of input length.
             head_hidden_dims: Hidden layer sizes for an optional small MLP
                 inserted between the pooled features and the `to_mu`/
                 `to_logvar` heads. Empty tuple (default) keeps today's
                 behavior: a single linear layer straight from pooled
                 features to each head.
-            head_activation: Optional head activation layer
-
+            head_activation: Optional activation layer to use for the
+                head.
+            modality_name: Name of the modality this encoder handles.
 
         Raises:
             ValueError: If any per-stage sequence argument does not
@@ -135,7 +136,10 @@ class OneDCnnEncoder(AbstractEncoder):
         strides_ = broadcastPerStage(strides, num_stages, "strides")
         dilations_ = broadcastPerStage(dilations, num_stages, "dilations")
         if paddings is None:
-            paddings_ = tuple(dilation * (kernel_size // 2) for kernel_size, dilation in zip(kernel_sizes_, dilations_, strict=True))
+            paddings_ = tuple(
+                dilation * (kernel_size // 2)
+                for kernel_size, dilation in zip(kernel_sizes_, dilations_, strict=True)
+            )
         else:
             paddings_ = broadcastPerStage(paddings, num_stages, "paddings")
         poolings_: tuple[str | None, ...] = broadcastPerStage(poolings, num_stages, "poolings")
@@ -148,7 +152,10 @@ class OneDCnnEncoder(AbstractEncoder):
             else (None,) * num_stages
         )
         pool_paddings_ = broadcastPerStage(pool_paddings, num_stages, "pool_paddings")
-        pool_kwargs_ = broadcastPerStage(pool_kwargs, num_stages, "pool_kwargs")
+        resolved_pool_kwargs: dict[str, Any] | Sequence[dict[str, Any]] = (
+            pool_kwargs if pool_kwargs is not None else {}
+        )
+        pool_kwargs_ = broadcastPerStage(resolved_pool_kwargs, num_stages, "pool_kwargs")
         activations_ = broadcastPerStage(activations, num_stages, "activations")
         normalizations_: tuple[Callable[[int], nn.Module] | None, ...] = broadcastPerStage(
             normalizations, num_stages, "normalizations"
@@ -213,12 +220,12 @@ class OneDCnnEncoder(AbstractEncoder):
                 layers.append(activation())
 
             pool_layer = build1DPoolLayer(
-                                          poolings_[stage],
-                                          pool_kernel_sizes_[stage],
-                                          pool_strides_[stage],
-                                          pool_paddings_[stage],
-                                          **pool_kwargs_[stage]
-                                        )
+                poolings_[stage],
+                pool_kernel_sizes_[stage],
+                pool_strides_[stage],
+                pool_paddings_[stage],
+                **pool_kwargs_[stage],
+            )
             if pool_layer is not None:
                 layers.append(pool_layer)
 
@@ -317,8 +324,7 @@ class OneDCnnEncoder(AbstractEncoder):
         for stage in reversed(range(num_stages)):
             if poolings_[stage] is not None and pool_kernel_sizes_[stage] is None:
                 raise ValueError(
-                    f"pooling='{poolings_[stage]}' requires a kernel_size, but "
-                    f"kernel_size is None."
+                    f"pooling='{poolings_[stage]}' requires a kernel_size, but kernel_size is None."
                 )
             if poolings_[stage] is not None:
                 kernel_size_for_stage = pool_kernel_sizes_[stage]
@@ -372,35 +378,45 @@ class OneDCnnEncoder(AbstractEncoder):
                 f"architecture arguments to see which stage is responsible."
             )
 
-    def forward(self, x:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            """Encode a batch of 1D series.
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Encode a batch of 1D series.
 
-            Args:
-                x: Raw series, shape `(batch, length)` or
-                    `(batch, in_channels, length)`. A 2D input is treated
-                    as `(batch, length)` and given an explicit channel
-                    dimension of `1`.
+        Args:
+            x: Raw series, shape `(batch, length)` or
+                `(batch, in_channels, length)`. A 2D input is treated
+                as `(batch, length)` and given an explicit channel
+                dimension of `1`.
 
-            Returns:
-                A `(mu, logvar)` tuple, each of shape `(batch, latent_dim)`.
-            """
-            series = x.unsqueeze(1) if x.dim() == 2 else x
-            self._validateInputLength(series.shape[-1])
-            features = self.conv(series)
-            pooled: torch.Tensor = self.pool(features).squeeze(-1)
-            pooled = self.head(pooled)
-            mu: torch.Tensor = self.to_mu(pooled)
-            logvar: torch.Tensor = self.to_logvar(pooled)
-            return mu, logvar
+        Returns:
+            A `(mu, logvar)` tuple, each of shape `(batch, latent_dim)`.
+        """
+        series = x.unsqueeze(1) if x.dim() == 2 else x
+        self._validateInputLength(series.shape[-1])
+        features = self.conv(series)
+        pooled: torch.Tensor = self.pool(features).squeeze(-1)
+        pooled = self.head(pooled)
+        mu: torch.Tensor = self.to_mu(pooled)
+        logvar: torch.Tensor = self.to_logvar(pooled)
+        return mu, logvar
 
     @property
     def latent_dim(self) -> int:
+        """Dimensionality of the `(mu, logvar)` output."""
         return self._latent_dim
 
     @property
     def modality_name(self) -> str:
+        """Name of the modality this encoder handles."""
         return self._modality_name
 
     @property
     def minimal_input_length(self) -> int:
+        """Shortest input length this configuration accepts.
+
+        Below it, the conv stack would collapse a feature map to zero
+        length (see `computeMinimumInputLength`).
+
+        Returns:
+            The minimal input length, fixed at construction.
+        """
         return self._min_input_length

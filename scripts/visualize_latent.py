@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Standalone latent-space visualization script (spec §6.1 milestone 1: "the ability to
-inspect training curves and visualize the latent space").
+r"""Standalone latent-space visualization script (spec §6.1 milestone 1).
+
+The spec asks for "the ability to inspect training curves and visualize the latent
+space".
 
 Loads a checkpoint into a model built by a user-supplied factory function, runs it over
 a user-supplied dataloader factory function, and saves latent-space scatter plots, a
@@ -46,10 +48,10 @@ dynamically imported from `module.path:function_name` strings you supply, exactl
 `scripts/evaluate.py`.
 
 Usage:
-    python scripts/visualize_latent.py \\
-        --checkpoint runs/model.pt \\
-        --model-factory mypackage.models:build_model \\
-        --dataloader-factory mypackage.data:build_dataloader \\
+    python scripts/visualize_latent.py \
+        --checkpoint runs/model.pt \
+        --model-factory mypackage.models:build_model \
+        --dataloader-factory mypackage.data:build_dataloader \
         --output-dir results/latent/
 
 Where, in your own code (anywhere importable on `PYTHONPATH`):

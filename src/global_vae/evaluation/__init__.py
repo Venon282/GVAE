@@ -1,6 +1,6 @@
-"""evaluation subpackage of global_vae: a standalone evaluation pass, distinct from
-training (spec §10's "MSE at minimum... KL value... reconstructions for visual
-inspection").
+"""Evaluation subpackage of global_vae: a standalone evaluation pass, distinct from training.
+
+See spec §10's "MSE at minimum... KL value... reconstructions for visual inspection".
 
 Nothing here needs a `Trainer`: `evaluate()` only needs a `GlobalVae` and a
 dataloader (the same `dict[str, torch.Tensor]` batch convention used everywhere else

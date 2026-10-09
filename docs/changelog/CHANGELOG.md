@@ -61,6 +61,26 @@ versioning follows [Semantic Versioning](https://semver.org/).
   seconds, against about 150 for the full run) are the fast loops, documented in the README and
   in `docs/getting-started.md`. CI is unchanged and still runs the whole suite.
 
+- Ruff clean-up (roadmap P0-2, spec section 10): `ruff check .` goes from 1071 findings to the 8
+  `N999` ones (the CamelCase module names), which wait for decision D-9, so the CI `lint` job
+  stays advisory until then. `ruff` and `mypy` are pinned in the `dev` extra with
+  compatible-release specifiers (`ruff~=0.16.0`, `mypy~=2.4.0`; the `docs` extra gets the same
+  `ruff` pin), so the finding counts no longer move with the tool version. `ruff check --fix`
+  (85 fixes) and `ruff format` were applied; ruff 0.16 also formats the Python code blocks of
+  the two `docs/guide-vae-accessible-*.md` files, which changed by one comment spacing. By hand,
+  in `src/`:
+  24 `D205` summary lines, 15 `D102` docstrings on overriding methods (the three assemblers'
+  `forward`, the `latent_dim`, `modality_name` and `minimal_input_length` properties of the
+  encoders and decoders), the `D417` parameter descriptions, the `D107` and `D100` gaps, and
+  the garbled class docstring and indentation of `OneDCnnEncoder`. The mutable default
+  `pool_kwargs={}` of `OneDCnnEncoder.__init__` (B006) is now `None`, resolved inside the
+  constructor like in the other three CNN encoders, so instances no longer share one dict.
+  In `scripts/` and `examples/`, the `D205` summaries were split, the four `D301` docstrings
+  that contain backslashes became raw strings (the resulting `__doc__`, which is the
+  `--help` text, is unchanged) and `main` of the first example got a docstring. In `tests/`,
+  `D101` to `D104` are ignored through `[tool.ruff.lint.per-file-ignores]` (decision D-10) and
+  the 98 `D205` summaries were split. No new `noqa` was needed.
+
 ### Removed
 
 ### Fixed

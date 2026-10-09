@@ -1,5 +1,7 @@
-"""Standalone evaluation pass: reconstruction metrics, regularization/KL values, distinct
-from `Trainer.evaluate` (spec: "un script/mode d'éval distinct de l'entraînement").
+"""Standalone evaluation pass: reconstruction metrics and regularization/KL values.
+
+Distinct from `Trainer.evaluate` (spec: "un script/mode d'éval distinct de
+l'entraînement").
 
 `Trainer.evaluate` (spec §10, `docs/adr/0005-training-loop.md`) already runs a
 no-gradient pass and reports the same three aggregate losses `fitEpoch` does
@@ -124,8 +126,9 @@ def evaluate(
     device: str | torch.device | None = None,
     max_samples: int | None = None,
 ) -> EvaluationResults:
-    """Run a full evaluation pass over `dataloader` and report reconstruction/regularization
-    metrics.
+    """Run a full evaluation pass over `dataloader` and report reconstruction metrics.
+
+    Regularization (KL) values are reported alongside the reconstruction metrics.
 
     Calls `model.eval()` (unlike the collection helpers in
     `visualization/`, which leave the mode to the caller: a standalone

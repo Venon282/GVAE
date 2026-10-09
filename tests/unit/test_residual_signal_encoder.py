@@ -206,9 +206,11 @@ def test_forward_at_exactly_the_minimum_input_length_succeeds() -> None:
 
 
 def test_compute_minimum_input_length_accounts_for_block_depth() -> None:
-    """A deeper block (more internal layers) never makes the minimum input length
-    *smaller* than a shallower one built from the exact same per-layer hyperparameters
-    (every internal layer can only add its own kernel-span requirement)."""
+    """A deeper block (more internal layers) never makes the minimum input length *smaller*.
+
+    The comparison is against a shallower one built from the exact same per-layer
+    hyperparameters (every internal layer can only add its own kernel-span requirement).
+    """
     shallow_minimum = OneDCnnResidualEncoder.computeMinimumInputLength(
         hidden_channels=(16, 32), kernel_sizes=3, strides=2, block_depths=1, poolings=None
     )

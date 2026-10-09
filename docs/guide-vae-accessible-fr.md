@@ -42,7 +42,7 @@ La variance doit toujours être positive (une "largeur" négative n'a pas de sen
 La solution : le réseau produit `logvar` (le logarithme de la variance), qui lui peut être n'importe quel nombre réel sans problème, puis on repasse en variance réelle avec `exp(logvar)` (l'exponentielle "annule" le logarithme et garantit un résultat toujours positif, quel que soit `logvar`). C'est ce que fait exactement `LatentSpace.reparameterize` (`src/global_vae/latent/base.py`) :
 
 ```python
-std = torch.exp(0.5 * logvar)   # écart-type = exp(logvar / 2)
+std = torch.exp(0.5 * logvar)  # écart-type = exp(logvar / 2)
 ```
 
 (Le `0.5 *` vient du fait qu'on veut l'écart-type, pas la variance : écart-type = racine carrée de la variance = exp(logvar)^0.5 = exp(0.5 * logvar).)
@@ -96,7 +96,7 @@ z = mu + epsilon * std     # combinaison différentiable de mu, std (calculés p
 ```python
 def reparameterize(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
     std = torch.exp(0.5 * logvar)
-    eps = torch.randn_like(std)   # epsilon, tiré au hasard, hors du graphe de calcul appris
+    eps = torch.randn_like(std)  # epsilon, tiré au hasard, hors du graphe de calcul appris
     return mu + eps * std
 ```
 

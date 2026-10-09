@@ -14,4 +14,13 @@ class ConcatAssembler(AbstractAssembler):
     """
 
     def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
+        """Concatenate the latent vectors along the feature dimension.
+
+        Args:
+            latents: Already-sampled latent tensors, each of shape
+                `(batch, dim_i)`; the `dim_i` may differ.
+
+        Returns:
+            The concatenation, shape `(batch, sum(dim_i))`.
+        """
         return torch.cat(latents, dim=-1)

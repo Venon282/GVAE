@@ -1,5 +1,4 @@
-"""Global Multimodal VAE — a modular, extensible multimodal Variational
-Autoencoder framework.
+"""Global Multimodal VAE: a modular, extensible multimodal Variational Autoencoder framework.
 
 See the project specification (`global-vae-project-specification.md`) for
 the architectural vision: three independent axes (encoder cardinality,

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""The same spec §6.1 milestone 1 pipeline as `01_signal_vae_pipeline.py`, but
-assembled entirely from the `configs/` YAML files (spec §9, §10 "Config management")
-instead of hand-written Python kwargs: by default, the residual ("ResNet-style") 1D
-encoder/decoder's own experiment file (`configs/experiment/signal_resnet_vae.yaml`,
+r"""Config-driven version of the spec §6.1 milestone 1 pipeline of `01_signal_vae_pipeline.py`.
+
+The pipeline is assembled entirely from the `configs/` YAML files (spec §9, §10
+"Config management") instead of hand-written Python kwargs: by default, the residual
+("ResNet-style") 1D encoder/decoder's own experiment file
+(`configs/experiment/signal_resnet_vae.yaml`,
 spec §7, `docs/adr/0014-residual-1d-encoder-decoder.md`), with a synthetic, in-memory
 `loader_factory` (`_synthetic_signal_data.buildSyntheticSignalDataloaders`) standing in
 for a real dataset, so this still runs with no external data.
@@ -61,8 +63,8 @@ Run:
     python examples/02_config_driven_pipeline.py --variants baseline --num-epochs 5
 
     # Arbitrary extra Hydra dotlist overrides, repeatable:
-    python examples/02_config_driven_pipeline.py \\
-        --override training.optimizer.kwargs.lr=0.01 \\
+    python examples/02_config_driven_pipeline.py \
+        --override training.optimizer.kwargs.lr=0.01 \
         --override model.single_latent.dim=32
 
 Run `python examples/02_config_driven_pipeline.py --help` for the full option list.
@@ -214,8 +216,9 @@ def _saveVariantFigures(
     cfg: ExperimentConfig,
     history: list[dict[str, float]],
 ) -> None:
-    """Save this variant's own reconstruction/latent/loss figures, mirroring
-    `01_signal_vae_pipeline.py`'s own step 7, so both examples produce directly
+    """Save this variant's own reconstruction, latent and loss figures.
+
+    Mirrors `01_signal_vae_pipeline.py`'s own step 7, so both examples produce directly
     comparable output artifacts.
 
     Args:

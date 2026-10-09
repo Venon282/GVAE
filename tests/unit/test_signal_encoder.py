@@ -5,8 +5,8 @@ import torch
 from torch import nn
 
 import global_vae.encoders  # noqa: F401  (registers the built-in encoders)
-from global_vae.encoders.registry import getEncoderClass
 from global_vae.encoders.OneDCnnEncoder import OneDCnnEncoder
+from global_vae.encoders.registry import getEncoderClass
 from global_vae.utils.autograd import backward
 
 
@@ -33,8 +33,10 @@ def test_handles_varying_input_length() -> None:
 
 
 def test_latent_dim_property() -> None:
-    """`latent_dim` (camelCase) is the property `AbstractEncoder` requires; a `latent_dim`
-    property alone would leave the class abstract and unable to be instantiated."""
+    """`latent_dim` (camelCase) is the property `AbstractEncoder` requires.
+
+    A `latent_dim` property alone would leave the class abstract and unable to be instantiated.
+    """
     encoder = OneDCnnEncoder(latent_dim=32)
     assert encoder.latent_dim == 32
 
@@ -141,6 +143,7 @@ def test_unknown_global_pool_raises() -> None:
 def test_unknown_pooling_raises() -> None:
     with pytest.raises(ValueError, match="pooling"):
         OneDCnnEncoder(latent_dim=8, poolings="sum")
+
 
 def test_forward_below_minimum_input_length_raises_clear_error() -> None:
     encoder = OneDCnnEncoder(latent_dim=8)

@@ -1,5 +1,6 @@
-"""Integration tests for `evaluation.cross_modal` (spec §5,
-`docs/adr/0016-cross-modal-reconstruction-reporting.md`).
+"""Integration tests for `evaluation.cross_modal`.
+
+See spec §5 and `docs/adr/0016-cross-modal-reconstruction-reporting.md`.
 
 Uses its own trivial linear dummy encoders/decoders and a dummy Product-of-Experts
 fusion, registered under a `_cross_modal_eval_test` suffix (see `test_trainer.py`'s
@@ -240,8 +241,7 @@ class TestExportCrossModalFigures:
         assert len(paths) == 1
 
     def test_unknown_modality_in_explicit_subset_still_raises(self, tmp_path: Path) -> None:
-        """A genuinely misused call must not be silently swallowed by the
-        single-modality no-op path."""
+        """A genuinely misused call must not be silently swallowed by the single-modality path."""
         model = _buildTwoModalityModel()
         with pytest.raises(ValueError, match="does_not_exist"):
             exportCrossModalFigures(

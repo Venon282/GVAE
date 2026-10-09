@@ -1,5 +1,6 @@
-"""config subpackage of global_vae: Hydra-driven, dataclass-validated configuration
-(spec §9, §10 "Config management").
+"""Config subpackage of global_vae: Hydra-driven, dataclass-validated configuration.
+
+See spec §9 and §10 "Config management".
 
 Importing this package registers `ModelConfig`, `DataConfig`, `TrainingConfig`, and
 `ExperimentConfig` with Hydra's `ConfigStore` under the `model`/`data`/`training`

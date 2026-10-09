@@ -1,5 +1,6 @@
-"""Integration test for `examples/02_config_driven_pipeline.py`'s CLI (spec §9, §10
-"Config management").
+"""Integration test for `examples/02_config_driven_pipeline.py`'s CLI.
+
+See spec §9 and §10 "Config management".
 
 Runs the script as a real subprocess, mirroring `test_train_script.py`'s own reasoning:
 even though this script is not `@hydra.main`-decorated (it calls
@@ -34,8 +35,9 @@ pytestmark = pytest.mark.slow
 def _runExample(
     tmp_path: Path, extra_args: list[str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    """Run `examples/02_config_driven_pipeline.py` as a subprocess with a small, fast,
-    isolated configuration.
+    """Run `examples/02_config_driven_pipeline.py` as a subprocess.
+
+    The configuration is small, fast and isolated.
 
     Args:
         tmp_path: pytest's per-test temporary directory; this run's `--output-root` is
@@ -134,9 +136,11 @@ class TestConfigSelectionFlags:
     def test_missing_required_argument_is_fine_since_everything_has_a_default(
         self, tmp_path: Path
     ) -> None:
-        """Unlike scripts/evaluate.py or scripts/visualize_latent.py, this script's CLI
-        has no required flags at all: every argument has a sensible default (spec's own
-        "use this config by default" requirement)."""
+        """Unlike the other scripts' CLIs, this script's CLI has no required flags at all.
+
+        Every argument has a sensible default (spec's own "use this config by default"
+        requirement), unlike scripts/evaluate.py or scripts/visualize_latent.py.
+        """
         completed = subprocess.run(
             [sys.executable, str(_SCRIPT_PATH), "--help"],
             cwd=_SCRIPT_PATH.parents[1],

@@ -76,8 +76,11 @@ class TestResidual1DBlock:
         assert y.shape == (2, 16, computeConv1dOutputLength(40, 3, 2, 1, 1))
 
     def test_depth_one_allows_an_even_kernel_size(self) -> None:
-        """No internal layer exists at depth=1, so the odd-kernel constraint does not apply,
-        as long as the (still-required) shortcut can match the main path's length."""
+        """No internal layer exists at depth=1, so the odd-kernel constraint does not apply.
+
+        That holds as long as the (still-required) shortcut can match the main path's
+        length.
+        """
         block = Residual1DBlock(
             in_channels=8,
             out_channels=16,
@@ -118,9 +121,11 @@ class TestResidual1DBlock:
             Residual1DBlock(in_channels=8, out_channels=8, depth=2, kernel_size=4)
 
     def test_mismatched_shortcut_offset_raises_with_actionable_message(self) -> None:
-        """kernel_size=4 with depth=1 skips the odd-kernel check, but the default 1x1
-        shortcut still cannot reach the same length as this main path for every input
-        length once a projection is actually needed (channel change here)."""
+        """kernel_size=4 with depth=1 skips the odd-kernel check.
+
+        But the default 1x1 shortcut still cannot reach the same length as this main path
+        for every input length once a projection is actually needed (channel change here).
+        """
         with pytest.raises(ValueError, match="length offset"):
             Residual1DBlock(in_channels=8, out_channels=16, depth=1, kernel_size=4, padding=1)
 
@@ -206,8 +211,11 @@ class TestResidual1DUpBlock:
             assert param.grad is not None, f"parameter '{name}' got no gradient"
 
     def test_output_flags_suppress_only_the_final_layer(self) -> None:
-        """Internal layers of a deep block must stay normalized/activated even when the
-        block's own final output is suppressed (the "last transition" convention)."""
+        """Internal layers of a deep block must stay normalized/activated.
+
+        This holds even when the block's own final output is suppressed (the "last
+        transition" convention).
+        """
         block = Residual1DUpBlock(
             in_channels=32,
             out_channels=1,
@@ -345,8 +353,11 @@ class TestResidual2DBlock:
         assert y.shape == (2, 16, 20, 18)
 
     def test_depth_one_allows_an_even_kernel_size(self) -> None:
-        """No internal layer exists at depth=1, so the odd-kernel constraint does not apply,
-        as long as the (still-required) shortcut can match the main path's offsets."""
+        """No internal layer exists at depth=1, so the odd-kernel constraint does not apply.
+
+        That holds as long as the (still-required) shortcut can match the main path's
+        offsets.
+        """
         block = Residual2DBlock(
             in_channels=8,
             out_channels=16,
@@ -361,8 +372,10 @@ class TestResidual2DBlock:
 
     def test_shortcut_reaches_the_main_path_shape_for_every_input_shape(self) -> None:
         """The guarantee the class docstring makes: not one example shape, every shape.
+
         A mismatch would make the residual `+` raise, so a clean sweep over odd and even
-        sizes on each axis is the direct check."""
+        sizes on each axis is the direct check.
+        """
         block = Residual2DBlock(
             in_channels=4, out_channels=8, depth=2, kernel_size=(3, 5), stride=(2, 3)
         )
@@ -425,17 +438,21 @@ class TestResidual2DBlock:
             )
 
     def test_shortcut_mismatch_on_a_single_axis_is_still_detected(self) -> None:
-        """Height offset is 0 (kernel 3, padding 1), width offset is -1 (kernel 4, padding
-        1): a check that only looked at one axis, or at their sum-symmetry, would pass."""
+        """Height offset is 0 (kernel 3, padding 1), width offset is -1 (kernel 4, padding 1).
+
+        A check that only looked at one axis, or at their sum-symmetry, would pass.
+        """
         with pytest.raises(ValueError, match="length offset"):
             Residual2DBlock(
                 in_channels=8, out_channels=16, depth=1, kernel_size=(3, 4), padding=(1, 1)
             )
 
     def test_mismatch_is_not_raised_when_no_projection_is_needed(self) -> None:
-        """An identity shortcut has nothing to reconcile, so an otherwise-mismatched
-        padding is not this class's job to reject (the residual add would simply be
-        applied to whatever shape the main path produces)."""
+        """An identity shortcut has nothing to reconcile.
+
+        So an otherwise-mismatched padding is not this class's job to reject (the residual
+        add would simply be applied to whatever shape the main path produces).
+        """
         block = Residual2DBlock(
             in_channels=8, out_channels=8, depth=1, kernel_size=(3, 3), padding=(1, 1)
         )
@@ -582,8 +599,11 @@ class TestResidual2DUpBlock:
             assert param.grad is not None, f"parameter '{name}' got no gradient"
 
     def test_output_flags_suppress_only_the_final_layer(self) -> None:
-        """Internal layers of a deep block must stay normalized/activated even when the
-        block's own final output is suppressed (the "last transition" convention)."""
+        """Internal layers of a deep block must stay normalized/activated.
+
+        This holds even when the block's own final output is suppressed (the "last
+        transition" convention).
+        """
         block = Residual2DUpBlock(
             in_channels=32,
             out_channels=1,

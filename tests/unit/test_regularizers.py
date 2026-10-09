@@ -135,8 +135,11 @@ class TestMmdRegularizer:
         assert torch.allclose(penalty, penalty[0].expand(6), atol=1e-6)
 
     def test_is_near_zero_when_posterior_matches_the_prior(self) -> None:
-        """Posterior samples drawn straight from N(0, I) should give a small (not necessarily
-        exactly zero, since this is a finite-sample estimate) MMD relative to a mismatched case."""
+        """Posterior samples drawn straight from N(0, I) should give a small MMD.
+
+        Small relative to a mismatched case, and not necessarily exactly zero, since this is
+        a finite-sample estimate.
+        """
         torch.manual_seed(0)
         regularizer = MmdRegularizer(num_prior_samples=512)
         matched_mu = torch.zeros(256, 4)

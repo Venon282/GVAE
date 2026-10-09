@@ -1,5 +1,6 @@
-"""Generate one API reference page per module under src/global_vae, plus a
-literate-nav SUMMARY.md tying them together (spec §10 "Documentation:
+"""Generate one API reference page per module under src/global_vae, plus a SUMMARY.md.
+
+The literate-nav SUMMARY.md ties the pages together (spec §10 "Documentation:
 mkdocs + mkdocstrings").
 
 Run automatically by mkdocs itself (see the `gen-files` plugin entry in
@@ -65,10 +66,7 @@ with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as nav_file:
 # codebase has 60+ modules under src/global_vae; a run producing only a
 # handful of pages means the walk above broke (wrong package_root, glob
 # instead of rglob, ...), not that the package shrank.
-python_files = [
-    path for path in package_root.rglob("*.py")
-    if path.name != "__main__.py"
-]
+python_files = [path for path in package_root.rglob("*.py") if path.name != "__main__.py"]
 if generated_count < len(python_files):
     raise RuntimeError(
         f"gen_ref_pages.py only generated {generated_count} reference page(s) "

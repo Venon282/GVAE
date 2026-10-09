@@ -34,9 +34,10 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Advisory: ruff reports about 1000 findings today and the clean-up is roadmap P0-2.
-    # The job stays green while the steps below are red, and the findings remain visible
-    # in the log. P0-2 removes this line, which makes the job blocking.
+    # Advisory: ruff still reports 8 N999 findings (CamelCase module names), which wait for
+    # decision D-9 (roadmap P0-2). The job stays green while the steps below are red, and the
+    # findings remain visible in the log. Removing this line, once D-9 is applied, makes the
+    # job blocking.
     continue-on-error: true
 
     steps:

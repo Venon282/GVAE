@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""End-to-end example: the full pipeline this framework currently supports (spec §6.1
-milestone 1), on simple synthetic 1D signals, built directly through the Python API
+"""End-to-end example of the pipeline this framework currently supports (spec §6.1 milestone 1).
+
+It runs on simple synthetic 1D signals, built directly through the Python API
 (see `02_config_driven_pipeline.py` for the same pipeline built from the `configs/`
 YAML files instead).
 
@@ -123,10 +124,12 @@ WARMUP_STEPS = 1500  # beta warm-up length, in optimizer steps, not epochs
 ENCODER_CHANNELS = (32, 64, 128)
 DECODER_CHANNELS = (128, 64, 32)
 
+
 def _modelKwargs(latent_dim: int, output_length: int) -> dict[str, Any]:
-    """Shared encoder/decoder construction arguments (used both for training and for
-    rebuilding an identical, freshly-initialized model to load the best checkpoint
-    into for evaluation).
+    """Shared encoder/decoder construction arguments.
+
+    Used both for training and for rebuilding an identical, freshly-initialized model
+    to load the best checkpoint into for evaluation.
 
     Args:
         latent_dim: Dimensionality of the single latent space.
@@ -138,7 +141,9 @@ def _modelKwargs(latent_dim: int, output_length: int) -> dict[str, Any]:
         `GlobalVae.createSingleLatent`.
     """
     return {
-        "encoder_kwargs": {"signal": {"latent_dim": latent_dim, "hidden_channels": ENCODER_CHANNELS}},
+        "encoder_kwargs": {
+            "signal": {"latent_dim": latent_dim, "hidden_channels": ENCODER_CHANNELS}
+        },
         "decoder_kwargs": {
             "signal": {
                 "latent_dim": latent_dim,
@@ -152,8 +157,9 @@ def _modelKwargs(latent_dim: int, output_length: int) -> dict[str, Any]:
 
 
 def buildModel(latent_dim: int = LATENT_DIM, output_length: int = COMMON_GRID_LENGTH) -> GlobalVae:
-    """Build the spec §6.1 milestone 1 model: one real encoder, one latent space, one
-    real decoder, no fusion (single modality).
+    """Build the spec §6.1 milestone 1 model (single modality, no fusion).
+
+    One real encoder, one latent space and one real decoder.
 
     Args:
         latent_dim: Dimensionality of the single latent space.
@@ -174,6 +180,7 @@ def buildModel(latent_dim: int = LATENT_DIM, output_length: int = COMMON_GRID_LE
 
 
 def main() -> None:
+    """Run the seven steps of the example, from synthetic data to saved figures."""
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     setGlobalSeed(SEED)
     rng = np.random.default_rng(SEED)

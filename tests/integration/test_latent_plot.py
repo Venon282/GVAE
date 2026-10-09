@@ -109,8 +109,10 @@ class TestProjectLatentSamples:
         assert projected.shape == (20, 2)
 
     def test_pca_recovers_the_dominant_direction_of_variance(self) -> None:
-        """A synthetic dataset that varies almost entirely along one axis: PCA's first
-        component should capture nearly all of it."""
+        """A synthetic dataset that varies almost entirely along one axis.
+
+        PCA's first component should capture nearly all of it.
+        """
         torch.manual_seed(0)
         n = 200
         dominant = torch.randn(n, 1) * 10.0

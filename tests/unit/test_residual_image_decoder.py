@@ -61,8 +61,10 @@ def test_registered_under_2d_cnn_resnet_decoder_v1() -> None:
 
 class TestFlexibleBlockDepths:
     def test_three_then_two_layers(self) -> None:
-        """Spec's own example, decoder side: a first transition with 3 internal layers, a
-        second with 2."""
+        """Spec's own example, decoder side.
+
+        A first transition with 3 internal layers, a second with 2.
+        """
         output_shape = TwoDCnnResidualDecoder.computeOutputShape(
             seed_shape=(16, 16), hidden_channels=(32, 16), kernel_sizes=3, strides=2, paddings=1
         )
@@ -125,8 +127,10 @@ class TestFlexibleBlockDepths:
 
 
 def test_auto_solves_output_padding_for_a_small_square_gap() -> None:
-    """A gap of 1 on both axes, within the last transition's stride, is closeable
-    without any blur."""
+    """A gap of 1 on both axes is closeable without any blur.
+
+    The gap is within the last transition's stride.
+    """
     natural = TwoDCnnResidualDecoder.computeOutputShape(
         seed_shape=(4, 4), hidden_channels=(16, 32), upsample_modes="conv_transpose"
     )
@@ -160,9 +164,11 @@ def test_auto_solves_output_padding_independently_per_axis_for_a_non_square_gap(
 
 
 def test_explicit_output_paddings_bypasses_auto_solve() -> None:
-    """Uses this class's own default `kernel_sizes=3` (odd, block_depths-compatible),
-    unlike `TwoDCnnDecoder`'s own `kernel_sizes=4` default, which this residual class's
-    internal, length-preserving layers cannot accept at `block_depths=2` (the default)."""
+    """Uses this class's own default `kernel_sizes=3` (odd, block_depths-compatible).
+
+    Unlike `TwoDCnnDecoder`'s own `kernel_sizes=4` default, which this residual class's
+    internal, length-preserving layers cannot accept at `block_depths=2` (the default).
+    """
     decoder = TwoDCnnResidualDecoder(
         latent_dim=16,
         output_shape=_DEFAULT_NATURAL_SHAPE,
@@ -228,8 +234,10 @@ def test_modality_name_defaults_to_image_but_is_configurable() -> None:
 
 
 class TestNonSquareShapes:
-    """Rectangular (non-square) images are not a special case: every axis is solved
-    and verified independently throughout."""
+    """Rectangular (non-square) images are not a special case.
+
+    Every axis is solved and verified independently throughout.
+    """
 
     def test_non_square_seed_gives_a_non_square_natural_output(self) -> None:
         natural = TwoDCnnResidualDecoder.computeOutputShape(
@@ -268,8 +276,10 @@ def test_the_very_last_transition_produces_unconstrained_values() -> None:
 
 
 def test_internal_layers_of_the_last_transition_still_get_normalization() -> None:
-    """Only the very last layer of the very last transition skips norm/activation; a
-    deeper last-stage block must still benefit from it on its earlier internal layers."""
+    """Only the very last layer of the very last transition skips norm/activation.
+
+    A deeper last-stage block must still benefit from it on its earlier internal layers.
+    """
     output_shape = TwoDCnnResidualDecoder.computeOutputShape(
         seed_shape=(16, 16), hidden_channels=(32, 16), kernel_sizes=3, strides=2, paddings=1
     )
@@ -318,8 +328,10 @@ def test_mismatched_per_transition_list_length_raises() -> None:
 
 
 def test_per_transition_differing_numeric_values_require_a_list_not_a_tuple() -> None:
-    """Same 1D->2D API convention as the encoder: a bare tuple is always a *shared*
-    shape (never per-transition)."""
+    """Same 1D->2D API convention as the encoder.
+
+    A bare tuple is always a *shared* shape (never per-transition).
+    """
     with pytest.raises(ValueError, match="2-dimensional"):
         TwoDCnnResidualDecoder(
             latent_dim=8,
@@ -330,8 +342,10 @@ def test_per_transition_differing_numeric_values_require_a_list_not_a_tuple() ->
 
 
 class TestEncoderDecoderRoundTrip:
-    """End-to-end sanity check, mirroring how `GlobalVae` wires an encoder and a
-    decoder of the same modality together (`image -> z -> image`)."""
+    """End-to-end sanity check, mirroring how `GlobalVae` wires an encoder and a decoder.
+
+    Both are of the same modality (`image -> z -> image`).
+    """
 
     def test_square_rgb_round_trip(self) -> None:
         from global_vae.encoders.TwoDCnnResidualEncoder import TwoDCnnResidualEncoder

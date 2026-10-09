@@ -473,8 +473,9 @@ class TestModalityDropout:
 
 
 class TestTargetOnlyDecoderKeys:
-    """A decoder's reconstruction target need not also be an encoder input (ADR 0019):
-    a translation-style `image_in -> image_out` model works with no special-casing.
+    """A decoder's reconstruction target need not also be an encoder input (ADR 0019).
+
+    A translation-style `image_in -> image_out` model works with no special-casing.
     """
 
     def test_select_encoder_inputs_drops_a_key_with_no_matching_encoder(self) -> None:

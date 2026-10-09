@@ -1,5 +1,6 @@
-"""Export evaluation figures to disk for visual inspection (spec: "éventuellement export
-des reconstructions pour inspection visuelle").
+"""Export evaluation figures to disk for visual inspection.
+
+See spec: "éventuellement export des reconstructions pour inspection visuelle".
 
 Pure wiring, no new plotting logic: reuses `visualization/`'s collection and plotting
 functions (`docs/adr/0009-visualization.md`) and simply saves the resulting figures as
@@ -35,8 +36,10 @@ def exportEvaluationFigures(
     latent_projection_method: str = "auto",
     inverse_transforms: dict[str, InverseTransform] | None = None,
 ) -> list[Path]:
-    """Save a reconstruction grid, a latent-space scatter plot, and a per-dimension KL
-    bar chart for every modality/latent space `model` has, under `output_dir`.
+    """Save the reconstruction, latent-space and KL figures of `model` under `output_dir`.
+
+    Writes one reconstruction grid per modality, then, for every latent space, a
+    latent-space scatter plot and a per-dimension KL bar chart.
 
     Args:
         model: The model to visualize.

@@ -1,5 +1,6 @@
-"""Global random-seed management (spec §10: "global seed management, deterministic-mode
-flag documented").
+"""Global random-seed management.
+
+See spec §10: "global seed management, deterministic-mode flag documented".
 
 This must run before model construction (an encoder/decoder's weights
 are initialized randomly the moment `nn.Linear(...)` etc. is called),

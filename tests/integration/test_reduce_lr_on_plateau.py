@@ -1,5 +1,6 @@
-"""Integration tests for `training.callbacks.reduce_lr_on_plateau.ReduceLrOnPlateau`
-(spec §10, ADR 0022).
+"""Integration tests for `training.callbacks.reduce_lr_on_plateau.ReduceLrOnPlateau`.
+
+See spec §10 and ADR 0022.
 
 `PlateauTracker`'s own value-correctness (mode/threshold/threshold_mode/cooldown) is
 covered by `test_plateau_tracker.py`; this file covers what `ReduceLrOnPlateau` itself

@@ -541,10 +541,12 @@ class TwoDCnnEncoder(AbstractEncoder):
 
     @property
     def latent_dim(self) -> int:
+        """Dimensionality of the `(mu, logvar)` output."""
         return self._latent_dim
 
     @property
     def modality_name(self) -> str:
+        """Name of the modality this encoder handles."""
         return self._modality_name
 
     @property

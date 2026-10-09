@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Training entry point (spec §10 "Config management", §6.1 milestone 1: a
-single-modality signal VAE trained end to end).
+r"""Training entry point (spec §10 "Config management", §6.1 milestone 1).
+
+Trains a single-modality signal VAE end to end.
 
 Hydra-driven: composes `configs/model/*.yaml` + `configs/data/*.yaml` +
 `configs/training/*.yaml` (via `configs/experiment/*.yaml`'s own `defaults` list) into
@@ -17,10 +18,10 @@ Usage:
 Runs `configs/experiment/signal_vae.yaml` by default. Override anything from the
 command line with Hydra's dotlist syntax, e.g.:
 
-    python scripts/train.py \\
-        data.train_path=/path/to/data \\
-        data.loader_factory=my_project.data:buildSignalDataloaders \\
-        training.num_epochs=50 \\
+    python scripts/train.py \
+        data.train_path=/path/to/data \
+        data.loader_factory=my_project.data:buildSignalDataloaders \
+        training.num_epochs=50 \
         training.optimizer.kwargs.lr=0.0003
 
 Or run an entirely different experiment file:

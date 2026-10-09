@@ -57,8 +57,9 @@ from global_vae.utils.imports import importCallable
 
 @dataclass
 class TransformConfig:
-    """One preprocessing step in one modality's entry of `DataConfig.transforms`
-    (spec §6.2, §9).
+    """One preprocessing step in one modality's entry of `DataConfig.transforms`.
+
+    See spec §6.2 and §9.
 
     Attributes:
         name: `data.transforms` registry key, e.g. `"log"`,
@@ -74,9 +75,11 @@ class TransformConfig:
 
 @dataclass
 class DataConfig:
-    """Data configuration contract (spec §6: preprocessing/pairing/splitting stays
-    outside this framework; this only describes it, except for the reusable
-    generic-transform part covered by `transforms` below, spec §6.2).
+    """Data configuration contract.
+
+    Per spec §6, preprocessing/pairing/splitting stays outside this framework; this
+    only describes it, except for the reusable generic-transform part covered by
+    `transforms` below (spec §6.2).
 
     Attributes:
         loader_factory: `"module.path:function_name"` pointing at a
@@ -255,8 +258,9 @@ def buildDataloadersFromConfig(config: DataConfig) -> DataloaderBundle:
 
 
 def buildTransformPipeline(config: DataConfig) -> dict[str, ComposeTransform]:
-    """Resolve `config.transforms` into one composed, invertible pipeline per
-    modality (spec §6.2).
+    """Resolve `config.transforms` into one composed, invertible pipeline per modality.
+
+    See spec §6.2.
 
     Every configured modality's step list is instantiated via the
     `data.transforms` registry (`getTransformClass`, mirroring how every

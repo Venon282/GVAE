@@ -44,8 +44,10 @@ def test_handles_varying_input_shape() -> None:
 
 
 def test_handles_non_square_input() -> None:
-    """Height and width are independent axes throughout; a rectangular image is not
-    a special case."""
+    """Height and width are independent axes throughout.
+
+    A rectangular image is not a special case.
+    """
     encoder = TwoDCnnResidualEncoder(latent_dim=16)
     mu, logvar = encoder(torch.randn(2, 48, 96))
     assert mu.shape == (2, 16)
@@ -120,9 +122,11 @@ class TestFlexibleBlockDepths:
             )
 
     def test_accounts_for_block_depth_but_never_shrinks_the_minimum(self) -> None:
-        """With odd kernels (this class's default), every internal layer is exactly
-        length-preserving, so a deeper block never *raises* the architecture's minimum
-        input shape above a shallower one built from the same per-layer hyperparameters."""
+        """With odd kernels (the default), every internal layer is exactly length-preserving.
+
+        So a deeper block never *raises* the architecture's minimum input shape above a
+        shallower one built from the same per-layer hyperparameters.
+        """
         shallow_minimum = TwoDCnnResidualEncoder.computeMinimumInputShape(
             hidden_channels=(16, 32), kernel_sizes=3, strides=2, block_depths=1, poolings=None
         )
@@ -133,10 +137,13 @@ class TestFlexibleBlockDepths:
 
 
 class TestPerStageShapeFlexibility:
-    """`kernel_sizes`/`strides`/`paddings`/`dilations`/`pool_*`/`shortcut_kernel_sizes` each
-    accept a shared `int`, a shared non-square `tuple[int, int]`, or a per-stage `list`
-    (spec §12); see `utils.stage_config.broadcastPerStageShape` for why `list` and `tuple`
-    mean different things here."""
+    """The 2D shape hyperparameters accept an `int`, a shared `tuple[int, int]` or a `list`.
+
+    That covers `kernel_sizes`/`strides`/`paddings`/`dilations`/`pool_*`/`shortcut_kernel_sizes`
+    (spec §12): a shared `int`, a shared non-square `tuple[int, int]`, or a per-stage `list`;
+    see `utils.stage_config.broadcastPerStageShape` for why `list` and `tuple` mean different
+    things here.
+    """
 
     def test_shared_non_square_kernel_tuple_applies_to_every_stage(self) -> None:
         encoder = TwoDCnnResidualEncoder(
@@ -162,8 +169,10 @@ class TestPerStageShapeFlexibility:
         assert mu.shape == (2, 8)
 
     def test_per_stage_differing_numeric_values_require_a_list_not_a_tuple(self) -> None:
-        """A bare tuple is always a *shared* shape (never per-stage); genuinely differing
-        per-stage values must use a list, exactly like `TwoDCnnEncoder`."""
+        """A bare tuple is always a *shared* shape (never per-stage).
+
+        Genuinely differing per-stage values must use a list, exactly like `TwoDCnnEncoder`.
+        """
         encoder = TwoDCnnResidualEncoder(
             latent_dim=8, hidden_channels=(16, 32, 64), strides=[1, 1, 2], poolings=None
         )
@@ -269,10 +278,12 @@ def test_head_hidden_dims_inserts_an_mlp_before_the_heads() -> None:
 
 class TestMinimumInputShape:
     def test_matches_the_1d_reference_value_on_both_axes_for_a_square_config(self) -> None:
-        """Same hyperparameters on both axes must reduce to exactly the same number
-        `OneDCnnResidualEncoder.computeMinimumInputLength` gives for the 1D case, and
-        the same value `TwoDCnnEncoder.computeMinimumInputShape` gives for the plain
-        (non-residual) 2D case, since odd-kernel internal layers add no requirement."""
+        """Same hyperparameters on both axes must reduce to exactly the 1D result.
+
+        That is the number `OneDCnnResidualEncoder.computeMinimumInputLength` gives for the
+        1D case, and the same value `TwoDCnnEncoder.computeMinimumInputShape` gives for the
+        plain (non-residual) 2D case, since odd-kernel internal layers add no requirement.
+        """
         min_shape = TwoDCnnResidualEncoder.computeMinimumInputShape(hidden_channels=(32, 64, 128))
         assert min_shape == (8, 8)
 

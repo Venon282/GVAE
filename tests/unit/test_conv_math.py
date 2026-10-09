@@ -119,8 +119,10 @@ class TestConvTranspose1dOutputLength:
                 )
 
     def test_default_doubling_configuration(self) -> None:
-        """kernel 4 / stride 2 / padding 1 doubles the length, the documented default of
-        `OneDCnnDecoder` under conv_transpose mode."""
+        """Kernel 4 / stride 2 / padding 1 doubles the length.
+
+        This is the documented default of `OneDCnnDecoder` under conv_transpose mode.
+        """
         assert computeConvTranspose1dOutputLength(8, 4, 2, 1, 0, 1) == 16
 
 
@@ -166,8 +168,11 @@ class TestSolveConvTranspose1dOutputPadding:
         )
 
     def test_can_return_a_value_pytorch_would_reject(self) -> None:
-        """Documented: the solver only closes the arithmetic gap; validity against
-        `0 <= output_padding < max(stride, dilation)` is the caller's check."""
+        """Documented: the solver only closes the arithmetic gap.
+
+        Validity against `0 <= output_padding < max(stride, dilation)` is the caller's
+        check.
+        """
         gap_of_five = computeConvTranspose1dOutputLength(8, 4, 2, 1, 0, 1) + 5
         assert solveConvTranspose1dOutputPadding(8, gap_of_five, 4, 2, 1, 1) == 5
 
@@ -229,9 +234,11 @@ class TestConv1dLengthOffset:
             )
 
     def test_equal_offsets_give_equal_lengths_for_every_input_length(self) -> None:
-        """The guarantee a residual shortcut needs against its main path: kernel 3 /
-        padding 1 and kernel 1 / padding 0 are both offset 0, so they agree at every
-        length; kernel 3 / padding 0 (offset -2) never does."""
+        """The guarantee a residual shortcut needs against its main path.
+
+        Kernel 3 / padding 1 and kernel 1 / padding 0 are both offset 0, so they agree at
+        every length; kernel 3 / padding 0 (offset -2) never does.
+        """
         assert computeConv1dLengthOffset(3, 1, 1) == computeConv1dLengthOffset(1, 0, 1) == 0
         for length in range(5, 40):
             assert computeConv1dOutputLength(length, 3, 1, 1, 1) == computeConv1dOutputLength(
@@ -554,9 +561,11 @@ class TestConv2dLengthOffset:
             assert actual == (shape[0] + offset[0], shape[1] + offset[1])
 
     def test_equal_offsets_give_equal_shapes_for_every_input_shape(self) -> None:
-        """What `Residual2DBlock` relies on: (3, 5)/(1, 2) and (1, 1)/(0, 0) are both
-        offset (0, 0), so a residual shortcut built from the latter always lines up with a
-        main path built from the former."""
+        """What `Residual2DBlock` relies on.
+
+        (3, 5)/(1, 2) and (1, 1)/(0, 0) are both offset (0, 0), so a residual shortcut built
+        from the latter always lines up with a main path built from the former.
+        """
         assert computeConv2dLengthOffset((3, 5), (1, 2), (1, 1)) == (0, 0)
         assert computeConv2dLengthOffset((1, 1), (0, 0), (1, 1)) == (0, 0)
         for shape in itertools.product(range(6, 20, 3), range(6, 20, 4)):

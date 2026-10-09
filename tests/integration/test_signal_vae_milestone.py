@@ -37,8 +37,10 @@ BATCH_SIZE = 6
 
 
 def _buildRealSignalVae(latent_dim: int = LATENT_DIM) -> GlobalVae:
-    """Build the exact spec §6.1 milestone 1 model: `signal -> z -> signal`,
-    real `OneDCnnEncoder`/`OneDCnnDecoder`, no fusion (single modality)."""
+    """Build the exact spec §6.1 milestone 1 model: `signal -> z -> signal`.
+
+    Real `OneDCnnEncoder`/`OneDCnnDecoder`, no fusion (single modality).
+    """
     return GlobalVae.createSingleLatent(
         modality_configs={
             "signal": {"encoder": "1d_cnn_encoder_v1", "decoder": "1d_cnn_decoder_v1"},
@@ -67,10 +69,11 @@ class TestModelAssembly:
         assert isinstance(model.decoders["signal"], OneDCnnDecoder)
 
     def test_no_fusion_module_is_built_for_a_single_encoder(self) -> None:
-        """Spec §4: a latent space fed by exactly one encoder needs no Fusion
-        strategy at all; GlobalVae.createSingleLatent's fusion_strategy stays
-        the default None here, matching the milestone description exactly
-        ("no fusion, no second modality")."""
+        """Spec §4: a latent space fed by exactly one encoder needs no Fusion strategy at all.
+
+        GlobalVae.createSingleLatent's fusion_strategy stays the default None here, matching
+        the milestone description exactly ("no fusion, no second modality").
+        """
         model = _buildRealSignalVae()
         assert "z_fused" not in model.fusions
         assert len(model.fusions) == 0

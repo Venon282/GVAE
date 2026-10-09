@@ -1,5 +1,7 @@
-"""Checkpoint save/restore for model + optimizer + config (spec §10: "config snapshotted
-with every run", and the practical need to re-run eval/visualization without retraining).
+"""Checkpoint save/restore for model + optimizer + config.
+
+See spec §10: "config snapshotted with every run", and the practical need to re-run
+eval/visualization without retraining.
 
 A checkpoint file (`torch.save`/`torch.load`, PyTorch's own standard
 serialization) bundles everything needed to either resume training

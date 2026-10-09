@@ -74,10 +74,11 @@ class TensorBoardLogger(AbstractExperimentLogger):
         self._scalars_since_flush = 0
 
     def logScalar(self, name: str, value: float, x: int, tag: str = "step") -> None:
-        """Write one scalar via `SummaryWriter.add_scalar`. `tag` is not used as a namespace
-        prefix (TensorBoard already groups series by `name`, e.g. `"train/loss/total"` reads
-        as the `"train"` group); it only affects the flush counter's bookkeeping here, not
-        which series a point lands on.
+        """Write one scalar via `SummaryWriter.add_scalar`.
+
+        `tag` is not used as a namespace prefix (TensorBoard already groups series by
+        `name`, e.g. `"train/loss/total"` reads as the `"train"` group); it only affects
+        the flush counter's bookkeeping here, not which series a point lands on.
 
         See `AbstractExperimentLogger.logScalar` for the full argument contract.
         """
@@ -95,10 +96,13 @@ class TensorBoardLogger(AbstractExperimentLogger):
         """Write a matplotlib figure via `SummaryWriter.add_figure`.
 
         Args:
+            name: Figure name/tag.
             figure: A `matplotlib.figure.Figure` (or a list of them,
                 `SummaryWriter.add_figure`'s own accepted input); typed
                 `Any` here since matplotlib is not a dependency of this
                 module (see `AbstractExperimentLogger.logFigure`).
+            x: As in `logScalar`.
+            tag: As in `logScalar`.
         """
         self._writer.add_figure(name, figure, global_step=x)
 

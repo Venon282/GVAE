@@ -1,5 +1,7 @@
-"""Training curve visualization (spec §10 "logging losses"; spec §6.1 milestone 1: "the
-ability to inspect training curves").
+"""Training curve visualization.
+
+See spec §10 "logging losses" and spec §6.1 milestone 1: "the ability to inspect
+training curves".
 
 `plotLossCurves` plots directly from `Trainer.history` (or any list shaped the same
 way); `plotStepCurves` plots from a step-level history such as

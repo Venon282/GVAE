@@ -80,8 +80,9 @@ there is an error, not a warning. CI runs the whole suite, slow tests included.
 GitHub Actions (`.github/workflows/ci.yaml`) runs the same checks on every push and pull
 request: `lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest` on Python 3.11
 and 3.13). The tests fail under a coverage floor of 95%, set one point below the measured
-value; raise it as coverage improves. The `lint` job is advisory until the ruff clean-up
-(roadmap P0-2) lands, the other jobs are blocking.
+value; raise it as coverage improves. The `lint` job is advisory until the 8 `N999`
+findings (CamelCase module names, decision D-9 of the roadmap) are resolved, the other jobs
+are blocking.
 
 ## Repository structure
 

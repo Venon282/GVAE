@@ -83,8 +83,11 @@ def test_every_link_in_the_index_and_the_summary_resolves_to_a_file() -> None:
 
 
 def test_index_rows_are_not_unverified_guesses() -> None:
-    """Two rows were once committed as "*Guess:*" placeholders because the ADR they
-    described had not been read. A row must describe the ADR as written."""
+    """A row must describe the ADR as written.
+
+    Two rows were once committed as "*Guess:*" placeholders because the ADR they described had
+    not been read.
+    """
     index_text = (_ADR_DIR / "index.md").read_text(encoding="utf-8")
     assert "*Guess" not in index_text
 
@@ -95,9 +98,11 @@ def test_index_rows_are_not_unverified_guesses() -> None:
 def test_mkdocs_nav_uses_the_directory_form_so_literate_nav_expands_the_summary(
     section: str, directory: str
 ) -> None:
-    """`- Section: adr/` (directory) makes literate-nav expand `adr/SUMMARY.md` into one
-    sidebar entry per line; `- Section: adr/SUMMARY.md` or `adr/index.md` (a file) does
-    not, and silently leaves the individual pages out of the sidebar."""
+    """`- Section: adr/` (directory) makes literate-nav expand `adr/SUMMARY.md` into entries.
+
+    One sidebar entry per line; `- Section: adr/SUMMARY.md` or `adr/index.md` (a file) does not,
+    and silently leaves the individual pages out of the sidebar.
+    """
     mkdocs_text = (_REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8")
     pattern = rf"^\s*-\s*{re.escape(section)}:\s*{re.escape(directory)}\s*(#.*)?$"
     assert re.search(pattern, mkdocs_text, flags=re.MULTILINE), (

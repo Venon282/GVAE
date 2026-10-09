@@ -108,8 +108,11 @@ class TestMetrics:
         assert computeR2(target, target) == pytest.approx(1.0, abs=1e-5)
 
     def test_r2_is_zero_when_predicting_the_global_mean(self) -> None:
-        """computeR2 pools every element into one scalar baseline (target.mean()), matching
-        computeMse's own flat pooling, not a per-column mean (sklearn's r2_score convention)."""
+        """computeR2 pools every element into one scalar baseline (target.mean()).
+
+        This matches computeMse's own flat pooling, not a per-column mean (sklearn's
+        r2_score convention).
+        """
         target = torch.randn(50, 3)
         mean_prediction = torch.full_like(target, target.mean().item())
         assert computeR2(mean_prediction, target) == pytest.approx(0.0, abs=1e-5)

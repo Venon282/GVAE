@@ -1,5 +1,6 @@
-"""Integration tests for `training.checkpoint` (spec §10: config snapshotted with every
-run; re-run eval/visualization without retraining).
+"""Integration tests for `training.checkpoint`.
+
+See spec §10: config snapshotted with every run; re-run eval/visualization without retraining.
 
 Covers the plain, `Trainer`-independent checkpoint *format* only
 (`saveCheckpoint`/`loadCheckpoint` roundtrips, RNG state, error paths).

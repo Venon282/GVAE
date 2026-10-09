@@ -17,9 +17,10 @@ BATCH_SIZE = 4
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
-    """Build tiny, deterministic in-memory dataloaders, ignoring `config.train_path`
-    (this fixture never touches disk: the whole point is exercising the
-    `loader_factory` wiring, not any real data pipeline).
+    """Build tiny, deterministic in-memory dataloaders, ignoring `config.train_path`.
+
+    This fixture never touches disk: the whole point is exercising the `loader_factory` wiring,
+    not any real data pipeline.
     """
     torch.manual_seed(config.seed)
     length = (config.sequence_length or {}).get("signal", 256)

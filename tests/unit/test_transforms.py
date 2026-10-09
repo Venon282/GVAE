@@ -95,8 +95,10 @@ def test_duplicate_registration_raises_value_error() -> None:
 class TestLogTransform:
     @pytest.mark.parametrize("shape", list(_SHAPES.values()), ids=list(_SHAPES.keys()))
     def test_round_trip_recovers_the_input(self, shape: tuple[int, ...]) -> None:
-        """Same class, same constructor args, exercised at three different
-        dimensionalities: nothing here is written for one specific shape."""
+        """Same class, same constructor args, exercised at three different dimensionalities.
+
+        Nothing here is written for one specific shape.
+        """
         transform = LogTransform(eps=1e-6)
         x = torch.rand(*shape) * 5 + 0.1
         recovered = transform.inverse(transform.apply(x))
@@ -135,9 +137,11 @@ class TestStandardizeTransform:
         assert torch.allclose(x, recovered, atol=1e-4)
 
     def test_round_trip_with_broadcastable_per_channel_mean_std(self) -> None:
-        """mean/std as tensors broadcast per-channel: the same mechanism a
-        multi-channel 1D series or a 2D image would both use, with no separate
-        per-dimensionality code path."""
+        """mean/std as tensors broadcast per-channel.
+
+        This is the same mechanism a multi-channel 1D series or a 2D image would both use,
+        with no separate per-dimensionality code path.
+        """
         mean = torch.tensor([1.0, 2.0, 3.0]).view(3, 1, 1)
         std = torch.tensor([0.5, 1.5, 2.5]).view(3, 1, 1)
         transform = StandardizeTransform(mean=mean, std=std)
@@ -178,9 +182,10 @@ class TestResampleTransform:
         target_size: int | tuple[int, ...],
         leading_shape: tuple[int, ...],
     ) -> None:
-        """One ResampleTransform implementation, parametrized purely by
-        num_spatial_dims, covers 1D/2D/3D data: no per-dimensionality subclass
-        exists or is needed (spec §6.2)."""
+        """One ResampleTransform, parametrized purely by num_spatial_dims, covers 1D/2D/3D data.
+
+        No per-dimensionality subclass exists or is needed (spec §6.2).
+        """
         transform = ResampleTransform(
             target_size=target_size, source_size=source_size, num_spatial_dims=num_spatial_dims
         )
@@ -206,8 +211,10 @@ class TestResampleTransform:
         assert restored.shape == x.shape
 
     def test_downsample_then_upsample_approximately_recovers_a_smooth_signal(self) -> None:
-        """Not exact (resampling is lossy, see the class docstring): a smooth, slowly
-        varying signal should still round-trip closely."""
+        """Not exact (resampling is lossy, see the class docstring).
+
+        A smooth, slowly varying signal should still round-trip closely.
+        """
         transform = ResampleTransform(target_size=64, source_size=256, num_spatial_dims=1)
         t = torch.linspace(0, 4 * 3.14159, 256)
         signal = torch.sin(t).unsqueeze(0)
@@ -241,11 +248,11 @@ class TestResampleTransform:
 
 
 class TestResampleTransformCoordinateAware:
-    """`interpolation="scipy"`: resampling onto explicit x-positions, including
-    positions that differ per sample (spec §6.2). This is what makes resampling
-    two curves recorded on genuinely different grids land on the *same* physical
-    positions, which point-count-only resampling (the `"torch"` backend) cannot
-    express at all.
+    """`interpolation="scipy"`: resampling onto explicit x-positions (spec §6.2).
+
+    The positions may differ per sample. This is what makes resampling two curves recorded on
+    genuinely different grids land on the *same* physical positions, which point-count-only
+    resampling (the `"torch"` backend) cannot express at all.
     """
 
     def test_shared_source_coords_given_at_construction(self) -> None:
@@ -262,9 +269,11 @@ class TestResampleTransformCoordinateAware:
         assert torch.allclose(result, torch.sin(target_q), atol=0.01)
 
     def test_per_sample_source_coords_align_two_different_grids(self) -> None:
-        """The exact motivating case: curve A and curve B were measured at different
-        positions; resampled onto the same common_q, index n now means the same
-        position for both, which naive index-based resampling cannot guarantee."""
+        """The exact motivating case: curve A and curve B were measured at different positions.
+
+        Resampled onto the same common_q, index n now means the same position for both,
+        which naive index-based resampling cannot guarantee.
+        """
 
         def f(q: torch.Tensor) -> torch.Tensor:
             return torch.sin(q) + 2.0
@@ -435,10 +444,11 @@ class TestComposeTransform:
 
 
 class TestBuildTransformPipelineFromConfig:
-    """`global_vae.config.data.buildTransformPipeline`: the config-driven wiring
-    that makes `DataConfig.transforms` actually operable (spec §6.2), keyed per
-    modality (docs/adr/0015-per-modality-data-transforms.md) so two modalities/
-    datasets never have to share one pipeline or one set of statistics.
+    """`global_vae.config.data.buildTransformPipeline`: config-driven transform wiring.
+
+    It makes `DataConfig.transforms` actually operable (spec §6.2), keyed per modality
+    (docs/adr/0015-per-modality-data-transforms.md) so two modalities/datasets never have to
+    share one pipeline or one set of statistics.
     """
 
     def test_resolves_each_step_by_registry_name_in_order(self) -> None:
@@ -461,9 +471,11 @@ class TestBuildTransformPipelineFromConfig:
         assert torch.allclose(x, recovered, atol=1e-4)
 
     def test_two_modalities_get_independent_pipelines(self) -> None:
-        """The whole point of the per-modality shape: two datasets in the same
-        1D-signal family (spec §6) can have entirely different steps and
-        statistics without colliding."""
+        """The whole point of the per-modality shape.
+
+        Two datasets in the same 1D-signal family (spec §6) can have entirely different
+        steps and statistics without colliding.
+        """
         config = DataConfig(
             loader_factory="unused:unused",
             train_path="unused",
@@ -499,9 +511,11 @@ class TestBuildTransformPipelineFromConfig:
         assert torch.equal(pipeline.apply(x), x)
 
     def test_modality_absent_from_transforms_is_absent_from_the_result(self) -> None:
-        """`DataConfig` has no independent notion of which modalities exist (spec §9:
-        that list lives in `ModelConfig.modalities`), so an unconfigured modality is
-        simply not a key here, not an implicit identity entry."""
+        """`DataConfig` has no independent notion of which modalities exist (spec §9).
+
+        That list lives in `ModelConfig.modalities`, so an unconfigured modality is simply
+        not a key here, not an implicit identity entry.
+        """
         config = DataConfig(loader_factory="unused:unused", train_path="unused")
         assert buildTransformPipeline(config) == {}
 
@@ -515,8 +529,10 @@ class TestBuildTransformPipelineFromConfig:
             buildTransformPipeline(config)
 
     def test_pipeline_inverse_is_usable_as_a_plain_callable(self) -> None:
-        """The exact shape `visualization.reconstruction_plot`'s own
-        `inverse_transform: Callable[[Tensor], Tensor]` parameter expects."""
+        """The exact shape `visualization.reconstruction_plot`'s own parameter expects.
+
+        That parameter is `inverse_transform: Callable[[Tensor], Tensor]`.
+        """
         config = DataConfig(
             loader_factory="unused:unused",
             train_path="unused",
@@ -530,9 +546,10 @@ class TestBuildTransformPipelineFromConfig:
         assert torch.allclose(inverse_transform(pipeline.apply(x)), x, atol=1e-5)
 
     def test_real_signal_yaml_config_wires_a_working_pipeline(self) -> None:
-        """End-to-end: the shipped configs/data/signal.yaml, composed through
-        Hydra, actually produces a usable, invertible per-modality pipeline
-        (spec §6.2)."""
+        """End-to-end: the shipped configs/data/signal.yaml, composed through Hydra, actually works.
+
+        It produces a usable, invertible per-modality pipeline (spec §6.2).
+        """
         import global_vae.config  # noqa: F401  (registers structured configs)
         from global_vae.config.experiment import loadExperimentConfig
 

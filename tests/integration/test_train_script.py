@@ -106,8 +106,10 @@ class TestTrainScriptEndToEnd:
         assert metadata.global_step > 0
 
     def test_missing_required_data_fields_fails_with_a_clear_error(self, tmp_path: Path) -> None:
-        """Omitting `data.loader_factory`/`data.train_path` must fail loudly (Hydra's
-        MISSING enforcement), not silently train on nothing."""
+        """Omitting `data.loader_factory`/`data.train_path` must fail loudly.
+
+        This is Hydra's MISSING enforcement: the script must not silently train on nothing.
+        """
         output_dir = tmp_path / "run"
         env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
         completed = subprocess.run(
@@ -127,8 +129,10 @@ class TestTrainScriptEndToEnd:
         assert "MissingMandatoryValue" in completed.stderr or "missing" in completed.stderr.lower()
 
     def test_overriding_hyperparameters_takes_effect(self, tmp_path: Path) -> None:
-        """A smoke check that command-line overrides actually reach the trained model,
-        not just that the process exits 0."""
+        """A smoke check that command-line overrides actually reach the trained model.
+
+        Not just that the process exits 0.
+        """
         completed, output_dir = _runTrainScript(
             tmp_path, extra_overrides=["training.optimizer.kwargs.lr=0.0", "training.num_epochs=1"]
         )

@@ -56,8 +56,10 @@ def test_registered_under_1d_cnn_resnet_decoder_v1() -> None:
 
 
 def test_flexible_block_depths_three_then_two_layers() -> None:
-    """Spec's own example, decoder side: a first transition with 3 internal layers, a
-    second with 2."""
+    """Spec's own example, decoder side.
+
+    A first transition with 3 internal layers, a second with 2.
+    """
     output_length = OneDCnnResidualDecoder.computeOutputLength(
         seed_length=16, hidden_channels=(32, 16), kernel_sizes=3, strides=2, paddings=1
     )
@@ -212,8 +214,10 @@ def test_the_very_last_transition_produces_unconstrained_values() -> None:
 
 
 def test_internal_layers_of_the_last_transition_still_get_normalization() -> None:
-    """Only the very last layer of the very last transition skips norm/activation; a
-    deeper last-stage block must still benefit from it on its earlier internal layers."""
+    """Only the very last layer of the very last transition skips norm/activation.
+
+    A deeper last-stage block must still benefit from it on its earlier internal layers.
+    """
     decoder = OneDCnnResidualDecoder(
         latent_dim=8,
         output_length=64,

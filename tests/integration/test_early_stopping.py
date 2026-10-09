@@ -1,5 +1,6 @@
-"""Integration tests for `training.callbacks.early_stopping.EarlyStopping` (spec §10,
-ADR 0022).
+"""Integration tests for `training.callbacks.early_stopping.EarlyStopping`.
+
+See spec §10 and ADR 0022.
 
 `PlateauTracker`'s own value-correctness is covered by `test_plateau_tracker.py`; this
 file covers what `EarlyStopping` itself is responsible for: reading `self.monitor`

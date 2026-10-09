@@ -1,7 +1,8 @@
-"""Shared helper for dynamically importing a callable from a `"module.path:function_name"`
-string (spec §10, §11: model/data construction stays the caller's own responsibility;
+"""Shared helper that imports a callable from a `"module.path:function_name"` string.
+
+Per spec §10 and §11, model/data construction stays the caller's own responsibility;
 this is the one mechanism every entry point in this framework uses to reach into the
-caller's own code without importing it directly).
+caller's own code without importing it directly.
 
 Extracted from `scripts/evaluate.py`'s original private `_importCallable` so
 `scripts/train.py` and `config/data.py` (spec's C9 Hydra config layer) can share the

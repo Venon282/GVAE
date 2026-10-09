@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import torch
 from torch import nn
 
+
 class AbstractDecoder(nn.Module, ABC):
     """Base class for every modality-specific (or shared) decoder.
 

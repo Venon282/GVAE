@@ -300,9 +300,7 @@ class TwoDCnnResidualEncoder(AbstractEncoder):
             )
         shortcut_kernel_sizes_: tuple[tuple[int, int], ...] = cast(
             "tuple[tuple[int, int], ...]",
-            broadcastPerStageShape(
-                shortcut_kernel_sizes, num_stages, 2, "shortcut_kernel_sizes"
-            ),
+            broadcastPerStageShape(shortcut_kernel_sizes, num_stages, 2, "shortcut_kernel_sizes"),
         )
         poolings_: tuple[str | None, ...] = broadcastPerStage(poolings, num_stages, "poolings")
         pool_kernel_sizes_: tuple[tuple[int, int] | None, ...] = cast(
@@ -576,10 +574,12 @@ class TwoDCnnResidualEncoder(AbstractEncoder):
 
     @property
     def latent_dim(self) -> int:
+        """Dimensionality of the `(mu, logvar)` output."""
         return self._latent_dim
 
     @property
     def modality_name(self) -> str:
+        """Name of the modality this encoder handles."""
         return self._modality_name
 
     @property

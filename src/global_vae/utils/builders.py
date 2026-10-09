@@ -1,3 +1,5 @@
+"""Builders for the pooling and upsampling layers shared by the CNN encoders and decoders."""
+
 from typing import Any
 
 from torch import nn
@@ -81,6 +83,12 @@ def build1DUpSampleStage(
             `Conv1d`), which avoids the checkerboard artifacts
             transposed convolutions are prone to, at the cost of a
             fixed (non-learned) upsampling step.
+        groups: Number of blocked connections between input and output
+            channels, forwarded to the convolution (`1` is an ordinary,
+            fully connected convolution).
+        interp_mode: `nn.Upsample` interpolation mode used by the
+            `"interpolate_conv"` upsampling step (default `"nearest"`).
+            Ignored if `upsample_mode` is `"conv_transpose"`.
 
     Returns:
         The upsampling module.

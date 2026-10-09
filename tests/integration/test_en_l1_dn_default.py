@@ -166,9 +166,11 @@ class _DummyProductOfExperts(AbstractFusion):
 
 @registerRegularizer("dummy_zero_regularizer_en_l1_dn")
 class _DummyZeroRegularizer(AbstractLatentRegularizer):
-    """Always-zero penalty, for this test only: proves a non-default
-    `regularizer_strategy` is actually wired in and used, rather than
-    silently falling back to `kl_standard_normal`."""
+    """Always-zero penalty, for this test only.
+
+    It proves a non-default `regularizer_strategy` is actually wired in and used, rather than
+    silently falling back to `kl_standard_normal`.
+    """
 
     def forward(self, mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
         return mu.new_zeros(mu.shape[0])
@@ -232,7 +234,9 @@ class TestEnL1DnDefault:
         # calling again must reproduce the exact same reconstructions (no sampling involved)
         other_output = model(inputs, use_mean=True)
         for name in output["reconstructions"]:
-            assert torch.equal(output["reconstructions"][name], other_output["reconstructions"][name])
+            assert torch.equal(
+                output["reconstructions"][name], other_output["reconstructions"][name]
+            )
 
     def test_forward_with_missing_modality(self, model: GlobalVae) -> None:
         """The model must still run and decode every modality with a partial input (spec §5)."""

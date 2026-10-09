@@ -443,12 +443,22 @@ class OneDCnnResidualEncoder(AbstractEncoder):
 
     @property
     def latent_dim(self) -> int:
+        """Dimensionality of the `(mu, logvar)` output."""
         return self._latent_dim
 
     @property
     def modality_name(self) -> str:
+        """Name of the modality this encoder handles."""
         return self._modality_name
 
     @property
     def minimal_input_length(self) -> int:
+        """Shortest input length this configuration accepts.
+
+        Below it, the conv stack would collapse a feature map to zero
+        length.
+
+        Returns:
+            The minimal input length, fixed at construction.
+        """
         return self._min_input_length

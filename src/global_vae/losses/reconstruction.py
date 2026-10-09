@@ -1,5 +1,4 @@
-"""Per-modality reconstruction loss aggregation (spec §2.2, §11, §12).
-"""
+"""Per-modality reconstruction loss aggregation (spec §2.2, §11, §12)."""
 
 from collections.abc import Callable
 

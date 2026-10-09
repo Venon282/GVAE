@@ -1,6 +1,8 @@
-"""visualization subpackage of global_vae (spec §10: "logging losses, latent-space
-visualizations, and reconstructions per run"; spec §6.1 milestone 1: "the ability to
-inspect training curves and visualize the latent space").
+"""Visualization subpackage of global_vae.
+
+See spec §10: "logging losses, latent-space visualizations, and reconstructions per
+run"; and spec §6.1 milestone 1: "the ability to inspect training curves and visualize
+the latent space".
 
 Every function here returns a plain `matplotlib.figure.Figure` and never displays,
 saves, or logs it: what to do with the figure (`fig.savefig(...)`, display inline in a

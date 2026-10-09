@@ -48,8 +48,10 @@ def script() -> ModuleType:
 
 @pytest.fixture
 def checkpoint_with_history(tmp_path: Path) -> Path:
-    """A checkpoint saved after a couple of real `Trainer.fit` epochs, so
-    `metadata.history` is non-empty and the loss-curve plot has something to draw."""
+    """A checkpoint saved after a couple of real `Trainer.fit` epochs.
+
+    So `metadata.history` is non-empty and the loss-curve plot has something to draw.
+    """
     model = buildModelForScript()
     trainer = Trainer(model, device="cpu")
     trainer.fit(buildDataloaderForScript(), num_epochs=2)
@@ -342,8 +344,9 @@ class TestMain:
 
 
 class TestLossCurveAxes:
-    """`plotLossCurves`'s two-axis capability, exercised by default (spec §2.3): a
-    regularization key is split onto its own, independently-scaled secondary axis.
+    """`plotLossCurves`'s two-axis capability, exercised by default (spec §2.3).
+
+    A regularization key is split onto its own, independently-scaled secondary axis.
     """
 
     def test_default_splits_regularization_onto_a_secondary_axis(

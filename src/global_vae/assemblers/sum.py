@@ -15,4 +15,13 @@ class SumAssembler(AbstractAssembler):
     """
 
     def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
+        """Sum the latent vectors elementwise.
+
+        Args:
+            latents: Already-sampled latent tensors, each of shape `(batch, dim)`,
+                all sharing the same `dim`.
+
+        Returns:
+            The elementwise sum, shape `(batch, dim)`.
+        """
         return torch.stack(latents, dim=0).sum(dim=0)

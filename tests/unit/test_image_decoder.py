@@ -49,8 +49,10 @@ def test_output_shape_smaller_than_natural_also_raises() -> None:
 
 
 def test_auto_solves_output_padding_for_a_small_square_gap() -> None:
-    """A gap of 1 on both axes, within the last transition's stride, is closeable
-    without any blur."""
+    """A gap of 1 on both axes is closeable without any blur.
+
+    The gap is within the last transition's stride.
+    """
     natural = TwoDCnnDecoder.computeOutputShape(
         seed_shape=(4, 4), hidden_channels=(16, 32), upsample_modes="conv_transpose"
     )
@@ -106,8 +108,10 @@ def test_explicit_wrong_output_paddings_still_gets_verified() -> None:
 
 
 def test_interpolate_conv_mode_with_matching_parameters() -> None:
-    """kernel_size=3/padding=1 is interpolate_conv's exact-doubling pairing, not the
-    default 4/1, on both axes."""
+    """kernel_size=3/padding=1 is interpolate_conv's exact-doubling pairing, on both axes.
+
+    It is not the default 4/1.
+    """
     decoder = TwoDCnnDecoder(
         latent_dim=8,
         output_shape=(64, 64),
@@ -120,8 +124,7 @@ def test_interpolate_conv_mode_with_matching_parameters() -> None:
 
 
 def test_interpolate_conv_mode_has_no_auto_solve_and_raises_on_mismatch() -> None:
-    """The default kernel_sizes=4/paddings=1 pairing is tuned for conv_transpose, not
-    this mode."""
+    """The default kernel_sizes=4/paddings=1 pairing is tuned for conv_transpose, not this mode."""
     with pytest.raises(ValueError, match="output_shape"):
         TwoDCnnDecoder(latent_dim=8, output_shape=(64, 64), upsample_modes="interpolate_conv")
 
@@ -158,8 +161,10 @@ def test_modality_name_defaults_to_image_but_is_configurable() -> None:
 
 
 class TestNonSquareShapes:
-    """Rectangular (non-square) images are not a special case: every axis is solved
-    and verified independently throughout."""
+    """Rectangular (non-square) images are not a special case.
+
+    Every axis is solved and verified independently throughout.
+    """
 
     def test_non_square_seed_gives_a_non_square_natural_output(self) -> None:
         natural = TwoDCnnDecoder.computeOutputShape(
@@ -241,8 +246,10 @@ def test_mismatched_per_transition_list_length_raises() -> None:
 
 
 def test_per_transition_differing_numeric_values_require_a_list_not_a_tuple() -> None:
-    """Same 1D->2D API convention as the encoder: a bare tuple is always a *shared*
-    shape (never per-transition)."""
+    """Same 1D->2D API convention as the encoder.
+
+    A bare tuple is always a *shared* shape (never per-transition).
+    """
     with pytest.raises(ValueError, match="2-dimensional"):
         TwoDCnnDecoder(
             latent_dim=8,
@@ -254,9 +261,11 @@ def test_per_transition_differing_numeric_values_require_a_list_not_a_tuple() ->
 
 
 class TestEncoderDecoderRoundTrip:
-    """End-to-end sanity check, mirroring how `GlobalVae` wires an encoder and a
-    decoder of the same modality together (spec §6.1's `signal -> z -> signal`
-    case, here `image -> z -> image`)."""
+    """End-to-end sanity check, mirroring how `GlobalVae` wires an encoder and a decoder.
+
+    Both are of the same modality (spec §6.1's `signal -> z -> signal` case, here `image -> z ->
+    image`).
+    """
 
     def test_square_rgb_round_trip(self) -> None:
         from global_vae.encoders.TwoDCnnEncoder import TwoDCnnEncoder

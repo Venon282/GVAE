@@ -1,5 +1,7 @@
-"""In-memory metrics collection for visualization, without going through a file-based
-logger (`training/loggers/`) first.
+"""In-memory metrics collection for visualization.
+
+Metrics are collected without going through a file-based logger
+(`training/loggers/`) first.
 
 `HistoryCallback` is a `TrainerCallback` (`training/callbacks/base.py`), exactly like every
 `AbstractExperimentLogger`, but it stores metrics in plain Python lists instead of
@@ -32,6 +34,7 @@ class HistoryCallback(TrainerCallback):
     """
 
     def __init__(self) -> None:
+        """Start with empty step and epoch histories."""
         self.step_history: list[dict[str, float]] = []
         self.epoch_history: list[dict[str, float]] = []
 

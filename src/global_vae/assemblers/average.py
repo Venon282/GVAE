@@ -15,4 +15,13 @@ class AverageAssembler(AbstractAssembler):
     """
 
     def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
+        """Average the latent vectors elementwise.
+
+        Args:
+            latents: Already-sampled latent tensors, each of shape `(batch, dim)`,
+                all sharing the same `dim`.
+
+        Returns:
+            The elementwise mean, shape `(batch, dim)`.
+        """
         return torch.stack(latents, dim=0).mean(dim=0)

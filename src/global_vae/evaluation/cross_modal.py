@@ -1,6 +1,7 @@
-"""Cross-modal reconstruction reporting: what each decoder produces when only a
-subset of modalities is fed as input (spec §5: "the model can be trained and
-queried with any subset of available modalities").
+"""Cross-modal reconstruction reporting: what each decoder produces from a subset of inputs.
+
+See spec §5: "the model can be trained and queried with any subset of available
+modalities".
 
 `GlobalVae.forward` already supports this with no change needed anywhere in this
 framework: when a latent space is fed by more than one encoder but only a subset of
@@ -103,8 +104,7 @@ def exportCrossModalFigures(
     inverse_transforms: dict[str, InverseTransform] | None = None,
     max_samples: int | None = None,
 ) -> list[Path]:
-    """Save a cross-modal reconstruction matrix figure, if `model` has more than
-    one modality to compare.
+    """Save a cross-modal reconstruction matrix figure if `model` has more than one modality.
 
     No-op (returns an empty list, writes nothing) for a model with fewer than two
     encoders: there is only ever one possible input subset in that case, so there

@@ -88,17 +88,17 @@ are blocking.
 
 See spec §8 for the target layout; `src/global_vae/` mirrors it.
 
-## Naming convention (deviates from PEP8 — read this before contributing)
+## Naming convention (deviates from PEP8: read this before contributing)
 
-- Classes → `CamelCase` (e.g. `GlobalVae`, `SignalEncoder`).
-- Variables → `snake_case` (e.g. `latent_dim`, `batch_size`).
-- **Functions and methods → `camelCase`** (e.g. `registerEncoder`,
+- Classes -> `CamelCase` (e.g. `GlobalVae`, `SignalEncoder`).
+- Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
+- **Functions and methods -> `camelCase`** (e.g. `registerEncoder`,
   `computeKlLoss`), not PEP8's usual `snake_case`. This is intentional
   (spec §10). `ruff`'s `N802`/`N803`/`N806` naming rules are disabled
   in `pyproject.toml` specifically so linting doesn't silently "fix"
   this back to snake_case. Framework-mandated overrides
   (`forward`, `__init__`, and other PyTorch/Python dunder or
-  base-class-required names) are the only exception — leave those as
+  base-class-required names) are the only exception: leave those as
   the base class defines them.
 
 ## Adding a new modality (spec §10 checklist)
@@ -107,7 +107,7 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
    `@registerEncoder("your_encoder_name")`.
 2. Subclass `AbstractDecoder` in `decoders/`, decorate it with
    `@registerDecoder("your_decoder_name")`.
-3. Register both (the decorator does this — nothing else to wire up).
+3. Register both (the decorator does this: nothing else to wire up).
 4. Add a config entry referencing the two registry names (see
    `configs/model/default.yaml` for the shape, once config loading is
    wired up).
@@ -115,7 +115,7 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
    ideally an entry in the relevant integration test (in `tests/integration/`).
 
 No core framework file should need to change. If it does, that's a
-signal the registry pattern is being bypassed somewhere — flag it
+signal the registry pattern is being bypassed somewhere. Flag it
 rather than special-casing the new modality into `GlobalVae`.
 
 ## Adding a new fusion, assembler, or data transform strategy

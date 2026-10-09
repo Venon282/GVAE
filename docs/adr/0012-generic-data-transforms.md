@@ -1,4 +1,4 @@
-# 0012 — Generic, invertible data transforms (`data/transforms/`)
+# 0012: Generic, invertible data transforms (`data/transforms/`)
 
 **Status:** accepted
 **Date:** 2026-08-29
@@ -22,7 +22,7 @@ different nature:
    much explicitly: "SAXS-specific preprocessing (e.g. log-scale intensity)
    belongs in `transforms/`, not in the encoder", and other signal sources
    "should slot into the same... family later, with only preprocessing
-   differing, not the architecture" — exactly the kind of reuse this
+   differing, not the architecture": exactly the kind of reuse this
    codebase already gives encoders and decoders themselves.
 
 Leaving (2) unimplemented alongside (1) had two concrete costs, not just a
@@ -36,7 +36,7 @@ Separately, spec §10's testing checklist item **C11** explicitly calls for
 regularizer-registry test, a beta-schedule test, a datamodule test, a raw
 trainer smoke test, and a real-module (`OneDCnnEncoder`/`OneDCnnDecoder` via
 `GlobalVae.createSingleLatent`, no fusion) integration test for spec §6.1
-milestone 1 specifically — none of which could be satisfied for transforms
+milestone 1 specifically: none of which could be satisfied for transforms
 without transform code existing in the first place, and two of which
 (trainer smoke test, real-module milestone test) were simply missing
 regardless of this decision.
@@ -114,10 +114,10 @@ not only a documented intention.
 `LoggerEntryConfig`) replaces the old `list[str]`; `DataConfig.transforms:
 list[TransformConfig]`. `buildTransformPipeline(config) -> ComposeTransform`
 resolves every entry through the `data.transforms` registry, in order.
-Nothing in this framework calls it automatically — a caller's own
+Nothing in this framework calls it automatically: a caller's own
 `loader_factory` may call it while loading data, or ignore
-`config.transforms` and preprocess however it likes — preserving the exact
-framework/data-pipeline boundary this project already committed to. The
+`config.transforms` and preprocess however it likes (preserving the exact
+framework/data-pipeline boundary this project already committed to). The
 returned pipeline's `.inverse` is a plain `Callable[[Tensor], Tensor]`,
 directly usable as `visualization.reconstruction_plot`'s
 `inverse_transform` parameter or `evaluation.visual_export`'s
@@ -140,14 +140,14 @@ the user to compute real statistics from their own training split, matching
   `config.data.buildTransformPipeline` (including an end-to-end check
   against the real, shipped `configs/data/signal.yaml`).
 - `tests/integration/test_trainer_smoke.py`: a small, self-contained smoke
-  test independent of `test_trainer.py`'s larger suite — a handful of
+  test independent of `test_trainer.py`'s larger suite: a handful of
   optimizer steps on dummy data, checking that the loss decreases over that
   short run and that no parameter's gradient is `None` after a step, at
   more than one point in the run (not only the first).
 - `tests/integration/test_signal_vae_milestone.py`: the real-module gap
   `test_en_l1_dn_default.py` left open. Builds spec §6.1 milestone 1 exactly
-  — `OneDCnnEncoder` + `OneDCnnDecoder` via `GlobalVae.createSingleLatent`,
-  no fusion strategy, single modality — and covers model assembly (the real
+  (`OneDCnnEncoder` + `OneDCnnDecoder` via `GlobalVae.createSingleLatent`,
+  no fusion strategy, single modality) and covers model assembly (the real
   classes are used, no fusion module is built), forward-pass shapes,
   gradient flow into every parameter, and a short `Trainer.fit` run where
   the loss decreases, i.e. "trained end to end" as spec §6.1 itself puts it.

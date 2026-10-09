@@ -37,6 +37,14 @@ versioning follows [Semantic Versioning](https://semver.org/).
   construction and raises `NotImplementedError` for an encoder that feeds two latent spaces
   (roadmap P1-2 inverts that one). Coverage of `latent/` goes from 57% to 100% and of
   `assemblers/` from 79% to 100%; overall coverage of the full run is 97.5%.
+- `tests/unit/test_typography.py` (roadmap P0-3, spec section 10): a guard that fails when a
+  tracked or new (not git-ignored) `.py`, `.md`, `.yaml`, `.yml` or `.toml` file contains an em
+  dash or a unicode arrow, so the house typography rule cannot regress. A character counts as an
+  arrow when its Unicode name contains "ARROW", which covers every arrow block without a range
+  table; en dashes, hyphens and the minus sign are allowed. The failure message lists each hit
+  as `path:line:column` with the offending line. Files come from `git ls-files`, with a
+  directory walk (skipping virtual environments and build output) outside a git checkout. It
+  runs with the rest of `tests/` in the `tests` job of CI. Commit messages are not scanned.
 
 ### Changed
 
@@ -80,6 +88,17 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `--help` text, is unchanged) and `main` of the first example got a docstring. In `tests/`,
   `D101` to `D104` are ignored through `[tool.ruff.lint.per-file-ignores]` (decision D-10) and
   the 98 `D205` summaries were split. No new `noqa` was needed.
+- Typography sweep (roadmap P0-3, spec section 10): every em dash (93 of them, in 32 files) and
+  every unicode arrow (3 in the README, 1 in the spec) is gone from the tracked text. Each was
+  rewritten in context with a period, a colon, parentheses or `->`, changing punctuation only.
+  The files are the README, the specification, the how-to guides and getting-started page, the
+  ADRs, the ADR index and the changelogs, plus a few docstrings and comments in `src/`,
+  `examples/` and `tests/`. No ADR decision text changed, so the rule against editing an ADR in
+  place is not breached. ADR headings and index entries now read `NNNN: Title`, like
+  `docs/adr/SUMMARY.md` and ADRs 0002 and 0016 to 0022 already did, and the changelog sidebar
+  entries read `1.1.0 (2026-09-16)`. The Typography bullet of spec section 10, which named the
+  banned characters themselves, now cites their code points (U+2014 and U+2192), names the new
+  guard test and states the arrow rule it used to garble.
 
 ### Removed
 

@@ -2,7 +2,7 @@
 
 Adding a modality should never require touching core framework code
 (`models/global_vae.py`, `latent/`, `losses/`). If it does, that's a sign the
-registry pattern is being bypassed somewhere — flag it rather than
+registry pattern is being bypassed somewhere. Flag it rather than
 special-casing the new modality in.
 
 1. **Subclass [`AbstractEncoder`](../reference/global_vae/encoders/base.md)**
@@ -15,7 +15,7 @@ special-casing the new modality in.
 3. **Register both** with `@registerEncoder("your_name")` /
    `@registerDecoder("your_name")`, and add the import to
    `encoders/__init__.py` / `decoders/__init__.py` so the decorator actually
-   runs — a registered class only exists once its module has been imported.
+   runs. A registered class only exists once its module has been imported.
 4. **Add a config entry** referencing the two registry names. See
    `configs/model/signal_single_latent.yaml` for the shape.
 5. **Add a test**: a unit test for your encoder/decoder's forward-pass

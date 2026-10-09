@@ -5,8 +5,8 @@ floating-point error) for any tensor whose values stay above `-eps`
 everywhere, regardless of shape or dimensionality. Useful wherever a
 long-tailed, strictly-positive-ish quantity benefits from log-scaling before
 being fed to a model with a Gaussian likelihood assumption (e.g. `mse_loss`,
-this framework's default reconstruction loss, `losses/reconstruction.py`) —
-a common preprocessing step across many modalities (spectroscopy or sensor
+this framework's default reconstruction loss, `losses/reconstruction.py`).
+A common preprocessing step across many modalities (spectroscopy or sensor
 intensities, pixel counts, ...), not specific to any one of them. This class
 knows nothing about what the values represent; it is applied elementwise
 with no assumption on the tensor's shape.

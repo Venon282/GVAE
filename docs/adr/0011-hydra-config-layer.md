@@ -1,4 +1,4 @@
-# 0011 — Hydra-driven config layer (`global_vae/config/`, `scripts/train.py`)
+# 0011: Hydra-driven config layer (`global_vae/config/`, `scripts/train.py`)
 
 **Status:** accepted
 **Date:** 2026-08-16

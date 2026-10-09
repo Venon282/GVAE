@@ -1,4 +1,4 @@
-# 0010 — Standalone evaluation (`evaluation/`, `scripts/evaluate.py`)
+# 0010: Standalone evaluation (`evaluation/`, `scripts/evaluate.py`)
 
 **Status:** accepted
 **Date:** 2026-08-07

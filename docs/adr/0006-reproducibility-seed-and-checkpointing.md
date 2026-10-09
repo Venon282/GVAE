@@ -1,4 +1,4 @@
-# 0006 — Reproducibility: global seed management and checkpointing
+# 0006: Reproducibility (global seed management and checkpointing)
 
 **Status:** accepted
 **Date:** 2026-08-03

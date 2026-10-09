@@ -12,8 +12,8 @@ class AbstractEncoder(nn.Module, ABC):
     An encoder maps a modality's raw input to distribution parameters
     `(mu, logvar)` of a Gaussian. When used upstream of a Fusion module
     (spec §4), these are per-modality "expert" parameters that Fusion
-    will combine into a single posterior — not yet the model's final
-    latent distribution.
+    will combine into a single posterior (not yet the model's final
+    latent distribution).
 
     Concrete subclasses must self-register via `@registerEncoder(name)`
     (see `registry.py`) so that model-assembly code never needs to

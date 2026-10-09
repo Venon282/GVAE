@@ -1,4 +1,4 @@
-# 0015 — Per-modality data transforms and sequence length
+# 0015: Per-modality data transforms and sequence length
 
 **Status:** accepted
 **Date:** 2026-09-10
@@ -15,11 +15,11 @@ This directly contradicts spec §6's own stated intent for the 1D-signal modalit
 family: "Other signal sources (spectroscopy, sensor time series, etc.) should slot
 into the same 'signal' encoder/decoder family later, with only preprocessing
 differing, not the architecture." A second 1D-signal dataset (a different
-instrument, a different sensor — e.g. pairing SAXS with an unrelated LES dataset)
+instrument, a different sensor: e.g. pairing SAXS with an unrelated LES dataset)
 is exactly the case this sentence describes, and the flat schema could not express
 it: two datasets sharing the `1d_cnn_encoder_v1`/`1d_cnn_decoder_v1` family, each
 needing its own `log`/`standardize` statistics (possibly a different set of steps
-entirely — one dataset may not need a `log` step at all) and its own resampled
+entirely: one dataset may not need a `log` step at all) and its own resampled
 length, had nowhere to configure that independently. The only way around this was
 to bypass `DataConfig`/`buildTransformPipeline` entirely and hand-build per-dataset
 pipelines directly in Python, which is exactly what

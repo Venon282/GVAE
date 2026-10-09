@@ -1,7 +1,7 @@
 # Evaluate and visualize a checkpoint
 
-Two standalone scripts cover this, neither needing a `Trainer` — only a
-`GlobalVae` and a dataloader. Both restrict a raw batch to the keys
+Two standalone scripts cover this, neither needing a `Trainer` (only a
+`GlobalVae` and a dataloader). Both restrict a raw batch to the keys
 naming one of the model's encoders before the forward pass
 (`GlobalVae.selectEncoderInputs`,
 `docs/adr/0019-decouple-encoder-inputs-from-decoder-targets.md`), so a
@@ -50,7 +50,7 @@ default projection, is an exact, deterministic decomposition, so this and
 `scripts/evaluate.py`'s own latent scatter plot agree on the same
 checkpoint and dataloader) and a per-dimension KL bar chart per latent
 space (for spotting posterior collapse), plus the training-curve plot if
-the checkpoint carries a history — split by default onto two
+the checkpoint carries a history: split by default onto two
 independently-scaled axes (reconstruction/total loss vs. regularization
 loss, spec §2.3; `--history-no-twin-axis` to disable, `--history-log-scale`
 /`--history-twin-log-scale` for either axis). Supports `--label-key` (color

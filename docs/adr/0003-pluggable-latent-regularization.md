@@ -1,4 +1,4 @@
-# 0003 — Pluggable latent regularization strategies
+# 0003: Pluggable latent regularization strategies
 
 **Status:** accepted
 **Date:** 2026-07-31

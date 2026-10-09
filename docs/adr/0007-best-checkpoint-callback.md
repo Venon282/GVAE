@@ -1,4 +1,4 @@
-# 0007 — Best-model checkpointing (`BestCheckpointCallback`)
+# 0007: Best-model checkpointing (`BestCheckpointCallback`)
 
 **Status:** accepted
 **Date:** 2026-08-03

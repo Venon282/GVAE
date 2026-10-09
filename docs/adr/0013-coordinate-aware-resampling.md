@@ -1,4 +1,4 @@
-# 0013 — Coordinate-aware resampling (`ResampleTransform` refinement)
+# 0013: Coordinate-aware resampling (`ResampleTransform` refinement)
 
 **Status:** accepted
 **Date:** 2026-08-29
@@ -38,8 +38,8 @@ original `interpolation="torch"` (kept as the default, unchanged in behavior):
   describe where the input's points are and where the output's points should be.
   Given once at construction, they apply to every call (the common case: a shared,
   possibly non-uniformly-spaced instrument grid). For the case that actually
-  motivated this ADR — samples whose own positions genuinely differ from one
-  another — `apply`/`inverse` also accept `source_coords`/`target_coords` as
+  motivated this ADR (samples whose own positions genuinely differ from one
+  another), `apply`/`inverse` also accept `source_coords`/`target_coords` as
   **per-call** overrides, so a caller's own per-sample loading code (a `Dataset
   .__getitem__`-style loop, necessarily per-sample anyway since ragged, differently-
   gridded samples cannot be one dense batched tensor before this step) can resample
@@ -92,7 +92,7 @@ original `interpolation="torch"` (kept as the default, unchanged in behavior):
   documented in that script's own comments: an unconstrained natural cubic spline
   (`scipy_kind="cubic_spline"`) fitted through many irregularly-spaced, noisy points
   can overshoot far outside the data's own range between points (classic spline
-  ringing) — `"pchip"`, which never overshoots the local data range, is the safer
+  ringing). `"pchip"`, which never overshoots the local data range, is the safer
   default for this kind of data, and is what the example actually uses.
 - `tests/integration/test_transforms.py` gained
   `TestResampleTransformCoordinateAware` (shared and per-call coordinates, every
@@ -105,5 +105,5 @@ original `interpolation="torch"` (kept as the default, unchanged in behavior):
   extra.
 - This ADR does not revise ADR 0012's other two transforms (`log`, `standardize`) or
   its overall design (registry pattern, `ComposeTransform`, the framework/data-pipeline
-  boundary): only `ResampleTransform` itself changed, and only additively — every
+  boundary): only `ResampleTransform` itself changed, and only additively: every
   `interpolation="torch"` call from before this ADR behaves identically.

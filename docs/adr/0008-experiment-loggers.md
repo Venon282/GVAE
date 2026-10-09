@@ -1,4 +1,4 @@
-# 0008 — Pluggable experiment loggers (`training/loggers/`)
+# 0008: Pluggable experiment loggers (`training/loggers/`)
 
 **Status:** accepted
 **Date:** 2026-08-04

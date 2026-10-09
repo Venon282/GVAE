@@ -101,7 +101,7 @@ ran `01_signal_vae_pipeline.py` at a much larger scale than its shipped defaults
   a real subprocess (mirroring `test_train_script.py`'s own reasoning: this script's
   `from _synthetic_signal_data import ...` sibling import only resolves when
   `examples/` itself is on `sys.path`, which an in-process `importlib`-loaded module
-  does not get for free) — the default resnet config, `--model-config`/
+  does not get for free): the default resnet config, `--model-config`/
   `--experiment-config` switching to the plain conv model, `--override` reaching the
   composed config, `--variants` actually restricting which variant directories get
   written, and the invalid-variant-name argparse error path.

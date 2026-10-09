@@ -154,7 +154,7 @@ is where the framework draws the line between the two:
   train/val/test splitting stay entirely the caller's own responsibility**
   (`DataConfig.loader_factory`, §9), permanently, not merely pending an open
   question. There is no reusable structure to extract from this: how to read
-  a file, how to associate a signal with an image, how to split — all of it
+  a file, how to associate a signal with an image, how to split: all of it
   is inherently specific to one dataset/user, and a framework-provided
   `datamodule.py` would either be a no-op wrapper or would have to guess at
   dataset-specific behavior. `datamodule.py` therefore does not exist and is
@@ -168,15 +168,15 @@ is where the framework draws the line between the two:
   this codebase (`apply`/`inverse`, self-registered via
   `@registerTransform(name)`, e.g. `log`, `standardize`, `resample`), plus
   `ComposeTransform` for chaining several into one invertible pipeline.
-  `DataConfig.transforms` (§9) is a **per-modality** mapping — modality name
-  -> an ordered list of these, by registry name — since two modalities/
+  `DataConfig.transforms` (§9) is a **per-modality** mapping (modality name
+  -> an ordered list of these, by registry name) since two modalities/
   datasets in the same family (e.g. two different 1D-signal sources, see the
   roadmap table above) can need entirely different steps and statistics;
   `config.data.buildTransformPipeline` resolves it into one composed
   callable per modality, each one's `.inverse` directly usable as
   `visualization.reconstruction_plot`'s own `inverse_transform` hook.
   `DataConfig.sequence_length` is keyed the same way, per modality. Nothing
-  in this framework calls `buildTransformPipeline` automatically — a
+  in this framework calls `buildTransformPipeline` automatically: a
   caller's `loader_factory` may use it, or preprocess data its own way
   entirely; the framework only provides the reusable operation.
 
@@ -192,7 +192,7 @@ cannot be written this way does not belong in `data/transforms/`; it belongs
 in the caller's own data pipeline, exactly like dataset loading already does.
 This mirrors, and is held to the same standard as, the existing
 architecture-level rule that adding a modality's Encoder/Decoder must never
-require touching the core (§10, §12) — here applied to preprocessing instead
+require touching the core (§10, §12): here applied to preprocessing instead
 of model architecture.
 
 ---
@@ -373,7 +373,7 @@ model:
  
 `signal` feeds both `z_shared` (through Fusion, combined with `image`) and its own `z_signal_private`. This is the encoder fan-out case from §2.2: the `signal` encoder produces one `(mu, logvar)` pair, and the `head: linear` on the `z_signal_private` edge adapts that shared output down to this latent space's own dimensionality (128 -> 32), so the two latent spaces stay genuinely independent instead of accidentally sharing the same values.
 
-**Data preprocessing pipeline** (§6.2, `DataConfig.transforms`, resolved by `config.data.buildTransformPipeline`; keyed per modality — docs/adr/0015-per-modality-data-transforms.md — so a second signal dataset never has to share the first's statistics):
+**Data preprocessing pipeline** (§6.2, `DataConfig.transforms`, resolved by `config.data.buildTransformPipeline`; keyed per modality (docs/adr/0015-per-modality-data-transforms.md) so a second signal dataset never has to share the first's statistics):
 
 ```yaml
 data:
@@ -404,7 +404,7 @@ All of these examples are illustrative, not final: the actual schema still needs
   - Functions and methods -> same rule as classes but starting lowercase, i.e. `camelCase` (e.g. `computeLoss`, `encodeSignal`, `registerEncoder`), not PEP8's usual `snake_case` for callables.
   - Property not calculated -> snake_case
   - Since this deviates from PEP8, disable/adjust `ruff`'s naming rules (`N802`, `N803`, `N806`) in `pyproject.toml` and note the exception in the contributor docs, so linting doesn't silently "fix" it back to snake_case later.
-- **Typography:** no em dashes (`—`) and in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead. This is a house style rule, not a technical one, so there is no linter for it; review for it like any other style note. Same for the arrows (`→`) you can use `->` instead
+- **Typography:** no em dashes (U+2014) and no unicode arrows (U+2192) in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead of an em dash, and `->` instead of an arrow. This is a house style rule, enforced by `tests/unit/test_typography.py` over the tracked `.py`, `.md`, `.yaml`, `.yml` and `.toml` files. Commit messages are not scanned, so review those like any other style note.
 - **Typing:** type hints mandatory everywhere; `mypy` run in CI.
 - **Docstrings:** Google-style, mandatory on every public class/function: purpose, `Args`, `Returns`, `Raises`.
 - **Modularity:** one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers/heads/regularizers/transforms. No god-files: a base class, its registry, and every concrete strategy each get their own file (see `fusion/`, `assemblers/`, `heads/`, `losses/regularizers/`, `data/transforms/`).

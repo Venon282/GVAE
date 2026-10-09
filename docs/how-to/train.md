@@ -16,7 +16,7 @@ python scripts/train.py \
 
 `data.loader_factory` must point at your own
 `(DataConfig) -> DataloaderBundle` callable: dataset loading, pairing, and
-splitting stay entirely your own responsibility — a permanent boundary, not
+splitting stay entirely your own responsibility: a permanent boundary, not
 a gap (project specification, §6.2).
 
 ## Overriding hyperparameters

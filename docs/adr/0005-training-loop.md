@@ -1,4 +1,4 @@
-# 0005 — Raw PyTorch training loop (`Trainer`)
+# 0005: Raw PyTorch training loop (`Trainer`)
 
 **Status:** accepted
 **Date:** 2026-08-02

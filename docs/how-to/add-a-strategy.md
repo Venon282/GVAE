@@ -28,7 +28,7 @@ why the two stay apart.
 
 ## Steps
 
-1. Create one new file per strategy — one class per file, no god-files (see
+1. Create one new file per strategy: one class per file, no god-files (see
    the project's coding standards, spec §10 "Modularity").
 2. Subclass the relevant base class above and implement its abstract
    method(s).

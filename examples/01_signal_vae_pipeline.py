@@ -11,7 +11,7 @@ this framework's own testing style throughout): no real dataset exists yet (spec
 pairing question is still open, and dataset loading is permanently the caller's own
 responsibility, spec §6.2), so an example that used one could not be run as-is by
 someone cloning this repository. Everything below is 1D signals, single modality, no
-fusion — exactly spec §6.1 milestone 1, the only configuration this framework fully
+fusion: exactly spec §6.1 milestone 1, the only configuration this framework fully
 supports end to end so far (image encoders/decoders, and the other 7 configurations of
 spec §2.1, are not built yet).
 
@@ -35,7 +35,7 @@ Stages covered, in order:
 4. **Model assembly**: `GlobalVae.createSingleLatent` with the real
    `1d_cnn_encoder_v1`/`1d_cnn_decoder_v1` (`OneDCnnEncoder`/`OneDCnnDecoder`), no
    fusion strategy (single modality), regularized with `free_bits_kl` rather than the
-   plain `kl_standard_normal` default — see "On regularization" below.
+   plain `kl_standard_normal` default (see "On regularization" below).
 5. **Training**: `Trainer`, with a linear warm-up beta schedule, a CSV logger, and
    `BestCheckpointCallback`.
 6. **Evaluation**: `evaluation.evaluate`, reported to the console and saved as JSON.

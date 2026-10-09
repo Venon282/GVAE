@@ -1,4 +1,4 @@
-# 0014 — Residual (ResNet-style) 1D encoder and decoder
+# 0014: Residual (ResNet-style) 1D encoder and decoder
 
 **Status:** accepted
 **Date:** 2026-09-06
@@ -28,8 +28,8 @@ Two materially different kinds of "skip connection" were considered:
    to change shape (an encoder would need to expose intermediate features, not just
    `(mu, logvar)`), would break the encoder/decoder/fusion/assembler interchangeability
    the routing graph (§2.2) depends on (a decoder would no longer be usable with any
-   encoder, only one built to match it feature-for-feature), and — the more fundamental
-   problem — gives the decoder a deterministic, unregularized path around `z`, which
+   encoder, only one built to match it feature-for-feature), and (the more fundamental
+   problem) gives the decoder a deterministic, unregularized path around `z`, which
    is exactly what posterior collapse via skip paths looks like: the model can satisfy
    reconstruction through the skip path alone and stop using `z`, defeating both
    latent-space visualization (spec §6.1 milestone 1) and, more seriously, generation
@@ -51,9 +51,9 @@ registered on their own (they are building blocks, not modalities). Each stacks
 `depth` conv layers (`depth >= 1`, independently configurable, e.g. `3` layers before
 one stage's shortcut and `4` for a deeper stage) plus one shortcut per block, `y =
 activation(F(x) + shortcut(x))`. Only a block's first layer may change channel width
-and/or length (a stride for the encoder block, an upsampling transition — reusing
+and/or length (a stride for the encoder block, an upsampling transition (reusing
 `utils.builders.build1DUpSampleStage`, both `"conv_transpose"`/`"interpolate_conv"`
-modes — for the decoder block); every later layer keeps both fixed. This is what
+modes) for the decoder block); every later layer keeps both fixed. This is what
 makes the block's contribution to the surrounding encoder's/decoder's overall length
 bookkeeping identical to a plain, single-layer stage of the same
 stride/kernel_size/padding/dilation, letting `OneDCnnResidualEncoder`/
@@ -133,7 +133,7 @@ full existing suite passes unchanged, verifying no behavior moved with it.
 ## Testing
 
 - `tests/integration/test_conv_blocks.py`: `Residual1DBlock`/`Residual1DUpBlock`
-  directly — shapes across depth/stride/projection combinations, the flexible-depth
+  directly: shapes across depth/stride/projection combinations, the flexible-depth
   case itself (spec's own "3 layers... then 4" example), gradient flow, both decoder
   upsample modes, the `apply_output_normalization`/`apply_output_activation` flags
   (confirming only the final layer is suppressed, internal layers of a deep block are
@@ -145,7 +145,7 @@ full existing suite passes unchanged, verifying no behavior moved with it.
   `test_signal_decoder.py`'s own coverage (shapes, variable length, gradients,
   registration, per-stage configurability, minimum/exact length solving, error paths)
   for the new classes, plus their own additions (`block_depths`,
-  `shortcut_kernel_sizes`, and — decoder only — the last-transition
+  `shortcut_kernel_sizes`, and (decoder only) the last-transition
   unconstrained-output guarantee and its interaction with a deep last-stage block).
 - Full existing suite (`pytest tests/`) passes unchanged (496 tests total after this
   change), confirming the `OneDCnnDecoder.py` relocation is behavior-preserving.
@@ -155,7 +155,7 @@ full existing suite passes unchanged, verifying no behavior moved with it.
 - A user can opt a modality into a ResNet-style 1D encoder/decoder, with a
   per-stage-flexible residual block depth, purely by registry name
   (`1d_cnn_resnet_encoder_v1`/`1d_cnn_resnet_decoder_v1`), with zero changes to `GlobalVae`,
-  Fusion, the Assembler, or the routing graph — exactly spec §10's extension
+  Fusion, the Assembler, or the routing graph: exactly spec §10's extension
   contract.
 - U-Net-style encoder-to-decoder skip connections remain explicitly out of scope,
   for the architectural reason given above (posterior collapse via a deterministic

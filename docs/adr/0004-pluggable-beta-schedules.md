@@ -1,4 +1,4 @@
-# 0004 — Pluggable beta-weighting schedules
+# 0004: Pluggable beta-weighting schedules
 
 **Status:** accepted
 **Date:** 2026-08-01

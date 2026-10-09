@@ -12,7 +12,7 @@ class AbstractDecoder(nn.Module, ABC):
     A decoder maps a latent vector back to a modality-specific
     reconstruction. If this decoder consumes more than one latent
     space (spec §2.2), the vector it receives has already been merged
-    by an Assembler (`latent/assembler.py`) — the decoder itself
+    by an Assembler (`latent/assembler.py`). The decoder itself
     stays agnostic to how many latent spaces fed into it.
 
     Concrete subclasses must self-register via `@registerDecoder(name)`

@@ -2,7 +2,7 @@
 
 This is one specific `RoutingGraph` topology among others (spec §2.2),
 corresponding to the `*-L1-*` rows of the configuration matrix (spec
-§2.1). It is not a separate mechanism from `RoutingGraph` — just a
+§2.1). It is not a separate mechanism from `RoutingGraph`: just a
 constructor that builds one for the common case.
 """
 

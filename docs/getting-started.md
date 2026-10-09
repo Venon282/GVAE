@@ -16,8 +16,8 @@ builds the site; leave it out if you do neither.
 python examples/01_signal_vae_pipeline.py
 ```
 
-This runs the entire spec §6.1 milestone 1 pipeline end to end — data,
-transforms, model, training, evaluation, visualization — on synthetic 1D
+This runs the entire spec §6.1 milestone 1 pipeline end to end (data,
+transforms, model, training, evaluation, visualization) on synthetic 1D
 signals, no external dataset required. Outputs land in
 `examples/outputs/01_signal_vae_pipeline/`.
 

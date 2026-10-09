@@ -7,7 +7,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 ## [1.0.0] - 2026-08-29
 
 First release of the framework. Covers spec §6.1 milestone 1 end to end (a
-single-modality signal VAE — encoder, one latent space, decoder, no fusion —
+single-modality signal VAE (encoder, one latent space, decoder, no fusion)
 trained, checkpointed, evaluated, and visualized), the `EN-L1-DN` Phase-1
 default (spec §2.1), pluggable fusion/regularization/beta-schedule/logger/
 transform strategies throughout, a Hydra-driven config layer, and a
@@ -33,7 +33,7 @@ silently editing one):
   distinct from `scripts/` (which need a user-supplied factory/config) and
   `notebooks/` (interactive exploration). `01_signal_vae_pipeline.py`: the full
   spec §6.1 milestone 1 pipeline end to end on simple synthetic 1D
-  signals — the only configuration this framework fully supports today.
+  signals: the only configuration this framework fully supports today.
   Generates each curve on its own deliberately irregular, per-sample grid,
   resamples every curve onto one common grid by *position*
   (`ResampleTransform(interpolation="scipy")`, spec §6.2, see below) rather
@@ -58,7 +58,7 @@ silently editing one):
   case a shared grid cannot express, resolved from the caller's own
   per-sample loading code before batching), and a choice of interpolation
   method (`scipy_kind`: any `scipy.interpolate.interp1d` kind, or the
-  `"cubic_spline"`/`"pchip"`/`"akima"` spline families — `"pchip"`, which
+  `"cubic_spline"`/`"pchip"`/`"akima"` spline families: `"pchip"`, which
   never overshoots between points, is the safer default for noisy,
   irregularly-sampled data than an unconstrained cubic spline, a lesson
   surfaced while building the example above and documented in both the ADR
@@ -158,15 +158,15 @@ silently editing one):
   tensor) with the exact same class/arguments each time, to make the "no
   dimensionality-specific code" rule (spec §6.2) a checked property.
 - `tests/integration/test_trainer_smoke.py` (**C11**): a small, self-contained
-  smoke test for `Trainer`, independent of `test_trainer.py`'s larger suite — a
+  smoke test for `Trainer`, independent of `test_trainer.py`'s larger suite: a
   handful of optimizer steps on dummy (non-real) data, verifying the loss
   decreases over that short run and that no parameter's gradient is left `None`
   after a step, checked at more than one point in the run.
 - `tests/integration/test_signal_vae_milestone.py` (**C11**): the real-module
   integration test `test_en_l1_dn_default.py`'s dummy-only coverage left missing.
-  Builds spec §6.1 milestone 1 exactly — the real `OneDCnnEncoder`/
+  Builds spec §6.1 milestone 1 exactly (the real `OneDCnnEncoder`/
   `OneDCnnDecoder`, assembled via `GlobalVae.createSingleLatent` with no fusion
-  strategy (single modality) — and covers model assembly (real classes used, no
+  strategy, single modality) and covers model assembly (real classes used, no
   fusion module built), forward-pass shapes, gradient flow into every parameter,
   and a short `Trainer.fit` run where the loss decreases end to end.
 - Initial project scaffold: repository structure per spec §8.

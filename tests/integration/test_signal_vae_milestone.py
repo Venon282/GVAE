@@ -4,7 +4,7 @@
 but only with trivial linear dummy encoders/decoders on two modalities
 (spec §2.1's `EN-L1-DN` row in the abstract). It never exercises the actual
 milestone spec §6.1 describes first: "a working single-modality signal
-VAE... One encoder, one latent space, one decoder — no fusion, no second
+VAE... One encoder, one latent space, one decoder: no fusion, no second
 modality, just `signal -> z -> signal`... trained end to end", built from
 the real `1d_cnn_encoder_v1`/`1d_cnn_decoder_v1` (`OneDCnnEncoder`/
 `OneDCnnDecoder`) via `GlobalVae.createSingleLatent`, with no

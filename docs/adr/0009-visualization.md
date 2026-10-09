@@ -1,4 +1,4 @@
-# 0009 — Visualization subpackage (`visualization/`)
+# 0009: Visualization subpackage (`visualization/`)
 
 **Status:** accepted
 **Date:** 2026-08-05

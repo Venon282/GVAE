@@ -12,7 +12,7 @@ class AbstractFusion(nn.Module, ABC):
     A Fusion module combines the distribution parameters produced by
     several encoders into a single set of distribution parameters,
     *before* sampling. It operates on `(mu, logvar)` pairs, not on
-    already-sampled latent vectors — combining realized vectors across
+    already-sampled latent vectors: combining realized vectors across
     independent latent spaces is the job of an Assembler
     (`latent/assembler.py`), not Fusion (spec §2.2).
 
@@ -52,7 +52,7 @@ class AbstractFusion(nn.Module, ABC):
         Returns:
             `True` for PoE / MoE / cross-attention; `False` for
             concat+MLP, which needs an explicit imputation/masking
-            scheme instead (spec §5) — a known, documented limitation
+            scheme instead (spec §5): a known, documented limitation
             rather than something to silently patch around.
         """
         raise NotImplementedError

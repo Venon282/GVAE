@@ -471,10 +471,11 @@ class GlobalVae(nn.Module):
         and the cross-space aggregation to
         `losses.regularization.computeTotalRegularizationLoss`, so
         neither the regularization strategy nor the weighting scheme
-        (beta, spec §2.3) is hardcoded into this model class. Renamed
-        from `computeKlLoss`: the default strategy is still
-        KL-to-standard-normal, but this method is no longer
-        KL-specific now that `self.regularizers` is pluggable.
+        (beta, spec §2.3) is hardcoded into this model class. The
+        default strategy is still KL-to-standard-normal, but this
+        method is not KL-specific: `self.regularizers` is pluggable,
+        which is why it is named after regularization and not after
+        the KL term (ADR 0003).
 
         Args:
             latent_params: Latent space name -> `(mu, logvar)`, as

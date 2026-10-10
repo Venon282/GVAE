@@ -90,10 +90,10 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
 
 ## Naming convention (deviates from PEP8: read this before contributing)
 
-- Classes -> `CamelCase` (e.g. `GlobalVae`, `SignalEncoder`).
+- Classes -> `CamelCase` (e.g. `GlobalVae`, `OneDCnnEncoder`).
 - Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
 - **Functions and methods -> `camelCase`** (e.g. `registerEncoder`,
-  `computeKlLoss`), not PEP8's usual `snake_case`. This is intentional
+  `computeRegularizationLoss`), not PEP8's usual `snake_case`. This is intentional
   (spec §10). `ruff`'s `N802`/`N803`/`N806` naming rules are disabled
   in `pyproject.toml` specifically so linting doesn't silently "fix"
   this back to snake_case. Framework-mandated overrides
@@ -109,8 +109,8 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
    `@registerDecoder("your_decoder_name")`.
 3. Register both (the decorator does this: nothing else to wire up).
 4. Add a config entry referencing the two registry names (see
-   `configs/model/default.yaml` for the shape, once config loading is
-   wired up).
+   `configs/model/default.yaml` for a two-modality example and
+   `configs/model/signal_single_latent.yaml` for a single-modality one).
 5. Add a test: a unit test for the encoder/decoder shapes (in `tests/unit/`), and
    ideally an entry in the relevant integration test (in `tests/integration/`).
 
@@ -129,9 +129,27 @@ across dimensionality (spec §6.2): no per-modality or per-dataset logic.
 ## Extending beyond `EN-L1-DN`
 
 The routing-graph machinery (`latent/base.py`, `latent/routing_graph_builders/`)
-already supports arbitrary encoder-latent-decoder
-topologies, including multiple independent latent spaces. `GlobalVae`
-currently only *drives* the single-fused-latent case end-to-end; growing
-it (or introducing sibling model classes) to cover the other 7
-configurations in spec §2.1 is the next milestone. See
-`docs/adr/0001-phase1-default-configuration.md`.
+supports arbitrary encoder-latent-decoder topologies, including multiple
+independent latent spaces, and `GlobalVae` accepts an explicit `RoutingGraph`
+(`docs/adr/0002-generalize-global-vae-to-routing-graph.md`). Two presets are
+provided: `buildSingleLatentRoutingGraph` (`EN-L1-DN`, what
+`GlobalVae.createSingleLatent` and `configs/model/` build) and
+`buildSharedPrivateRoutingGraph` (a shared plus per-modality private latent
+space). Three limits remain:
+
+- `buildModelFromConfig` only builds `latent_mode: single`, so a config file
+  cannot describe several latent spaces yet.
+- An encoder cannot feed two latent spaces: `GlobalVae` raises
+  `NotImplementedError`, which is why the shared plus private preset cannot be
+  trained today.
+- Of the 8 configurations in spec §2.1, the four `EN-*` rows (one encoder per
+  modality) are built and covered by the configuration-matrix test, without
+  encoder fan-out. The four `E1-*` rows (one shared encoder) are not built.
+
+Closing these gaps is tracked in the [roadmap](docs/roadmap.md) (Phase 1). See
+also `docs/adr/0001-phase1-default-configuration.md`.
+
+## Roadmap
+
+[`docs/roadmap.md`](docs/roadmap.md) lists what is done, what is open and the
+decisions waiting on the owner, in priority order.

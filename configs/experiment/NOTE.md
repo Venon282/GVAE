@@ -16,7 +16,14 @@ runnable end to end via `scripts/train.py`. See
 # Still open
 
 A second experiment file for spec §6.1 milestone 2 (paired signal+image, exercising
-Fusion) depends on an image encoder/decoder existing first (see README.md's "What's
-deliberately not built yet") and on the still-open pairing mechanism (spec §11).
-`configs/model/default.yaml` is schema-valid for that future case already, but not yet
-buildable.
+Fusion) is not written yet. The image encoder and decoder it needs exist
+(`docs/adr/0017-2d-cnn-encoder-decoder.md`, `docs/adr/0018-2d-residual-encoder-decoder.md`),
+and `configs/model/default.yaml` is a buildable signal plus image model (PoE fusion, both
+modalities reconstructed). What is missing is a paired `configs/data/` file and the pairing
+mechanism itself (spec §11, roadmap P3-2): pairing stays the caller's `loader_factory`. The
+experiment file is roadmap P3-3, which proposes the name `signal_image_vae.yaml`.
+
+A model whose decoder target is not an encoder input (signal and image to image, as in
+`examples/03_signal_image_to_image.py`) cannot be written as a `configs/model/` file yet:
+`buildModelFromConfig` supports `latent_mode: single` only, which ties one decoder to each
+encoder name (roadmap P1-3).

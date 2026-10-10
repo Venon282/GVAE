@@ -11,7 +11,7 @@ def registerDecoder(name: str) -> Callable[[type[AbstractDecoder]], type[Abstrac
     """Class decorator registering a decoder implementation under `name`.
 
     Args:
-        name: Unique registry key (e.g. `"signal_cnn_v1"`), referenced
+        name: Unique registry key (e.g. `"1d_cnn_decoder_v1"`), referenced
             from config files (see spec §9).
 
     Returns:

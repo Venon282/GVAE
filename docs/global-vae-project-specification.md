@@ -210,14 +210,21 @@ These are **future directions**, listed to keep core abstractions (encoder/decod
 ---
 
 ## 8. Repository structure
- 
+
+This is the layout of the repository as built. Entries marked `(planned)` do not exist yet and are
+tracked in `docs/roadmap.md`; everything else is present. Encoder and decoder modules are named after
+the class they hold (`OneDCnnEncoder.py` for `OneDCnnEncoder`, registered as `1d_cnn_encoder_v1`),
+one class per file (§10).
+
 ```
 global-vae/
 ├── pyproject.toml
 ├── README.md
-├── configs/                     # Hydra/OmegaConf configs
+├── mkdocs.yml
+├── configs/                     # Hydra/OmegaConf configs, validated against src/global_vae/config/
 │   ├── model/
 │   ├── data/
+│   ├── training/
 │   └── experiment/
 ├── examples/                     # runnable, self-contained pipeline walkthroughs on
 │   │                             # synthetic data (distinct from scripts/, which need a
@@ -225,23 +232,28 @@ global-vae/
 ├── src/
 │   └── global_vae/
 │       ├── encoders/
-│       │   ├── base.py          # AbstractEncoder interface
+│       │   ├── base.py                    # AbstractEncoder interface
 │       │   ├── registry.py
-│       │   ├── signal_encoder.py
-│       │   └── image_encoder.py
+│       │   ├── OneDCnnEncoder.py          # 1d_cnn_encoder_v1 (signals, any 1D series)
+│       │   ├── OneDCnnResidualEncoder.py  # 1d_cnn_resnet_encoder_v1
+│       │   ├── TwoDCnnEncoder.py          # 2d_cnn_encoder_v1 (images, any 2D grid)
+│       │   └── TwoDCnnResidualEncoder.py  # 2d_cnn_resnet_encoder_v1
 │       ├── decoders/
-│       │   ├── base.py          # AbstractDecoder interface
+│       │   ├── base.py                    # AbstractDecoder interface
 │       │   ├── registry.py
-│       │   ├── signal_decoder.py
-│       │   └── image_decoder.py
+│       │   ├── OneDCnnDecoder.py          # 1d_cnn_decoder_v1
+│       │   ├── OneDCnnResidualDecoder.py  # 1d_cnn_resnet_decoder_v1
+│       │   ├── TwoDCnnDecoder.py          # 2d_cnn_decoder_v1
+│       │   └── TwoDCnnResidualDecoder.py  # 2d_cnn_resnet_decoder_v1
 │       ├── fusion/
 │       │   ├── base.py          # AbstractFusion interface
 │       │   ├── registry.py
 │       │   ├── poe.py
 │       │   ├── moe.py
 │       │   ├── concat_mlp.py
-│       │   └── cross_attention.py
-│       ├── heads/
+│       │   ├── cross_attention.py
+│       │   └── residual.py      # ResidualFusion: wraps any strategy with a residual connection
+│       ├── heads/                # (planned)
 │       │   ├── base.py          # AbstractLatentHead interface
 │       │   ├── registry.py
 │       │   ├── identity.py      # default: no-op passthrough
@@ -252,38 +264,51 @@ global-vae/
 │       │   ├── concat.py
 │       │   ├── sum.py
 │       │   ├── average.py
-│       │   ├── weighted_sum.py
-│       │   └── attention.py
+│       │   ├── weighted_sum.py  # (planned)
+│       │   └── attention.py     # (planned)
 │       ├── latent/
 │       │   ├── base.py          # LatentSpace, RoutingGraph, validateRoutingGraph
-│       │   ├── single.py        # preset: one latent space feeding every decoder
-│       │   └── shared_private.py # preset: shared + private latent spaces
+│       │   └── routing_graph_builders/
+│       │       ├── single.py          # preset: one latent space feeding every decoder
+│       │       └── shared_private.py  # preset: shared + private latent spaces
 │       ├── models/
-│       │   └── global_vae.py    # assembles encoders + heads + fusion + latent + decoders from a routing graph
+│       │   └── global_vae.py    # assembles encoders + fusion + latent + decoders from a routing graph (heads: planned)
 │       ├── losses/
-│       │   ├── reconstruction.py
+│       │   ├── reconstruction.py     # computeTotalReconstructionLoss
+│       │   ├── regularization.py     # computeTotalRegularizationLoss
 │       │   └── regularizers/
 │       │       ├── base.py      # AbstractLatentRegularizer interface
 │       │       ├── registry.py
-│       │       └── kl_standard_normal.py  # default strategy
+│       │       ├── kl_standard_normal.py  # default strategy
+│       │       ├── free_bits_kl.py
+│       │       └── mmd.py
 │       ├── data/
 │       │   ├── datamodule.py    # NOT built, and not planned: see §6.2 (permanent scope boundary)
-│       │   └── transforms/      # AbstractTransform interface + registry: log, standardize, resample (§6.2)
+│       │   └── transforms/      # AbstractTransform interface + registry: log, standardize, resample, ComposeTransform (§6.2)
 │       ├── training/
-│       │   └── trainer.py       # raw PyTorch loop for now (see §10); Lightning/Fabric later
-│       └── utils/
+│       │   ├── trainer.py       # raw PyTorch loop for now (see §10); Lightning/Fabric later
+│       │   ├── checkpoint.py    # checkpoint file format, save and load
+│       │   ├── beta_schedule_resolution.py
+│       │   ├── beta_schedules/  # AbstractBetaSchedule + registry: constant, linear_warmup, cyclical_annealing
+│       │   ├── callbacks/       # TrainerCallback + registry: checkpoint, best_checkpoint, early_stopping, reduce_lr_on_plateau
+│       │   └── loggers/         # experiment logger interface + registry: csv, tensorboard
+│       ├── config/              # structured dataclass schema + builders (data, model, training, experiment)
+│       ├── evaluation/          # metrics, evaluate(), cross-modal reports, figure export
+│       ├── visualization/       # latent, reconstruction and loss-curve plots (optional `visualization` extra)
+│       └── utils/               # seed, convolution arithmetic and blocks, shared builders
 ├── tests/
-│   ├── unit/
-│   └── integration/              # end-to-end test for each of the 8 configurations
+│   ├── unit/                     # one component at a time, hand-made tensors
+│   └── integration/              # wiring of several components, scripts, examples, the docs build
 ├── notebooks/
-├── scripts/
-└── docs/
+├── scripts/                      # train.py, evaluate.py, visualize_latent.py, gen_ref_pages.py
+├── docs/                         # this specification, roadmap.md, adr/, changelog/, how-to/
+└── .github/workflows/            # CI (lint, types, tests) and the docs build
 ```
 
 ---
 ## 9. Illustrative config examples
  
-Not final: these show how the registry + config-driven pattern is meant to operate in practice, matching `GlobalVae`'s two constructors (`__init__` with an explicit `RoutingGraph`, and the `createSingleLatent()` convenience wrapper; see `models/global_vae.py` and ADR 0002).
+Not final: these show how the registry + config-driven pattern is meant to operate in practice, matching `GlobalVae`'s two constructors (`__init__` with an explicit `RoutingGraph`, and the `createSingleLatent()` convenience wrapper; see `models/global_vae.py` and ADR 0002). The encoder and decoder names are real registry keys (§8), except `joint_decoder_v1` in the second example, a placeholder for a shared decoder you would write and register yourself. For the YAML shape `buildModelFromConfig` accepts today, see `configs/model/default.yaml` (signal + image, single latent space) and `configs/model/signal_single_latent.yaml`.
  
 **Single latent space** (`GlobalVae.createSingleLatent`, the `EN-L1-DN` Phase-1 default):
  
@@ -292,11 +317,11 @@ model:
   name: global_vae
   modalities:
     signal:                    # first concrete dataset for this modality: SAXS
-      encoder: signal_cnn_v1
-      decoder: signal_cnn_v1
+      encoder: 1d_cnn_encoder_v1
+      decoder: 1d_cnn_decoder_v1
     image:
-      encoder: resnet_encoder_v1
-      decoder: resnet_decoder_v1
+      encoder: 2d_cnn_resnet_encoder_v1
+      decoder: 2d_cnn_resnet_decoder_v1
   latent:
     mode: single              # single | several
     dim: 128
@@ -315,10 +340,10 @@ model:
   name: global_vae
   modalities:
     signal:
-      encoder: signal_cnn_v1
+      encoder: 1d_cnn_encoder_v1
       decoder: joint_decoder_v1        # shares a decoder with image: its own key, not "signal"
     image:
-      encoder: resnet_encoder_v1
+      encoder: 2d_cnn_resnet_encoder_v1
       decoder: joint_decoder_v1
   latent:
     mode: several
@@ -336,18 +361,18 @@ model:
     modality_dropout_p: 0.15
 ```
  
-**Shared plus private latent spaces** (`latent/shared_private.py`'s preset . the encoder fan-out case, resolved via the Latent Head, §2.2):
+**Shared plus private latent spaces** (`latent/routing_graph_builders/shared_private.py`'s preset . the encoder fan-out case, resolved via the Latent Head, §2.2):
  
 ```yaml
 model:
   name: global_vae
   modalities:
     signal:
-      encoder: signal_cnn_v1
-      decoder: signal_cnn_v1
+      encoder: 1d_cnn_encoder_v1
+      decoder: 1d_cnn_decoder_v1
     image:
-      encoder: resnet_encoder_v1
-      decoder: resnet_decoder_v1
+      encoder: 2d_cnn_resnet_encoder_v1
+      decoder: 2d_cnn_resnet_decoder_v1
   latent:
     mode: several
     spaces:
@@ -399,7 +424,7 @@ All of these examples are illustrative, not final: the actual schema still needs
 - **Language/runtime:** Python 3.11+, PyTorch (latest stable).
 - **Formatting/linting:** `ruff` (lint + format), consistent import ordering.
 - **Naming convention (custom, overrides PEP8 default for callables):**
-  - Classes -> `CamelCase` (e.g. `GlobalVae`, `SignalEncoder`, `ProductOfExperts`).
+  - Classes -> `CamelCase` (e.g. `GlobalVae`, `OneDCnnEncoder`, `ProductOfExperts`).
   - Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
   - Functions and methods -> same rule as classes but starting lowercase, i.e. `camelCase` (e.g. `computeLoss`, `encodeSignal`, `registerEncoder`), not PEP8's usual `snake_case` for callables.
   - Property not calculated -> snake_case
@@ -424,7 +449,7 @@ All of these examples are illustrative, not final: the actual schema still needs
   - An **integration test with the real modules** for spec §6.1 milestone 1 specifically: `OneDCnnEncoder` + `OneDCnnDecoder`, assembled via `GlobalVae.createSingleLatent` with no fusion strategy (single modality), covering forward-pass shapes, gradient flow, and a short trained-end-to-end run where the loss decreases. This is distinct from, and in addition to, the dummy-encoder/decoder `EN-L1-DN` integration test already required above: dummy modules validate the assembly/routing machinery, this test validates that the actual Phase-1-milestone modules work together correctly.
 - **Experiment tracking:** Weights & Biases or MLflow, logging losses, latent-space visualizations, and reconstructions per run.
 - **Reproducibility:** global seed management, deterministic-mode flag documented, config snapshotted with every run.
-- **Logging:** standard `logging` module, no bare `print`.
+- **Logging:** library code (`src/global_vae/`) uses the standard `logging` module, with no bare `print`. A command line tool or a runnable example (`scripts/`, `examples/`) may `print` the result it exists to report, since that output is its interface and not diagnostics; its progress and diagnostic messages still go through `logging`.
 - **Version control:** Conventional Commits, semantic versioning, maintained `CHANGELOG.md`. Architectural decisions get a new ADR when they change, rather than an old ADR being edited in place (see `docs/adr/0002-*.md` for an example of one ADR superseding part of another).
 - **CI:** GitHub Actions running lint, type-check, and tests on every push.
 - **Documentation:** `mkdocs` + `mkdocstrings` built from docstrings; major architectural choices (e.g. "why PoE + MoE + cross-attention", "why a routing graph instead of a fixed shared/private split") recorded as short ADRs (`docs/adr/NNNN-title.md`).
@@ -454,7 +479,7 @@ All of these examples are illustrative, not final: the actual schema still needs
 - Encoder fan-out to several latent spaces goes through a Latent Head (§2.2), never by giving `AbstractEncoder` multiple output heads or duplicating the encoder.
 - Regularization is never hardcoded to KL-to-standard-normal inside the model class; it goes through the `AbstractLatentRegularizer` registry (§2.3).
 - Data transforms (`data/transforms/`, §6.2) must stay fully generic across dimensionality (1D/2D/3D/other) and must never encode anything specific to one dataset or modality (e.g. SAXS); modality-specific preprocessing decisions (which transforms, in what order, with what parameters) stay in the caller's own data pipeline, exactly as they always have. `datamodule.py` is a permanent scope boundary (§6.2), not a pending milestone: do not build it, and do not treat its absence as a gap to fill.
-- Build routing graphs through `RoutingGraph` directly or through a preset in `latent/` (`single.py`, `shared_private.py`, or a new one); never re-derive the same construction inline in a model class.
+- Build routing graphs through `RoutingGraph` directly or through a preset in `latent/routing_graph_builders/` (`single.py`, `shared_private.py`, or a new one); never re-derive the same construction inline in a model class.
 - Respect the milestone order in §6.1: don't build the fully general multimodal machinery before the single-modality signal VAE (encoder -> latent -> decoder, training + latent visualization) actually works end to end.
 - If a request would violate the "no fixed fusion strategy" or "no fixed modality set" principles, flag it rather than silently narrowing the design.
 - When a decision in §11 is needed to proceed, ask: don't guess and move on.

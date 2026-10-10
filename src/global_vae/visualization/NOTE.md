@@ -22,11 +22,15 @@ one specific strategy within it.
 
 - **Image-comparison reconstruction plot** (side-by-side original/
   reconstruction images, as opposed to `reconstruction_plot.py`'s 1D
-  line overlay): natural once an image decoder exists (spec §6.1
-  milestone 2). Not built yet, since no image decoder exists yet
-  either (`encoders/`/`decoders/` NOTE.md).
-- A real, non-dummy cross-modal demonstration (`examples/`): awaits the
-  same milestone as the item above, for the same reason; the dummy
-  fixtures in `tests/integration/test_cross_modal_reconstruction.py`
-  already exercise every code path, so this is only deferred, not
-  blocking anything.
+  line overlay), and an image version of the cross-modal matrix, which
+  draws 1D series only. The 2D encoders and decoders it was waiting for
+  exist now (`docs/adr/0017-2d-cnn-encoder-decoder.md`,
+  `docs/adr/0018-2d-residual-encoder-decoder.md`), so nothing blocks it
+  any more; it is simply not written yet (roadmap P3-4). Until then
+  `examples/03_signal_image_to_image.py` draws its own image grid
+  locally. That helper should be removed once the library one exists.
+
+The real, non-dummy cross-modal demonstration that used to be listed here
+exists: `examples/03_signal_image_to_image.py` (signal and image to image
+through PoE fusion) uses `collectCrossModalReconstructions` for its
+evaluation by input subset.

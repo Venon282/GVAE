@@ -1,10 +1,18 @@
-# Illustrative two-modality (signal + image) model config for the future spec §6.1
-# milestone 2 (paired signal+image, exercising Fusion for the first time). Schema-valid
-# against global_vae.config.model.ModelConfig, but NOT buildable yet: no image
-# encoder/decoder is registered (see encoders/decoders NOTE.md, README's "What's
-# deliberately not built yet"). buildModelFromConfig raises KeyError on
-# "resnet_encoder_v1"/"resnet_decoder_v1" until one exists. Use
-# `signal_single_latent.yaml` for the current milestone 1 (single-modality signal VAE).
+# Two-modality model (spec §6.1 milestone 2): a 1D signal and a 2D image encoded into ONE
+# fused latent space by Product-of-Experts (spec §4), then each decoded back to itself
+# (`signal -> z -> signal` and `image -> z -> image`). Both modalities are reconstructed,
+# which is the variant `GlobalVae.createSingleLatent` builds, since it ties each decoder to
+# the encoder of the same name. Buildable as is: the registry names below are the ones
+# `encoders/` and `decoders/` register (ADR 0017 for the 2D pair).
+#
+# The decoder that is NOT an input (signal + image -> image, example 03) cannot be written
+# in this schema yet: `buildModelFromConfig` only wires `latent_mode: single`, which
+# requires one decoder per encoder name. Build that model in Python instead, as
+# `examples/03_signal_image_to_image.py` does (ADR 0019).
+#
+# Single-modality starting points: `signal_single_latent.yaml` and
+# `signal_resnet_single_latent.yaml`. Validated against
+# global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
 name: global_vae_signal_image
 latent_mode: single
 
@@ -13,23 +21,41 @@ modalities:
     encoder:
       name: 1d_cnn_encoder_v1
       kwargs:
-        hidden_channels: [32, 64, 128]
+        hidden_channels: [8, 16, 32, 64, 128]
+        kernel_sizes: 5
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
     decoder:
       name: 1d_cnn_decoder_v1
       kwargs:
+        # output_length must match configs/data/signal.yaml's sequence_length.signal.
+        # 5 hidden_channels entries give 5 conv_transpose doublings:
+        # 8 -> 16 -> 32 -> 64 -> 128 -> 256.
         output_length: 256
         hidden_channels: [128, 64, 32, 16, 8]
         upsample_modes: conv_transpose
   image:
     encoder:
-      name: resnet_encoder_v1 # not yet implemented
-      kwargs: {}
+      name: 2d_cnn_encoder_v1
+      kwargs:
+        # One grayscale channel (in_channels defaults to 1). Each stage is followed by a
+        # 2x2 max pool, and a global average pool then makes the head independent of the
+        # input height and width.
+        hidden_channels: [16, 32, 64]
     decoder:
-      name: resnet_decoder_v1 # not yet implemented
-      kwargs: {}
+      name: 2d_cnn_decoder_v1
+      kwargs:
+        # output_shape must match the images your own loader_factory yields (height,
+        # width). The decoder never resizes: with conv_transpose (kernel 4, stride 2,
+        # padding 1) each of the 3 hidden_channels entries doubles the default 8 x 8
+        # seed, 8 -> 16 -> 32 -> 64, so [64, 64]. Use
+        # TwoDCnnDecoder.computeOutputShape(...) to verify any configuration.
+        output_shape: [64, 64]
+        hidden_channels: [64, 32, 16]
+        upsample_modes: conv_transpose
 
 single_latent:
-  dim: 128
+  dim: 32
   name: z_fused
   # fusion is required here: more than one encoder feeds the single latent space
   # (spec §4).

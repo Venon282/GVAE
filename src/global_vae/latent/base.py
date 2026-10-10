@@ -6,10 +6,11 @@ necessarily KL divergence (spec §2.3; see `losses/regularizers/` for
 the pluggable strategies). "Several latent spaces" in the spec is not
 a fixed shared/private split. It is an arbitrary number of these,
 wired to encoders and decoders through a configurable routing graph.
-`single.py` (one latent space) and `shared_private.py` (shared plus
-private, one example topology) are convenience presets built on top of
-the general `RoutingGraph` defined here; the framework does not treat
-either as a hardcoded special case.
+`routing_graph_builders/single.py` (one latent space) and
+`routing_graph_builders/shared_private.py` (shared plus private, one
+example topology) are convenience presets built on top of the general
+`RoutingGraph` defined here; the framework does not treat either as a
+hardcoded special case.
 """
 
 from dataclasses import dataclass, field

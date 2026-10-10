@@ -191,11 +191,7 @@ class TestBuildModelFromConfig:
         assert model.encoders["signal"].latent_dim == 8
 
     def test_two_modality_config_needs_a_fusion_strategy(self) -> None:
-        """default.yaml's two-modality example is schema-valid.
-
-        Only its unregistered image encoder/decoder makes it unbuildable today (see next
-        test).
-        """
+        """default.yaml's two-modality example declares the fusion its two encoders need."""
         cfg = loadExperimentConfig(
             config_name="experiment/signal_vae",
             overrides=[*_BASE_OVERRIDES, "model=default"],
@@ -203,12 +199,45 @@ class TestBuildModelFromConfig:
         assert cfg.model.single_latent.fusion is not None
         assert cfg.model.single_latent.fusion.strategy == "poe"
 
-    def test_unregistered_encoder_name_raises_key_error(self) -> None:
+    def test_two_modality_config_builds_a_signal_and_image_model(self) -> None:
+        """default.yaml is buildable: a signal and an image encoder fused by PoE (ADR 0017)."""
         cfg = loadExperimentConfig(
             config_name="experiment/signal_vae",
             overrides=[*_BASE_OVERRIDES, "model=default"],
         )
-        with pytest.raises(KeyError, match="resnet_encoder_v1"):
+        model = buildModelFromConfig(cfg.model)
+        assert set(model.encoders) == {"signal", "image"}
+        assert set(model.decoders) == {"signal", "image"}
+        assert "z_fused" in model.fusions  # two encoders feed one latent space
+
+        output = model({"signal": torch.randn(3, 256), "image": torch.randn(3, 1, 64, 64)})
+        assert output["reconstructions"]["signal"].shape == (3, 256)
+        assert output["reconstructions"]["image"].shape == (3, 64, 64)
+        mu, logvar = output["latent_params"]["z_fused"]
+        assert mu.shape == (3, 32)
+        assert logvar.shape == (3, 32)
+
+    def test_two_modality_config_still_encodes_one_modality_alone(self) -> None:
+        """Hiding a modality at the encoder input still gives a latent (spec §5)."""
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_vae",
+            overrides=[*_BASE_OVERRIDES, "model=default"],
+        )
+        model = buildModelFromConfig(cfg.model)
+        output = model({"image": torch.randn(2, 1, 64, 64)})
+        mu, _ = output["latent_params"]["z_fused"]
+        assert mu.shape == (2, 32)
+
+    def test_unregistered_encoder_name_raises_key_error(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_vae",
+            overrides=[
+                *_BASE_OVERRIDES,
+                "model=default",
+                "model.modalities.image.encoder.name=not_a_registered_encoder_v1",
+            ],
+        )
+        with pytest.raises(KeyError, match="not_a_registered_encoder_v1"):
             buildModelFromConfig(cfg.model)
 
     def test_several_latent_mode_raises_not_implemented(self) -> None:

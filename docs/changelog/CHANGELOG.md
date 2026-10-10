@@ -8,6 +8,15 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `tests/integration/test_docs_changelog_navigation.py` (roadmap P0-7), the changelog counterpart of
+  `test_docs_adr_navigation.py`. It fails when a `CHANGELOG_<version>_<date>.md` file is not listed
+  in `docs/changelog/SUMMARY.md`, when the list is not newest first, when a link or a label
+  (`x.y.z (YYYY-MM-DD)`) does not match the file it points to, when the `## [x.y.z] - date` heading
+  inside a release file disagrees with its name, or when a changelog file name breaks the
+  `CHANGELOG_<x.y.z>_<YYYY-MM-DD>.md` convention. A slow test builds the site with `mkdocs build
+  --strict` and checks that every release is in the built sidebar. Run against the previous state of
+  the repository, three of its tests fail (the underscore file name, the two missing entries and the
+  order).
 - `.github/workflows/ci.yaml` (roadmap P0-1, spec section 10): GitHub Actions workflow run on
   every push and pull request with three jobs. `lint` runs `ruff check` and
   `ruff format --check`, and is advisory (`continue-on-error`) until the ruff clean-up of
@@ -48,6 +57,33 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Documentation hygiene (roadmap P0-7). Stale text is refreshed, and no code behaviour changes.
+  `losses/NOTE.md` no longer says the reconstruction and regularization modules are deferred or
+  cites the removed `computeKlLoss` (it now lists `regularizers/`, the beta schedules and the open
+  loss-scale question of roadmap P2-1); `data/NOTE.md` describes `DataConfig.transforms` as the
+  per-modality mapping it has been since ADR 0015; `visualization/NOTE.md` no longer says that no
+  image decoder exists; `configs/experiment/NOTE.md` no longer cites a README section that is gone.
+  The README drops `SignalEncoder` and `computeKlLoss` from its naming examples, refreshes
+  "Extending beyond `EN-L1-DN`" (what the routing graph supports and the three remaining limits)
+  and links the roadmap. The specification follows the code: section 8 shows the real tree
+  (`OneDCnn*` and `TwoDCnn*` modules, `latent/routing_graph_builders/`, `beta_schedules/`,
+  `callbacks/`, `loggers/`, `config/`, `evaluation/`, `visualization/`, with the unbuilt `heads/`,
+  `weighted_sum` and `attention` marked as planned), section 9 uses real registry names instead of
+  `signal_cnn_v1` and `resnet_encoder_v1`, and section 10 now reads "no bare `print`" as a rule for
+  library code, so the 9 `print` calls that report results in `scripts/evaluate.py` and examples 01
+  and 02 stay (roadmap decision D-11, default taken: this edit needs the owner's approval). The
+  stale example names in the `encoders/registry.py` and `decoders/registry.py` docstrings, and the
+  stale preset paths in `latent/base.py` and spec section 12, are fixed the same way. The
+  `computeKlLoss` mention in the `computeRegularizationLoss` docstring is reworded.
+- `configs/model/default.yaml` is now a buildable signal plus image model (`1d_cnn_encoder_v1` and
+  `2d_cnn_encoder_v1` fused by PoE into one 32-dimensional latent space, both modalities
+  reconstructed) instead of an unbuildable example naming a `resnet_encoder_v1` that was never
+  registered. In `tests/integration/test_config.py`, the test that expected `model=default` to raise
+  `KeyError` is replaced by tests that build it, run a forward pass with both modalities and with
+  one, and check the unknown-name `KeyError` with an override naming an unregistered encoder.
+- `docs/changelog/CHANGELOG_1.1.1_2026_09_27.md` is renamed `CHANGELOG_1.1.1_2026-09-27.md` (with
+  `git mv`) so that every release file uses hyphens in its date, and releases 1.2.0 and 1.1.1 are
+  added to `docs/changelog/SUMMARY.md`: both pages were built but had no sidebar entry.
 - `computeTotalReconstructionLoss` now raises `ValueError` when a reconstruction and its target
   differ in shape (roadmap P0-4(g)). `torch.nn.functional.mse_loss` and the other built-in losses
   only warn and then broadcast, so a `(B, 1, H, W)` target against the 2D decoder's `(B, H, W)`

@@ -48,7 +48,9 @@ nav:
 # itself (`adr/SUMMARY.md`) makes mkdocs render it as one ordinary page titled
 # "SUMMARY", with none of the entries it lists showing up in the sidebar: this is what
 # the changelog entry used to do. tests/integration/test_docs_adr_navigation.py guards
-# both the directory form and the completeness of adr/SUMMARY.md.
+# both the directory form and the completeness of adr/SUMMARY.md, and
+# tests/integration/test_docs_changelog_navigation.py the completeness, order and file
+# naming of changelog/SUMMARY.md.
 
 plugins:
   - search

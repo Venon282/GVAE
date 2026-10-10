@@ -19,16 +19,19 @@ beyond `torch.nn.functional.interpolate`'s evenly-spaced-grid modes
 splines). `scipy` is a soft dependency of this mode only; the default
 `interpolation="torch"` mode needs nothing beyond torch.
 
-`DataConfig.transforms` (`config/data.py`) is a list of these transforms by
-registry name; `buildTransformPipeline(config)` resolves it into a composed
-`ComposeTransform`. Nothing in this framework calls it automatically: a
-`loader_factory` may call it inside its own pipeline if it wants to, and its
-`.inverse` also works directly as `visualization.reconstruction_plot`'s own
-`inverse_transform` hook (`pipeline.inverse`) or
-`evaluation.visual_export.exportEvaluationFigures`'s `inverse_transforms`
-dict. `examples/01_signal_vae_pipeline.py` demonstrates the full pipeline,
-including per-sample coordinate-aware resampling, end to end on synthetic
-data.
+`DataConfig.transforms` (`config/data.py`) is a per-modality mapping: modality name ->
+ordered list of `TransformConfig` (a registry name plus its kwargs), so a second dataset
+never shares the first one's steps or statistics (`docs/adr/0015-per-modality-data-transforms.md`).
+`DataConfig.sequence_length` is keyed per modality the same way. `buildTransformPipeline(config)`
+resolves the mapping into one `ComposeTransform` per modality (a `dict[str, ComposeTransform]`;
+a modality absent from `transforms` is absent from the result, not an implicit identity).
+Nothing in this framework calls it automatically: a `loader_factory` may call it inside its
+own pipeline if it wants to, and each pipeline's `.inverse` also works directly as
+`visualization.reconstruction_plot`'s own `inverse_transform` hook
+(`pipelines["signal"].inverse`), while the returned dict is already shaped like
+`evaluation.visual_export.exportEvaluationFigures`'s `inverse_transforms` parameter.
+`examples/01_signal_vae_pipeline.py` demonstrates the full pipeline, including per-sample
+coordinate-aware resampling, end to end on synthetic data.
 
 # Permanent scope boundary (not deferred)
 

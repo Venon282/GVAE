@@ -8,6 +8,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Packaging, versioning and licence (roadmap P0-6). `LICENSE` holds the MIT text that
+  `pyproject.toml` has always declared. The copyright holder is a marked placeholder until the
+  owner supplies the name (roadmap decision D-12). `src/global_vae/py.typed` (PEP 561) is declared
+  as package data, so a downstream `mypy` sees the type hints. A "Releasing" section in the README
+  holds a short release checklist, including "tag, `pyproject.toml` and changelog agree".
+  `tests/unit/test_packaging.py` guards the result: the version is `MAJOR.MINOR.PATCH`, read from
+  `global_vae.__version__` and equal to the newest `CHANGELOG_<x.y.z>_<date>.md`; numpy is
+  declared and pydantic is not; every package imported at module level in `src/` is declared in
+  `pyproject.toml`; `py.typed` and `LICENSE` exist. Run against the previous state of the
+  repository, seven of its eight tests fail.
 - `tests/integration/test_docs_changelog_navigation.py` (roadmap P0-7), the changelog counterpart of
   `test_docs_adr_navigation.py`. It fails when a `CHANGELOG_<version>_<date>.md` file is not listed
   in `docs/changelog/SUMMARY.md`, when the list is not newest first, when a link or a label
@@ -138,4 +148,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- `pydantic` from the dependencies of `pyproject.toml` (roadmap P0-6). Nothing imports it and
+  `docs/adr/0011-hydra-config-layer.md` chose dataclasses for the config layer. That ADR still
+  lists pydantic as a dependency: it is left as written, because an ADR is never edited in place,
+  and this entry records that the listed dependency is gone.
+
 ### Fixed
+
+- `pip install .` produced an environment where `import global_vae.config` failed, because
+  `data/transforms/resample.py` imports numpy at module level and `pyproject.toml` never declared
+  it. `numpy>=1.24` is now a dependency (roadmap P0-6). Declaring it was preferred to a lazy
+  import: the module uses `np.ndarray` in its annotations, and a lazy import would only move the
+  failure to the first resample.
+- The version was written twice and disagreed with the tags: `pyproject.toml` and
+  `global_vae.__version__` both said 0.1.0 while the latest release is 1.2.0. Both now come from
+  `global_vae.__version__`, which is 1.2.0, and `pyproject.toml` reads it through
+  `[tool.setuptools.dynamic]` (roadmap P0-6).

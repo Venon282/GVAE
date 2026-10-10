@@ -84,6 +84,31 @@ value; raise it as coverage improves. The `lint` job is advisory until the 8 `N9
 findings (CamelCase module names, decision D-9 of the roadmap) are resolved, the other jobs
 are blocking.
 
+## Releasing
+
+The version is written in one place, `__version__` in `src/global_vae/__init__.py`.
+`pyproject.toml` declares it `dynamic` and reads it from there (`[tool.setuptools.dynamic]`), so
+the package metadata, `global_vae.__version__` and the `global_vae_version` stored in every
+checkpoint cannot drift apart. Release checklist:
+
+1. Pick the next version with semantic versioning (breaking change: major, new feature: minor,
+   fix: patch).
+2. Set `__version__` to it. Do not add a `version` key to `pyproject.toml`.
+3. Move the `[Unreleased]` entries of `docs/changelog/CHANGELOG.md` into a new
+   `docs/changelog/CHANGELOG_<x.y.z>_<YYYY-MM-DD>.md` under a `## [x.y.z] - <YYYY-MM-DD>`
+   heading, list it first in `docs/changelog/SUMMARY.md`, and leave an empty `[Unreleased]`
+   section behind.
+4. Check that the tag, `pyproject.toml` and the changelog agree: the tag is `v<x.y.z>`, the
+   `__version__` that `pyproject.toml` reads is `<x.y.z>`, and the newest changelog file is
+   `CHANGELOG_<x.y.z>_<date>.md`. `tests/unit/test_packaging.py` checks the last two.
+5. Run the checks of the previous section, then in a fresh virtual environment:
+   `pip install .`, `python -c "import global_vae.config, global_vae; print(global_vae.__version__)"`
+   and `pip check`. The printed version must equal the tag without its `v`.
+6. Tag the commit (`git tag v<x.y.z>`) and push the tag.
+
+`src/global_vae/py.typed` marks the package as typed (PEP 561), so a downstream `mypy` uses its
+type hints. It is declared as package data in `pyproject.toml`. The licence is MIT (`LICENSE`).
+
 ## Repository structure
 
 See spec §8 for the target layout; `src/global_vae/` mirrors it.

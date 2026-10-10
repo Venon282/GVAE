@@ -7,4 +7,4 @@ graph, and a registry-based extension mechanism so that new modalities
 never require touching the core.
 """
 
-__version__ = "0.1.0"
+__version__ = "1.2.0"

@@ -136,11 +136,13 @@ pinned.
 ---
 
 ## 4. Phase 0: hygiene and safety net (target 1.3.0)
+**Status:** done
 
 Suggested order: P0-1, P0-5, P0-4, P0-2, P0-3, P0-7, P0-6, P0-8. P0-1 comes first because it only
 adds a workflow, and P0-5 comes before P0-4 so that new tests land in the right folder.
 
 ### P0-1. CI workflow (S)
+**Status:** done
 
 **Why.** Spec §10 asks for GitHub Actions running lint, type-check and tests on every push. Today
 a regression is only caught when someone runs the checks by hand.
@@ -154,6 +156,7 @@ required checks on `main` (a GitHub setting, not a file).
 deliberate type error is blocked, and the previously skipped test runs.
 
 ### P0-2. Ruff clean-up (M)
+**Status:** done
 
 **Why.** 1071 findings, and `ruff>=0.4` is unpinned, so the counts change with the version.
 **Do.**
@@ -176,6 +179,7 @@ CI `lint` job is switched from advisory to required.
 **Depends on.** D-9, D-10 (defaults proposed; the rest can start now).
 
 ### P0-3. Typography sweep and guard (S)
+**Status:** done
 
 **Why.** Spec §10 bans em dashes and unicode arrows. There are 95 em dashes in 33 files (README, the spec
 itself, `docs/adr/index.md` with 15, most ADRs, how-to guides, 7 in `src/`) and 4 arrows in 2
@@ -188,6 +192,7 @@ owner's approval, since the spec is the ground truth.
 **Done when.** The scan finds nothing and the test runs in CI.
 
 ### P0-4. Close the spec-mandated test gaps (M)
+**Status:** done
 
 **Why.** Spec §10 requires unit tests per registry, validation of the routing graph at
 construction, and one integration test across the 8 configurations. Coverage shows what is
@@ -221,6 +226,7 @@ missing.
 `assemblers/` is at least 95%, overall coverage does not drop, and the guard in (g) has a test.
 
 ### P0-5. Test layout and markers (S)
+**Status:** done
 
 **Why.** Spec §8 and §10 expect `tests/unit/` and `tests/integration/`. `tests/unit/` is empty
 and all test modules sit in `tests/integration/`, including pure unit tests (`test_conv_math.py`,
@@ -233,6 +239,7 @@ because they run a script or an example in a subprocess, or run UMAP.
 documented.
 
 ### P0-6. Packaging, versioning and licence (S)
+**Status:** done
 
 **Do.**
 - Declare `numpy` in `dependencies`, or make its import in `resample.py` lazy.
@@ -249,6 +256,7 @@ clean, `global_vae.__version__` equals the tag, and `LICENSE` exists.
 **Depends on.** D-12 (the copyright holder).
 
 ### P0-7. Documentation hygiene (S)
+**Status:** done
 
 **Do.**
 - Refresh stale notes: `src/global_vae/losses/NOTE.md` (says the reconstruction and KL modules are
@@ -277,6 +285,7 @@ ADRs and changelogs finds nothing, and `mkdocs build --strict` lists no orphan c
 **Depends on.** D-11 (default proposed), and the owner's approval for the spec edits.
 
 ### P0-8. Type-check scope (S)
+**Status:** done
 
 **Do.**
 - Extend mypy to `scripts/` and `examples/` (6 errors in 3 files: optional-dict indexing in
@@ -294,11 +303,13 @@ ADRs and changelogs finds nothing, and `mkdocs build --strict` lists no orphan c
 ---
 
 ## 5. Phase 1: complete the configuration space (targets 1.4.0 to 1.6.0)
+**Status:** todo
 
 Goal: all 8 configurations of spec §2.1 build from config and are covered by one test. Suggested
 releases: 1.4.0 for P1-1 and P1-2, 1.5.0 for P1-3 and P1-4, 1.6.0 for P1-5 and P1-6.
 
 ### P1-1. Latent heads (M)
+**Status:** done
 
 **Spec.** §2.2, §3, §8, §10, §12.
 **Do.** Add `src/global_vae/heads/`: `base.py` (`AbstractLatentHead`, `forward(mu, logvar)`

@@ -254,7 +254,7 @@ global-vae/
 │       │   ├── concat_mlp.py
 │       │   ├── cross_attention.py
 │       │   └── residual.py      # ResidualFusion: wraps any strategy with a residual connection
-│       ├── heads/                # (planned)
+│       ├── heads/
 │       │   ├── base.py          # AbstractLatentHead interface
 │       │   ├── registry.py
 │       │   ├── identity.py      # default: no-op passthrough

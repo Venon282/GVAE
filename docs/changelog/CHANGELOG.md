@@ -8,6 +8,22 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Latent heads (roadmap P1-1, spec §2.2). The new `global_vae.heads` package holds
+  `AbstractLatentHead` (`base.py`: built from `in_dim` and `out_dim`, `forward(mu, logvar)` returns
+  the adapted `(mu, logvar)`, positive-integer validation, a shape check shared by the concrete
+  heads), the registry (`registry.py`: `registerHead`, `getHeadClass`, `listRegisteredHeads`) and
+  two built-ins, one class per file. `identity` is the default: it returns the very tensors it
+  receives and requires `in_dim == out_dim`. `linear` projects `mu` and `logvar` through two
+  separate `nn.Linear` layers (`to_mu`, `to_logvar`); the initialisation is Xavier uniform weights
+  and zero biases, so the prior `(0, 0)` maps to itself and two heads on one encoder start
+  different. `heads/__init__.py` imports both modules. `GlobalVae` does not use heads yet:
+  encoder fan-out is P1-2.
+- `tests/unit/test_heads.py`: registry, shape, gradient, initialisation and identity-is-a-no-op
+  tests. The latent head registry joins `tests/unit/test_registry_contract.py`, which now covers
+  ten registries (`test_nine_registries_are_covered` became `test_ten_registries_are_covered`).
+- `docs/how-to/add-a-strategy.md` covers latent heads: the table row, the constructor contract
+  (`in_dim` and `out_dim` first) and the `forward` signature. The spec §8 tree no longer marks
+  `heads/` as `(planned)`.
 - `tests/unit/test_deprecated_module_paths.py` and `tests/unit/test_ci_workflow.py` (roadmap
   P0-2). The first pins the deprecation shims below: each old import path warns and names its
   replacement, returns the very same class, registers nothing twice and defines nothing of its

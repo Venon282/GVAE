@@ -1,4 +1,4 @@
-# Add a fusion, assembler, regularizer, transform, beta schedule, callback, or logger
+# Add a fusion, latent head, assembler, regularizer, transform, beta schedule, callback, or logger
 
 Every one of these follows the exact same three-step pattern: subclass an
 abstract base class, decorate it to self-register under a name, and import
@@ -8,6 +8,7 @@ runs.
 | You're adding a... | Base class | Decorator | Lives in | Import it from |
 |---|---|---|---|---|
 | Fusion strategy | `AbstractFusion` | `@registerFusion("name")` | `fusion/` | `fusion/__init__.py` |
+| Latent head | `AbstractLatentHead` | `@registerHead("name")` | `heads/` | `heads/__init__.py` |
 | Assembler | `AbstractAssembler` | `@registerAssembler("name")` | `assemblers/` | `assemblers/__init__.py` |
 | Latent regularizer | `AbstractLatentRegularizer` | `@registerRegularizer("name")` | `losses/regularizers/` | `losses/regularizers/__init__.py` |
 | Data transform | `AbstractTransform` | `@registerTransform("name")` | `data/transforms/` | `data/transforms/__init__.py` |
@@ -41,6 +42,16 @@ why the two stay apart.
 5. Add a unit test covering registration, lookup, and (where relevant) the
    duplicate-name and unknown-name error paths, following the pattern of the
    existing registry tests.
+
+## A note specific to latent heads
+
+A latent head sits on one encoder -> latent edge and adapts the encoder's
+`(mu, logvar)` to the width of the latent space that edge feeds (spec §2.2).
+It is how one encoder will feed several latent spaces, a shared one and
+private ones for example, instead of giving the encoder several output heads.
+The built-ins are `identity` (the default, a no-op that needs
+`in_dim == out_dim`) and `linear` (one learned projection for `mu` and
+another for `logvar`, Xavier uniform weights and zero biases).
 
 ## A note specific to data transforms
 

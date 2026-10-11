@@ -32,7 +32,7 @@ nav:
       - Roadmap: roadmap.md
   - How-to Guides:
       - Add a new modality: how-to/add-a-modality.md
-      - Add a fusion / assembler / regularizer / transform / schedule: how-to/add-a-strategy.md
+      - Add a fusion / latent head / assembler / regularizer / transform / schedule: how-to/add-a-strategy.md
       - Choose and configure a fusion strategy: how-to/choose-a-fusion-strategy.md
       - Train a model (Hydra config): how-to/train.md
       - Evaluate and visualize a checkpoint: how-to/evaluate.md

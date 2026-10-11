@@ -1,9 +1,9 @@
 """Contract test shared by every self-registration registry (spec §10, roadmap P0-4(c)).
 
-The codebase has nine registries (encoders, decoders, fusion strategies, assemblers, latent
-regularizers, data transforms, beta schedules, callbacks and experiment loggers), each a small
-module with the same three functions. This file states the behaviour they all promise and checks
-it once per registry, so that a registry that drifts, or a new one that forgets part of the
+The codebase has ten registries (encoders, decoders, fusion strategies, latent heads, assemblers,
+latent regularizers, data transforms, beta schedules, callbacks and experiment loggers), each a
+small module with the same three functions. This file states the behaviour they all promise and
+checks it once per registry, so that a registry that drifts, or a new one that forgets part of the
 pattern, fails here:
 
 * a class registered under a name is returned by the lookup, unchanged;
@@ -12,10 +12,11 @@ pattern, fails here:
 * the `listRegistered*` function returns names in sorted order;
 * importing the registry's subpackage registers at least one built-in.
 
-A registry added later (the latent head registry of roadmap P1-1, for example) joins by adding
-one `_RegistrySpec` to `_REGISTRIES`; `test_nine_registries_are_covered` makes forgetting that
-visible. Behaviour that belongs to one registry only (which built-ins exist, what each does) stays
-in that registry's own tests, such as `test_callback_registry.py` and `test_assemblers.py`.
+A registry added later joins by adding one `_RegistrySpec` to `_REGISTRIES` (the latent head
+registry of roadmap P1-1 did); `test_ten_registries_are_covered` makes forgetting that visible.
+Behaviour that belongs to one registry only (which built-ins exist, what each does) stays in that
+registry's own tests, such as `test_callback_registry.py`, `test_assemblers.py` and
+`test_heads.py`.
 
 Every test runs against a private copy of the registry's dictionary, swapped in with
 `monkeypatch`, so the throwaway classes registered here never leak into other tests.
@@ -46,6 +47,8 @@ from global_vae.encoders.base import AbstractEncoder
 from global_vae.encoders.registry import getEncoderClass, listRegisteredEncoders, registerEncoder
 from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import getFusionClass, listRegisteredFusions, registerFusion
+from global_vae.heads.base import AbstractLatentHead
+from global_vae.heads.registry import getHeadClass, listRegisteredHeads, registerHead
 from global_vae.losses.regularizers.base import AbstractLatentRegularizer
 from global_vae.losses.regularizers.registry import (
     getRegularizerClass,
@@ -127,6 +130,16 @@ _REGISTRIES: tuple[_RegistrySpec, ...] = (
         registerFusion,
         getFusionClass,
         listRegisteredFusions,
+    ),
+    _RegistrySpec(
+        "heads",
+        "global_vae.heads",
+        "global_vae.heads.registry",
+        "_HEAD_REGISTRY",
+        AbstractLatentHead,
+        registerHead,
+        getHeadClass,
+        listRegisteredHeads,
     ),
     _RegistrySpec(
         "assemblers",
@@ -231,10 +244,10 @@ def spec(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> _Re
     return registry_spec
 
 
-def test_nine_registries_are_covered() -> None:
-    """The contract runs over all nine registries; adding a tenth means adding a spec."""
-    assert len(_REGISTRIES) == 9
-    assert len({s.registry_attr for s in _REGISTRIES}) == 9
+def test_ten_registries_are_covered() -> None:
+    """The contract runs over all ten registries; adding an eleventh means adding a spec."""
+    assert len(_REGISTRIES) == 10
+    assert len({s.registry_attr for s in _REGISTRIES}) == 10
 
 
 class TestRegisterAndLookUp:

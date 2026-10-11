@@ -20,6 +20,8 @@ docstring), so these tests stay exactly reproducible like every other test in th
 suite instead of depending on real training dynamics.
 """
 
+from typing import Any
+
 import pytest
 import torch
 from torch import nn
@@ -110,7 +112,7 @@ def _fixedDataset(num_batches: int = 2, seed: int = 0) -> list[dict[str, torch.T
     return [{"signal": torch.randn(BATCH_SIZE, INPUT_DIM)} for _ in range(num_batches)]
 
 
-def _buildTrainer(**kwargs) -> Trainer:
+def _buildTrainer(**kwargs: Any) -> Trainer:
     return Trainer(_buildSingleModalityModel(), device="cpu", **kwargs)
 
 

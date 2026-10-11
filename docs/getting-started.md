@@ -61,6 +61,11 @@ The same four commands run in CI on every push and pull request
 (`.github/workflows/ci.yaml`). `pytest` must keep coverage at or above the 95% floor, and the
 `ruff` job is advisory until the lint clean-up (roadmap P0-2) lands.
 
+`mypy` with no arguments checks `src/`, `scripts/`, `examples/` and `tests/` in strict mode, on
+Python 3.11 in CI. Test functions may carry no annotations, but a partly annotated one is an
+error. On Python 3.12 or newer, run `mypy --python-version <your version>` locally, because the
+numpy 2.5 stubs that pip installs there do not match the configured `python_version = "3.11"`.
+
 Two shorter loops are available while you work. `tests/unit/` holds the tests of one component
 at a time and `tests/integration/` the ones that wire several together; the `slow` marker tags
 the tests that run a script or an example in a subprocess, build the docs site or run UMAP.

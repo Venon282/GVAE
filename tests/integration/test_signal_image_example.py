@@ -48,7 +48,8 @@ def example() -> ModuleType:
 
 
 def _batch(example: ModuleType, num_samples: int = 4, seed: int = 0) -> dict[str, torch.Tensor]:
-    return example.buildSplit(num_samples, np.random.default_rng(seed))
+    split: dict[str, torch.Tensor] = example.buildSplit(num_samples, np.random.default_rng(seed))
+    return split
 
 
 class TestSyntheticData:

@@ -318,12 +318,14 @@ def runVariant(
         if cfg.model.single_latent is not None
         else None
     )
+    best_checkpoint_cfg = cfg.training.callbacks["best_checkpoint"]
+    assert best_checkpoint_cfg is not None  # every variant keeps the best-checkpoint callback
     logger.info(
         "  resolved from that composed config: model=%s, regularizer=%s, "
         "best-checkpoint monitor=%s, lr=%s.",
         cfg.model.name,
         regularizer_strategy,
-        cfg.training.callbacks["best_checkpoint"]["monitor"],
+        best_checkpoint_cfg["monitor"],
         cfg.training.optimizer.kwargs.get("lr"),
     )
     setGlobalSeed(cfg.seed, deterministic=cfg.deterministic)
@@ -344,7 +346,7 @@ def runVariant(
     )
 
     best_model = buildModelFromConfig(cfg.model)
-    best_checkpoint_path = cfg.training.callbacks["best_checkpoint"]["path"]
+    best_checkpoint_path = best_checkpoint_cfg["path"]
     assert best_checkpoint_path is not None  # every variant sets one
     loadCheckpoint(Path(best_checkpoint_path), model=best_model)
 

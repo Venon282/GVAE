@@ -5,12 +5,15 @@ Uses its own trivial linear dummy encoder/decoder registered under a
 for why test files do not import each other's dummy fixtures).
 """
 
+from typing import cast
+
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pytest
 import torch
+from matplotlib.patches import Rectangle
 from torch import nn
 
 from global_vae.decoders.base import AbstractDecoder
@@ -230,7 +233,7 @@ class TestPlotPerDimensionKl:
         expected = (-0.5 * (1 + logvar - mu.pow(2) - logvar.exp())).mean(dim=0)
 
         fig = plotPerDimensionKl(mu, logvar)
-        bar_heights = [patch.get_height() for patch in fig.axes[0].patches]
+        bar_heights = [cast(Rectangle, patch).get_height() for patch in fig.axes[0].patches]
         assert torch.allclose(torch.tensor(bar_heights, dtype=expected.dtype), expected, atol=1e-5)
         plt.close(fig)
 

@@ -10,6 +10,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 import pytest
 import torch
 from torch import nn
@@ -108,7 +109,7 @@ class TestPlotLossCurves:
         history = [{"train/loss/total": 1.0, "other": 5.0}, {"train/loss/total": 0.5, "other": 4.0}]
         fig = plotLossCurves(history, metrics=["other"])
         line = fig.axes[0].lines[0]
-        assert list(line.get_ydata()) == [5.0, 4.0]
+        assert np.asarray(line.get_ydata()).tolist() == [5.0, 4.0]
         plt.close(fig)
 
     def test_metric_present_only_in_later_epochs_only_plots_those_points(self) -> None:
@@ -119,7 +120,7 @@ class TestPlotLossCurves:
         ]
         fig = plotLossCurves(history)
         val_line = next(line for line in fig.axes[0].lines if line.get_label() == "val/loss/total")
-        assert list(val_line.get_xdata()) == [1, 2]
+        assert np.asarray(val_line.get_xdata()).tolist() == [1, 2]
         plt.close(fig)
 
     def test_log_scale_does_not_raise(self) -> None:
@@ -150,7 +151,7 @@ class TestPlotStepCurves:
         step_history = [{"step": 10, "loss/total": 1.0}, {"step": 20, "loss/total": 0.5}]
         fig = plotStepCurves(step_history)
         line = fig.axes[0].lines[0]
-        assert list(line.get_xdata()) == [10, 20]
+        assert np.asarray(line.get_xdata()).tolist() == [10, 20]
         plt.close(fig)
 
     def test_default_metrics_excludes_the_step_key_itself(self) -> None:
@@ -179,7 +180,7 @@ class TestPlotBetaSchedule:
         fig = plotBetaSchedule(schedule, num_steps=20)
         line = fig.axes[0].lines[0]
         expected = [schedule(step) for step in range(20)]
-        assert list(line.get_ydata()) == pytest.approx(expected)
+        assert np.asarray(line.get_ydata()).tolist() == pytest.approx(expected)
         plt.close(fig)
 
     def test_dict_of_schedules_produces_one_line_each(self) -> None:

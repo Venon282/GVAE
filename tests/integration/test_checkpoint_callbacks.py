@@ -17,6 +17,8 @@ collection, re-running its `@registerEncoder(...)` decorators and raising "alrea
 registered".
 """
 
+from pathlib import Path
+
 import pytest
 import torch
 from torch import nn
@@ -75,6 +77,13 @@ class _DummySignalDecoder(AbstractDecoder):
         return "signal"
 
 
+def _muWeight(model: GlobalVae) -> torch.Tensor:
+    """The weight of the dummy encoder's `to_mu` layer (`ModuleDict` lookups are untyped)."""
+    encoder = model.encoders["signal"]
+    assert isinstance(encoder, _DummySignalEncoder)
+    return encoder.to_mu.weight
+
+
 def _buildSingleModalityModel() -> GlobalVae:
     return GlobalVae.createSingleLatent(
         modality_configs={
@@ -96,7 +105,7 @@ def _fixedDataset(
 
 
 class TestCheckpointCallback:
-    def test_saves_every_n_epochs(self, tmp_path) -> None:
+    def test_saves_every_n_epochs(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         callback = CheckpointCallback(directory=tmp_path, every_n_epochs=2)
         trainer = Trainer(model, device="cpu", callbacks=[callback])
@@ -106,7 +115,7 @@ class TestCheckpointCallback:
         saved_files = sorted(tmp_path.glob("checkpoint_epoch_*.pt"))
         assert len(saved_files) == 2  # after epoch 1 (0-based) and epoch 3
 
-    def test_last_checkpoint_can_be_loaded_and_matches_final_state(self, tmp_path) -> None:
+    def test_last_checkpoint_can_be_loaded_and_matches_final_state(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         callback = CheckpointCallback(directory=tmp_path, every_n_epochs=1)
         trainer = Trainer(model, device="cpu")
@@ -119,11 +128,11 @@ class TestCheckpointCallback:
         metadata = loadCheckpoint(last_checkpoint, model=reloaded_model)
         assert metadata.start_epoch == 3
         assert torch.equal(
-            reloaded_model.encoders["signal"].to_mu.weight,
-            trainer.model.encoders["signal"].to_mu.weight,
+            _muWeight(reloaded_model),
+            _muWeight(trainer.model),
         )
 
-    def test_keep_last_n_deletes_older_checkpoints(self, tmp_path) -> None:
+    def test_keep_last_n_deletes_older_checkpoints(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         callback = CheckpointCallback(directory=tmp_path, every_n_epochs=1, keep_last_n=2)
         trainer = Trainer(model, device="cpu", callbacks=[callback])
@@ -134,17 +143,17 @@ class TestCheckpointCallback:
         assert len(saved_files) == 2
         assert saved_files[-1].name == "checkpoint_epoch_0003.pt"
 
-    def test_invalid_every_n_epochs_raises(self, tmp_path) -> None:
+    def test_invalid_every_n_epochs_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="every_n_epochs"):
             CheckpointCallback(directory=tmp_path, every_n_epochs=0)
 
-    def test_invalid_keep_last_n_raises(self, tmp_path) -> None:
+    def test_invalid_keep_last_n_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="keep_last_n"):
             CheckpointCallback(directory=tmp_path, keep_last_n=0)
 
 
 class TestBestCheckpointCallback:
-    def test_only_saves_on_improvement_min_mode(self, tmp_path) -> None:
+    def test_only_saves_on_improvement_min_mode(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         checkpoint_path = tmp_path / "best.pt"
         callback = BestCheckpointCallback(path=checkpoint_path, monitor="train/loss/total")
@@ -161,7 +170,7 @@ class TestBestCheckpointCallback:
         assert callback.best_value == min(entry["train/loss/total"] for entry in trainer.history)
         assert best_values  # sanity: the recorded best actually occurred in history
 
-    def test_always_overwrites_the_same_single_file(self, tmp_path) -> None:
+    def test_always_overwrites_the_same_single_file(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         checkpoint_path = tmp_path / "best.pt"
         callback = BestCheckpointCallback(path=checkpoint_path, monitor="train/loss/total")
@@ -172,7 +181,7 @@ class TestBestCheckpointCallback:
         assert checkpoint_path.exists()
         assert len(list(tmp_path.glob("*.pt"))) == 1
 
-    def test_max_mode_keeps_the_highest_value(self, tmp_path) -> None:
+    def test_max_mode_keeps_the_highest_value(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         checkpoint_path = tmp_path / "best.pt"
         callback = BestCheckpointCallback(
@@ -185,7 +194,7 @@ class TestBestCheckpointCallback:
         assert callback.best_value == max(entry["train/loss/total"] for entry in trainer.history)
 
     def test_best_checkpoint_can_be_loaded_and_matches_the_best_epoch_weights(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """The actual point: loading `path` at any time gives the best model, not the last one."""
         model = _buildSingleModalityModel()
@@ -204,7 +213,7 @@ class TestBestCheckpointCallback:
         best_epoch_metrics = min(trainer.history, key=lambda entry: entry["train/loss/total"])
         assert metadata.history[-1] == best_epoch_metrics
 
-    def test_missing_monitor_key_raises_key_error(self, tmp_path) -> None:
+    def test_missing_monitor_key_raises_key_error(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         callback = BestCheckpointCallback(path=tmp_path / "best.pt", monitor="val/loss/total")
         trainer = Trainer(model, device="cpu", callbacks=[callback])
@@ -212,7 +221,7 @@ class TestBestCheckpointCallback:
         with pytest.raises(KeyError, match="val/loss/total"):
             trainer.fit(_fixedDataset(num_batches=2), num_epochs=1)  # no val_dataloader given
 
-    def test_works_with_validation_dataloader(self, tmp_path) -> None:
+    def test_works_with_validation_dataloader(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         checkpoint_path = tmp_path / "best.pt"
         callback = BestCheckpointCallback(path=checkpoint_path, monitor="val/loss/total")
@@ -224,6 +233,6 @@ class TestBestCheckpointCallback:
 
         assert checkpoint_path.exists()
 
-    def test_invalid_mode_raises(self, tmp_path) -> None:
+    def test_invalid_mode_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="mode"):
             BestCheckpointCallback(path=tmp_path / "best.pt", mode="sideways")

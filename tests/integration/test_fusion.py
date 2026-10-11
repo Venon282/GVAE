@@ -219,10 +219,15 @@ class TestMixtureOfExperts:
         mu, logvar = fusion(params)
 
         weight = 1.0 / 3.0
-        expected_mu = sum(weight * expert_mu for expert_mu, _ in params.values())
+        # `start=` keeps the result a `Tensor` for the type checker (a bare `sum` may be `0`).
+        zero = torch.zeros(())
+        expected_mu = sum((weight * expert_mu for expert_mu, _ in params.values()), start=zero)
         expected_second_moment = sum(
-            weight * (torch.exp(expert_logvar) + expert_mu.pow(2))
-            for expert_mu, expert_logvar in params.values()
+            (
+                weight * (torch.exp(expert_logvar) + expert_mu.pow(2))
+                for expert_mu, expert_logvar in params.values()
+            ),
+            start=zero,
         )
         expected_logvar = torch.log(expected_second_moment - expected_mu.pow(2))
 
@@ -614,7 +619,7 @@ class TestFusionWiredIntoGlobalVae:
 
     def test_regularization_loss_is_finite_for_every_new_strategy(self) -> None:
         """The regularization loss on the fused posterior is finite."""
-        for strategy, kwargs in [
+        cases: list[tuple[str, dict[str, object]]] = [
             ("moe", {}),
             (
                 "concat_mlp",
@@ -624,7 +629,8 @@ class TestFusionWiredIntoGlobalVae:
                 },
             ),
             ("cross_attention", {"latent_dim": LATENT_DIM, "num_heads": 2}),
-        ]:
+        ]
+        for strategy, kwargs in cases:
             model = _buildModel(strategy, kwargs)
             inputs = {"signal": torch.randn(BATCH_SIZE, 6), "image": torch.randn(BATCH_SIZE, 6)}
             outputs = model(inputs)

@@ -20,6 +20,7 @@ re-running its `@registerEncoder(...)` decorators and raising
 """
 
 import random
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -78,6 +79,13 @@ class _DummySignalDecoder(AbstractDecoder):
         return "signal"
 
 
+def _muWeight(model: GlobalVae) -> torch.Tensor:
+    """The weight of the dummy encoder's `to_mu` layer (`ModuleDict` lookups are untyped)."""
+    encoder = model.encoders["signal"]
+    assert isinstance(encoder, _DummySignalEncoder)
+    return encoder.to_mu.weight
+
+
 def _buildSingleModalityModel() -> GlobalVae:
     return GlobalVae.createSingleLatent(
         modality_configs={
@@ -99,7 +107,7 @@ def _fixedDataset(
 
 
 class TestSaveAndLoadRoundtrip:
-    def test_model_weights_are_restored_exactly(self, tmp_path) -> None:
+    def test_model_weights_are_restored_exactly(self, tmp_path: Path) -> None:
         trained_model = _buildSingleModalityModel()
         trainer = Trainer(trained_model, device="cpu", optimizer_kwargs={"lr": 0.1})
         trainer.fit(_fixedDataset(num_batches=3), num_epochs=5)  # move weights away from init
@@ -109,17 +117,17 @@ class TestSaveAndLoadRoundtrip:
 
         fresh_model = _buildSingleModalityModel()  # different random init
         assert not torch.equal(
-            fresh_model.encoders["signal"].to_mu.weight,
-            trainer.model.encoders["signal"].to_mu.weight,
+            _muWeight(fresh_model),
+            _muWeight(trainer.model),
         )
 
         loadCheckpoint(checkpoint_path, model=fresh_model)
         assert torch.equal(
-            fresh_model.encoders["signal"].to_mu.weight,
-            trainer.model.encoders["signal"].to_mu.weight,
+            _muWeight(fresh_model),
+            _muWeight(trainer.model),
         )
 
-    def test_optimizer_state_is_restored(self, tmp_path) -> None:
+    def test_optimizer_state_is_restored(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
         batch = {"signal": torch.randn(BATCH_SIZE, INPUT_DIM)}
@@ -140,7 +148,7 @@ class TestSaveAndLoadRoundtrip:
         for key in original_state:
             assert torch.equal(original_state[key]["exp_avg"], restored_state[key]["exp_avg"])
 
-    def test_config_is_restored_unchanged(self, tmp_path) -> None:
+    def test_config_is_restored_unchanged(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         config = {"latent_dim": 4, "modalities": ["signal"], "notes": "first run"}
         checkpoint_path = tmp_path / "with_config.pt"
@@ -150,7 +158,7 @@ class TestSaveAndLoadRoundtrip:
         metadata = loadCheckpoint(checkpoint_path, model=fresh_model)
         assert metadata.config == config
 
-    def test_step_epoch_and_history_roundtrip_through_trainer_methods(self, tmp_path) -> None:
+    def test_step_epoch_and_history_roundtrip_through_trainer_methods(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         trainer = Trainer(model, device="cpu")
         trainer.fit(_fixedDataset(num_batches=2), num_epochs=3)
@@ -167,7 +175,7 @@ class TestSaveAndLoadRoundtrip:
         assert len(resumed_trainer.history) == 3
         assert returned_config == {"note": "checkpoint"}
 
-    def test_resumed_training_continues_epoch_numbering(self, tmp_path) -> None:
+    def test_resumed_training_continues_epoch_numbering(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         trainer = Trainer(model, device="cpu")
         trainer.fit(_fixedDataset(num_batches=2), num_epochs=2)
@@ -184,7 +192,7 @@ class TestSaveAndLoadRoundtrip:
 
 
 class TestRngStateRoundtrip:
-    def test_restoring_rng_state_reproduces_the_next_draws(self, tmp_path) -> None:
+    def test_restoring_rng_state_reproduces_the_next_draws(self, tmp_path: Path) -> None:
         random.seed(123)
         np.random.seed(123)
         torch.manual_seed(123)
@@ -210,7 +218,7 @@ class TestRngStateRoundtrip:
         assert np.array_equal(np.random.rand(3), expected_numpy)
         assert torch.equal(torch.randn(3), expected_torch)
 
-    def test_restore_rng_state_false_leaves_current_rng_untouched(self, tmp_path) -> None:
+    def test_restore_rng_state_false_leaves_current_rng_untouched(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         checkpoint_path = tmp_path / "rng_skip.pt"
         saveCheckpoint(checkpoint_path, model=model, include_rng_state=True)
@@ -224,7 +232,7 @@ class TestRngStateRoundtrip:
         assert not metadata.rng_state_restored
         assert torch.equal(torch.randn(3), expected)
 
-    def test_no_rng_state_saved_when_disabled(self, tmp_path) -> None:
+    def test_no_rng_state_saved_when_disabled(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         checkpoint_path = tmp_path / "no_rng.pt"
         saveCheckpoint(checkpoint_path, model=model, include_rng_state=False)
@@ -235,12 +243,14 @@ class TestRngStateRoundtrip:
 
 
 class TestErrorPaths:
-    def test_missing_file_raises_file_not_found(self, tmp_path) -> None:
+    def test_missing_file_raises_file_not_found(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         with pytest.raises(FileNotFoundError):
             loadCheckpoint(tmp_path / "does_not_exist.pt", model=model)
 
-    def test_requesting_optimizer_restore_without_saved_optimizer_raises(self, tmp_path) -> None:
+    def test_requesting_optimizer_restore_without_saved_optimizer_raises(
+        self, tmp_path: Path
+    ) -> None:
         model = _buildSingleModalityModel()
         checkpoint_path = tmp_path / "no_optimizer.pt"
         saveCheckpoint(checkpoint_path, model=model)  # no optimizer passed in

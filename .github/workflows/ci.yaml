@@ -71,9 +71,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Python 3.11 is the version pyproject.toml asks mypy to check against
-      # (`python_version = "3.11"`). On 3.13 with a recent numpy, mypy reports errors from
-      # the numpy stubs (roadmap P0-8), so this job does not use 3.13.
+      # Pinned to the interpreter that `python_version` in [tool.mypy] names (3.11, the oldest
+      # supported Python), see roadmap P0-8. tests/unit/test_typecheck_config.py fails when the
+      # two disagree. Do not move this job to 3.12 or newer on its own: pip would then install
+      # numpy 2.5, whose stubs make mypy fail on `python_version = "3.11"`.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -87,7 +88,8 @@ jobs:
           pip install -e ".[dev,docs]"
 
       - name: mypy
-        # Scope and strictness come from [tool.mypy] in pyproject.toml.
+        # Scope and strictness come from [tool.mypy] in pyproject.toml: `src`, `scripts`,
+        # `examples` and `tests` (relaxed, no annotation requirement on test functions).
         run: mypy
 
   tests:

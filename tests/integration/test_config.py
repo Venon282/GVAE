@@ -15,6 +15,7 @@ initialize_config_dir(...)` block clears Hydra's global state on exit, verified 
 """
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
@@ -37,10 +38,12 @@ from global_vae.config.training import (
     resolveOptimizerClass,
     resolveReconstructionLossFn,
 )
+from global_vae.encoders.OneDCnnResidualEncoder import OneDCnnResidualEncoder
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
 from global_vae.training.callbacks.best_checkpoint import BestCheckpointCallback
 from global_vae.training.callbacks.checkpoint import CheckpointCallback
+from global_vae.training.callbacks.early_stopping import EarlyStopping
 from global_vae.training.loggers.csv_logger import CsvLogger
 from global_vae.training.loggers.tensorboard_logger import TensorBoardLogger
 from global_vae.training.trainer import Trainer
@@ -51,6 +54,13 @@ _BASE_OVERRIDES = [f"data.loader_factory={_LOADER_FACTORY}", "data.train_path=/u
 
 def _loadSignalVaeConfig(overrides: list[str] | None = None) -> ExperimentConfig:
     return loadExperimentConfig(overrides=[*_BASE_OVERRIDES, *(overrides or [])])
+
+
+def _callbackSettings(cfg: ExperimentConfig, name: str) -> dict[str, Any]:
+    """The kwargs of one callback entry (an entry is `None` when it declares no kwargs)."""
+    settings = cfg.training.callbacks[name]
+    assert settings is not None
+    return settings
 
 
 class TestLoadExperimentConfig:
@@ -77,9 +87,9 @@ class TestLoadExperimentConfig:
         literal string.
         """
         cfg = _loadSignalVaeConfig(overrides=["output_dir=/tmp/some_run"])
-        assert cfg.training.callbacks["checkpoint"]["directory"] == "/tmp/some_run/checkpoints"
+        assert _callbackSettings(cfg, "checkpoint")["directory"] == "/tmp/some_run/checkpoints"
         assert (
-            cfg.training.callbacks["best_checkpoint"]["path"] == "/tmp/some_run/checkpoints/best.pt"
+            _callbackSettings(cfg, "best_checkpoint")["path"] == "/tmp/some_run/checkpoints/best.pt"
         )
         logger_paths = {entry.name: entry.kwargs for entry in cfg.training.loggers}
         assert logger_paths["csv"]["path"] == "/tmp/some_run/metrics.csv"
@@ -97,13 +107,14 @@ class TestLoadExperimentConfig:
         assert cfg.training.num_epochs == 7
         assert cfg.training.optimizer.kwargs["lr"] == pytest.approx(0.005)
         assert cfg.data.batch_size == 64
+        assert cfg.model.single_latent is not None
         assert cfg.model.single_latent.dim == 32
 
     def test_overriding_an_already_present_callback_needs_no_plus_prefix(self) -> None:
         cfg = _loadSignalVaeConfig(
             overrides=["training.callbacks.best_checkpoint.monitor=val/loss/reconstruction"]
         )
-        assert cfg.training.callbacks["best_checkpoint"]["monitor"] == "val/loss/reconstruction"
+        assert _callbackSettings(cfg, "best_checkpoint")["monitor"] == "val/loss/reconstruction"
 
     def test_adding_a_brand_new_callback_from_the_cli_needs_a_plus_prefix(self) -> None:
         """Hydra's own struct-mode rule for any dict field, not specific to `callbacks`.
@@ -196,6 +207,7 @@ class TestBuildModelFromConfig:
             config_name="experiment/signal_vae",
             overrides=[*_BASE_OVERRIDES, "model=default"],
         )
+        assert cfg.model.single_latent is not None
         assert cfg.model.single_latent.fusion is not None
         assert cfg.model.single_latent.fusion.strategy == "poe"
 
@@ -329,10 +341,10 @@ class TestSignalResnetVaeExperiment:
         # (each stage contributes exactly one Residual1DBlock plus, optionally, one
         # pooling layer; block_depths controls each block's own internal layer count,
         # not how many blocks exist).
+        encoder = model.encoders["signal"]
+        assert isinstance(encoder, OneDCnnResidualEncoder)
         residual_blocks = [
-            module
-            for module in model.encoders["signal"].conv
-            if type(module).__name__ == "Residual1DBlock"
+            module for module in encoder.conv if type(module).__name__ == "Residual1DBlock"
         ]
         assert len(residual_blocks) == 5
 
@@ -501,6 +513,7 @@ class TestBuildCallbacksFromConfig:
         config = TrainingConfig(callbacks={"early_stopping": None})
         callbacks = buildCallbacksFromConfig(config)
         assert len(callbacks) == 1
+        assert isinstance(callbacks[0], EarlyStopping)
         assert callbacks[0].monitor == "val/loss/total"  # EarlyStopping's own default
 
     def test_unknown_callback_name_raises_key_error(self) -> None:
@@ -531,6 +544,7 @@ class TestBuildCallbacksFromConfig:
             callbacks={"checkpoint": {"directory": str(tmp_path), "config": "explicit"}}
         )
         callbacks = buildCallbacksFromConfig(config, config_snapshot={"some": "snapshot"})
+        assert isinstance(callbacks[0], CheckpointCallback)
         assert callbacks[0].config == "explicit"
 
 

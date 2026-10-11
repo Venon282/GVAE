@@ -193,7 +193,8 @@ class TestAbstractAssembler:
 
         class _Deferring(AbstractAssembler):
             def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
-                return super().forward(latents)
+                # The abstract body is called on purpose: that is what this test checks.
+                return super().forward(latents)  # type: ignore[safe-super]
 
         with pytest.raises(NotImplementedError):
             _Deferring()([torch.zeros(1, 1)])

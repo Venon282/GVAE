@@ -58,6 +58,14 @@ mypy
 pytest --cov=global_vae --cov-fail-under=95
 ```
 
+`mypy` with no arguments checks `src/`, `scripts/`, `examples/` and `tests/` in strict mode
+(`[tool.mypy]` in `pyproject.toml`). A test function may carry no annotations at all, but a
+function with some annotated and some unannotated parameters is an error: write
+`tmp_path: Path`, not a bare `tmp_path`. Run it on Python 3.11, the version `python_version`
+names and the one CI uses. On Python 3.12 or newer pip installs numpy 2.5, whose stubs make mypy
+report errors that are not in the code. On a newer interpreter, pass `--python-version` (for
+example `mypy --python-version 3.13`) for a local check; CI stays the reference.
+
 ### Test layout and fast loops
 
 `tests/unit/` holds the tests of one component at a time (a class, a function, a registry),

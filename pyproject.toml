@@ -111,9 +111,17 @@ convention = "google"
 known-first-party = ["global_vae"]
 
 [tool.mypy]
+# `python_version` is the oldest Python the project supports (`requires-python`), so syntax and
+# stdlib APIs newer than 3.11 are rejected. It must equal the interpreter of the CI `types` job
+# (.github/workflows/ci.yaml), which tests/unit/test_typecheck_config.py guards. Type-check on
+# Python 3.11: pip then installs numpy 2.4, whose stubs support 3.11. numpy 2.5 requires Python
+# 3.12, and with `python_version = "3.11"` its stubs make mypy report errors that are not in the
+# code (call-overload on `ndarray.min()` and `max()` in data/transforms/resample.py). On a newer
+# interpreter, pass `--python-version` explicitly (roadmap P0-8).
 python_version = "3.11"
 strict = true
-packages = ["global_vae"]
+# `mypy` with no arguments checks all four trees (roadmap P0-8). `tests` is relaxed below.
+files = ["src", "scripts", "examples", "tests"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
@@ -131,6 +139,24 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "scipy.*"
 ignore_missing_imports = true
+
+# mkdocs-gen-files ships partial type information: `Nav` is not re-exported explicitly and its
+# constructor has no annotations. Only scripts/gen_ref_pages.py uses it. mypy names that script
+# `gen_ref_pages`, because `scripts/` is not a package.
+[[tool.mypy.overrides]]
+module = "mkdocs_gen_files"
+implicit_reexport = true
+
+[[tool.mypy.overrides]]
+module = "gen_ref_pages"
+disallow_untyped_calls = false
+
+# Tests are checked, but a test function may carry no annotation at all (about 900 tests, and a
+# test name already states what it checks). A partly annotated function is still an error:
+# annotate the parameter too (`tmp_path: Path`). Everything else of `strict` applies.
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

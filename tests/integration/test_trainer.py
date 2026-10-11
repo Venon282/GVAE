@@ -542,7 +542,8 @@ class TestGradientClipping:
         trainer.fitEpoch([batch], epoch=0)
 
         total_norm_sq = sum(
-            p.grad.pow(2).sum() for p in trainer.model.parameters() if p.grad is not None
+            (p.grad.pow(2).sum() for p in trainer.model.parameters() if p.grad is not None),
+            start=torch.zeros(()),  # keeps the result a `Tensor` for the type checker
         )
         assert torch.sqrt(total_norm_sq) <= 0.01 + 1e-4
 

@@ -11,7 +11,7 @@ These tests pin the fix at every level it lives at: the shared helpers in
 through `OmegaConf` and `buildModelFromConfig`.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import torch
@@ -41,7 +41,7 @@ def _yamlShapeKwargs() -> dict[str, Any]:
     )
     assert isinstance(container, dict)
     assert isinstance(container["output_shape"], list)
-    return container
+    return cast(dict[str, Any], container)
 
 
 class TestResolveSpatialShape:
@@ -72,13 +72,15 @@ class TestBroadcastPerStageShapeWithListEntries:
 
     def test_list_entries_resolve_to_tuples(self) -> None:
         """`[[3, 5], [3, 5]]` is two stages of one `(3, 5)` kernel, not nested lists."""
-        resolved = broadcastPerStageShape([[3, 5], [3, 5]], 2, 2, "kernel_sizes")
+        yaml_entries: Any = [[3, 5], [3, 5]]  # lists are not in the hints, but are accepted
+        resolved = broadcastPerStageShape(yaml_entries, 2, 2, "kernel_sizes")
         assert resolved == ((3, 5), (3, 5))
         assert all(isinstance(entry, tuple) for entry in resolved)
 
     def test_mixed_int_tuple_and_list_entries(self) -> None:
         """Entries of different kinds can coexist in one per-stage list."""
-        resolved = broadcastPerStageShape([3, (3, 5), [5, 3]], 3, 2, "kernel_sizes")
+        mixed_entries: Any = [3, (3, 5), [5, 3]]  # lists are not in the hints, but are accepted
+        resolved = broadcastPerStageShape(mixed_entries, 3, 2, "kernel_sizes")
         assert resolved == ((3, 3), (3, 5), (5, 3))
 
     def test_top_level_list_is_still_the_per_stage_wrapper(self) -> None:
@@ -149,7 +151,8 @@ def test_compute_output_shape_accepts_a_list_seed_shape() -> None:
 
 def test_resample_transform_accepts_a_list_target_size() -> None:
     """`DataConfig.transforms` kwargs come from YAML too, so `target_size: [16, 16]` must work."""
-    transform = ResampleTransform(target_size=[16, 16], num_spatial_dims=2)
+    yaml_size: Any = [16, 16]  # a list is not in the hints, but is what YAML gives
+    transform = ResampleTransform(target_size=yaml_size, num_spatial_dims=2)
     assert transform.apply(torch.randn(3, 32, 32)).shape == (3, 16, 16)
 
 

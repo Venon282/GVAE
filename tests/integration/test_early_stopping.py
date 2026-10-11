@@ -15,6 +15,8 @@ As in `test_reduce_lr_on_plateau.py`, the "full training run" tests never rely o
 deterministic, hand-picked sequence before `EarlyStopping.onEpochEnd` ever reads it.
 """
 
+from typing import Any
+
 import pytest
 import torch
 from torch import nn
@@ -100,7 +102,7 @@ def _fixedDataset(num_batches: int = 2, seed: int = 0) -> list[dict[str, torch.T
     return [{"signal": torch.randn(BATCH_SIZE, INPUT_DIM)} for _ in range(num_batches)]
 
 
-def _buildTrainer(**kwargs) -> Trainer:
+def _buildTrainer(**kwargs: Any) -> Trainer:
     return Trainer(_buildSingleModalityModel(), device="cpu", **kwargs)
 
 
@@ -190,7 +192,7 @@ class TestFullTrainingRun:
         calls: list[int] = []
 
         class _RecordsCalls(TrainerCallback):
-            def onEpochEnd(self, trainer: Trainer, epoch: int, metrics: dict) -> None:
+            def onEpochEnd(self, trainer: Trainer, epoch: int, metrics: dict[str, float]) -> None:
                 calls.append(epoch)
 
         trainer = _buildTrainer()

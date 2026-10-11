@@ -45,6 +45,7 @@ from global_vae.latent.base import LatentSpace, RoutingGraph
 from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
 from global_vae.losses.reconstruction import computeTotalReconstructionLoss
 from global_vae.models.global_vae import GlobalVae
+from global_vae.utils.autograd import backward
 
 BATCH_SIZE = 4
 SIGNAL_LENGTH = 32
@@ -399,7 +400,7 @@ class TestStage1Rows:
     def test_every_parameter_receives_a_finite_gradient(self, run: _Run) -> None:
         """Backward through the loss reaches every parameter of every module."""
         run.model.zero_grad()
-        _totalLoss(run).backward()
+        backward(_totalLoss(run))
         parameters = dict(run.model.named_parameters())
         assert parameters
         for name, parameter in parameters.items():

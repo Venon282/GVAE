@@ -156,7 +156,7 @@ def renderBlobImages(params: np.ndarray, size: int = IMAGE_SIZE) -> np.ndarray:
     coords = (np.arange(size) + 0.5) / size
     cx, cy, sigma = (params[:, index, None, None] for index in range(3))
     squared_distance = (coords[None, None, :] - cx) ** 2 + (coords[None, :, None] - cy) ** 2
-    return np.exp(-squared_distance / (2.0 * sigma**2)).astype(np.float32)
+    return np.asarray(np.exp(-squared_distance / (2.0 * sigma**2)), dtype=np.float32)
 
 
 def renderXProfiles(
@@ -180,7 +180,7 @@ def renderXProfiles(
     cx, sigma = params[:, 0, None], params[:, 2, None]
     profile = np.exp(-((positions[None, :] - cx) ** 2) / (2.0 * sigma**2))
     noise = rng.normal(0.0, SIGNAL_NOISE_STD, size=profile.shape)
-    return (profile + noise).astype(np.float32)
+    return np.asarray(profile + noise, dtype=np.float32)
 
 
 def degradeImages(clean: np.ndarray, rng: np.random.Generator) -> np.ndarray:

@@ -45,7 +45,9 @@ class TestBuiltInCallbacksAreRegistered:
             ("reduce_lr_on_plateau", ReduceLrOnPlateau),
         ],
     )
-    def test_registered_under_expected_name(self, name, expected_cls) -> None:
+    def test_registered_under_expected_name(
+        self, name: str, expected_cls: type[TrainerCallback]
+    ) -> None:
         assert name in listRegisteredCallbacks()
         assert getCallbackClass(name) is expected_cls
 

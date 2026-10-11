@@ -382,7 +382,8 @@ class TestLossCurveAxes:
         )
         assert captured["num_axes"] == 2
         twin_metrics = captured["twin_metrics"]
-        assert twin_metrics and all("regularization" in key for key in twin_metrics)  # type: ignore[union-attr]
+        assert isinstance(twin_metrics, list)
+        assert twin_metrics and all("regularization" in key for key in twin_metrics)
 
     def test_no_twin_axis_flag_keeps_every_curve_on_one_axis(
         self,

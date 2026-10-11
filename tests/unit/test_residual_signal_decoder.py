@@ -17,6 +17,7 @@ import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
 from global_vae.decoders.OneDCnnResidualDecoder import OneDCnnResidualDecoder
 from global_vae.decoders.registry import getDecoderClass
 from global_vae.utils.autograd import backward
+from global_vae.utils.conv_blocks import Residual1DUpBlock
 
 # Defaults (seed_length=8, hidden_channels=(128, 64, 32), kernel_sizes=3, strides=2,
 # paddings=1, upsample_modes="interpolate_conv") exactly double the length at every
@@ -226,6 +227,7 @@ def test_internal_layers_of_the_last_transition_still_get_normalization() -> Non
         seed_length=16,
     )
     last_block = decoder.deconv[-1]
+    assert isinstance(last_block, Residual1DUpBlock)
     assert any(isinstance(module, nn.BatchNorm1d) for module in last_block.main.modules())
 
 

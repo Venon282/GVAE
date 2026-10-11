@@ -13,6 +13,8 @@ the same registrations twice under full-suite collection; see
 import csv
 import logging
 import sys
+from pathlib import Path
+from typing import cast
 
 import matplotlib
 
@@ -40,6 +42,8 @@ from global_vae.training.trainer import Trainer
 INPUT_DIM = 16
 LATENT_DIM = 4
 BATCH_SIZE = 8
+# `CsvLogger` never reads the trainer passed to its hooks, so the hook tests pass no real one.
+_NO_TRAINER = cast(Trainer, None)
 
 
 @registerEncoder("dummy_signal_encoder_logger_test")
@@ -128,7 +132,7 @@ class TestRegistry:
 
 
 class TestCsvLogger:
-    def test_writes_header(self, tmp_path) -> None:
+    def test_writes_header(self, tmp_path: Path) -> None:
         path = tmp_path / "metrics.csv"
         csv_logger = CsvLogger(path)
         csv_logger.close()
@@ -136,7 +140,7 @@ class TestCsvLogger:
             header = next(csv.reader(f))
         assert header == ["x", "tag", "metric", "value"]
 
-    def test_log_scalar_writes_a_row(self, tmp_path) -> None:
+    def test_log_scalar_writes_a_row(self, tmp_path: Path) -> None:
         path = tmp_path / "metrics.csv"
         csv_logger = CsvLogger(path)
         csv_logger.logScalar("loss/total", 1.23, 5, tag="step")
@@ -144,7 +148,7 @@ class TestCsvLogger:
         rows = list(csv.DictReader(path.open()))
         assert rows == [{"x": "5", "tag": "step", "metric": "loss/total", "value": "1.23"}]
 
-    def test_log_scalars_writes_one_row_per_metric(self, tmp_path) -> None:
+    def test_log_scalars_writes_one_row_per_metric(self, tmp_path: Path) -> None:
         path = tmp_path / "metrics.csv"
         csv_logger = CsvLogger(path)
         csv_logger.logScalars({"a": 1.0, "b": 2.0}, 3, tag="epoch")
@@ -153,38 +157,38 @@ class TestCsvLogger:
         assert {(row["metric"], row["value"]) for row in rows} == {("a", "1.0"), ("b", "2.0")}
         assert all(row["tag"] == "epoch" and row["x"] == "3" for row in rows)
 
-    def test_on_step_end_tags_step(self, tmp_path) -> None:
+    def test_on_step_end_tags_step(self, tmp_path: Path) -> None:
         path = tmp_path / "metrics.csv"
         csv_logger = CsvLogger(path)
-        csv_logger.onStepEnd(None, 7, {"loss/total": 0.5})
+        csv_logger.onStepEnd(_NO_TRAINER, 7, {"loss/total": 0.5})
         csv_logger.close()
         row = next(csv.DictReader(path.open()))
         assert row["tag"] == "step"
         assert row["x"] == "7"
 
-    def test_on_epoch_end_tags_epoch(self, tmp_path) -> None:
+    def test_on_epoch_end_tags_epoch(self, tmp_path: Path) -> None:
         path = tmp_path / "metrics.csv"
         csv_logger = CsvLogger(path)
-        csv_logger.onEpochEnd(None, 2, {"train/loss/total": 0.5})
+        csv_logger.onEpochEnd(_NO_TRAINER, 2, {"train/loss/total": 0.5})
         csv_logger.close()
         row = next(csv.DictReader(path.open()))
         assert row["tag"] == "epoch"
         assert row["x"] == "2"
 
-    def test_on_train_end_closes_the_file(self, tmp_path) -> None:
+    def test_on_train_end_closes_the_file(self, tmp_path: Path) -> None:
         path = tmp_path / "metrics.csv"
         csv_logger = CsvLogger(path)
-        csv_logger.onTrainEnd(None)
+        csv_logger.onTrainEnd(_NO_TRAINER)
         assert csv_logger._file.closed
 
-    def test_creates_parent_directory(self, tmp_path) -> None:
+    def test_creates_parent_directory(self, tmp_path: Path) -> None:
         path = tmp_path / "nested" / "dir" / "metrics.csv"
         csv_logger = CsvLogger(path)
         csv_logger.close()
         assert path.exists()
 
     def test_log_image_and_log_figure_warn_instead_of_raising(
-        self, tmp_path, caplog: pytest.LogCaptureFixture
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         path = tmp_path / "metrics.csv"
         csv_logger = CsvLogger(path)
@@ -194,11 +198,11 @@ class TestCsvLogger:
         csv_logger.close()
         assert sum("does not support" in record.message for record in caplog.records) == 2
 
-    def test_invalid_flush_every_n_rows_raises(self, tmp_path) -> None:
+    def test_invalid_flush_every_n_rows_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="flush_every_n_rows"):
             CsvLogger(tmp_path / "metrics.csv", flush_every_n_rows=0)
 
-    def test_full_training_run_produces_expected_row_counts(self, tmp_path) -> None:
+    def test_full_training_run_produces_expected_row_counts(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         path = tmp_path / "metrics.csv"
         trainer = Trainer(model, device="cpu", callbacks=[CsvLogger(path)])
@@ -213,13 +217,13 @@ class TestCsvLogger:
 
 class TestTensorBoardLogger:
     def test_missing_tensorboard_package_raises_clear_import_error(
-        self, tmp_path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setitem(sys.modules, "torch.utils.tensorboard", None)
         with pytest.raises(ImportError, match="tensorboard"):
             TensorBoardLogger(tmp_path / "tb_logs")
 
-    def test_construction_creates_log_dir_and_an_event_file(self, tmp_path) -> None:
+    def test_construction_creates_log_dir_and_an_event_file(self, tmp_path: Path) -> None:
         log_dir = tmp_path / "tb_logs"
         tb_logger = TensorBoardLogger(log_dir)
         tb_logger.logScalar("loss/total", 1.0, 0)
@@ -227,12 +231,12 @@ class TestTensorBoardLogger:
         assert log_dir.exists()
         assert any(log_dir.iterdir())
 
-    def test_log_image_does_not_raise(self, tmp_path) -> None:
+    def test_log_image_does_not_raise(self, tmp_path: Path) -> None:
         tb_logger = TensorBoardLogger(tmp_path / "tb_logs")
         tb_logger.logImage("recon", torch.rand(3, 8, 8), 0)
         tb_logger.close()
 
-    def test_log_figure_does_not_raise(self, tmp_path) -> None:
+    def test_log_figure_does_not_raise(self, tmp_path: Path) -> None:
         figure = plt.figure()
         plt.plot([0, 1], [0, 1])
         tb_logger = TensorBoardLogger(tmp_path / "tb_logs")
@@ -242,11 +246,11 @@ class TestTensorBoardLogger:
         finally:
             plt.close(figure)
 
-    def test_invalid_flush_every_n_scalars_raises(self, tmp_path) -> None:
+    def test_invalid_flush_every_n_scalars_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="flush_every_n_scalars"):
             TensorBoardLogger(tmp_path / "tb_logs", flush_every_n_scalars=0)
 
-    def test_full_training_run_does_not_raise(self, tmp_path) -> None:
+    def test_full_training_run_does_not_raise(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         log_dir = tmp_path / "tb_logs"
         trainer = Trainer(model, device="cpu", callbacks=[TensorBoardLogger(log_dir)])
@@ -257,7 +261,7 @@ class TestTensorBoardLogger:
 class TestComposability:
     """No dedicated "composite logger" is needed: Trainer.callbacks is already a list."""
 
-    def test_multiple_loggers_are_both_active_at_once(self, tmp_path) -> None:
+    def test_multiple_loggers_are_both_active_at_once(self, tmp_path: Path) -> None:
         model = _buildSingleModalityModel()
         csv_path = tmp_path / "metrics.csv"
         tb_dir = tmp_path / "tb_logs"

@@ -21,3 +21,4 @@
 - [0020: Additional fusion strategies](0020-additional-fusion-strategies.md)
 - [0021: Fusion residual connection](0021-fusion-residual-connection.md)
 - [0022: Training callback registry](0022-callback-registry.md)
+- [0023: Snake_case module names](0023-snake-case-module-names.md)

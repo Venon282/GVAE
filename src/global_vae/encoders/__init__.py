@@ -13,7 +13,7 @@ subpackage's `__init__.py` must import every concrete implementation for
 that side effect").
 """
 
-import global_vae.encoders.OneDCnnEncoder  # noqa: F401
-import global_vae.encoders.OneDCnnResidualEncoder  # noqa: F401
-import global_vae.encoders.TwoDCnnEncoder  # noqa: F401
-import global_vae.encoders.TwoDCnnResidualEncoder  # noqa: F401
+import global_vae.encoders.one_d_cnn_encoder  # noqa: F401
+import global_vae.encoders.one_d_cnn_residual_encoder  # noqa: F401
+import global_vae.encoders.two_d_cnn_encoder  # noqa: F401
+import global_vae.encoders.two_d_cnn_residual_encoder  # noqa: F401

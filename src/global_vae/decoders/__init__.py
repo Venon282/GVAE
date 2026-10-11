@@ -7,7 +7,7 @@ decorator, mirroring `encoders/__init__.py` (see that module's docstring
 for why this import is required).
 """
 
-import global_vae.decoders.OneDCnnDecoder  # noqa: F401
-import global_vae.decoders.OneDCnnResidualDecoder  # noqa: F401
-import global_vae.decoders.TwoDCnnDecoder  # noqa: F401
-import global_vae.decoders.TwoDCnnResidualDecoder  # noqa: F401
+import global_vae.decoders.one_d_cnn_decoder  # noqa: F401
+import global_vae.decoders.one_d_cnn_residual_decoder  # noqa: F401
+import global_vae.decoders.two_d_cnn_decoder  # noqa: F401
+import global_vae.decoders.two_d_cnn_residual_decoder  # noqa: F401

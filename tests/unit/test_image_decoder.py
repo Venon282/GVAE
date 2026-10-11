@@ -12,7 +12,7 @@ from torch import nn
 
 import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
 from global_vae.decoders.registry import getDecoderClass
-from global_vae.decoders.TwoDCnnDecoder import TwoDCnnDecoder
+from global_vae.decoders.two_d_cnn_decoder import TwoDCnnDecoder
 from global_vae.utils.autograd import backward
 
 # Defaults (seed_shape=(8, 8), hidden_channels=(128, 64, 32), kernel_sizes=4,
@@ -268,7 +268,7 @@ class TestEncoderDecoderRoundTrip:
     """
 
     def test_square_rgb_round_trip(self) -> None:
-        from global_vae.encoders.TwoDCnnEncoder import TwoDCnnEncoder
+        from global_vae.encoders.two_d_cnn_encoder import TwoDCnnEncoder
 
         encoder = TwoDCnnEncoder(latent_dim=12, in_channels=3, hidden_channels=(16, 32, 64))
         decoder = TwoDCnnDecoder(
@@ -285,7 +285,7 @@ class TestEncoderDecoderRoundTrip:
         assert reconstruction.shape == batch.shape
 
     def test_rectangular_grayscale_round_trip(self) -> None:
-        from global_vae.encoders.TwoDCnnEncoder import TwoDCnnEncoder
+        from global_vae.encoders.two_d_cnn_encoder import TwoDCnnEncoder
 
         encoder = TwoDCnnEncoder(latent_dim=8, hidden_channels=(16, 32, 64), strides=1)
         decoder = TwoDCnnDecoder(

@@ -21,8 +21,8 @@ import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
 import global_vae.encoders  # noqa: F401  (registers the built-in encoders)
 from global_vae.config.model import ModelConfig, buildModelFromConfig
 from global_vae.data.transforms.resample import ResampleTransform
-from global_vae.decoders.TwoDCnnDecoder import TwoDCnnDecoder
-from global_vae.decoders.TwoDCnnResidualDecoder import TwoDCnnResidualDecoder
+from global_vae.decoders.two_d_cnn_decoder import TwoDCnnDecoder
+from global_vae.decoders.two_d_cnn_residual_decoder import TwoDCnnResidualDecoder
 from global_vae.utils.stage_config import broadcastPerStageShape, resolveSpatialShape
 
 # Each decoder with the extra kwargs its own defaults need to reach an exact doubling per

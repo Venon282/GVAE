@@ -4,7 +4,8 @@ name: CI
 # roadmap P0-1). The docs build and deploy live in docs.yaml and are unchanged.
 #
 # Required checks on `main` (a repository setting, not a file): lint, types,
-# tests (3.11) and tests (3.13). `lint` is advisory until roadmap P0-2 lands, see below.
+# tests (3.11) and tests (3.13). All four are blocking: `ruff check .` and `ruff format --check .`
+# exit 0 since the CamelCase module names were renamed (roadmap P0-2, decision D-9, ADR 0023).
 
 on:
   push:
@@ -34,11 +35,6 @@ jobs:
     name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Advisory: ruff still reports 8 N999 findings (CamelCase module names), which wait for
-    # decision D-9 (roadmap P0-2). The job stays green while the steps below are red, and the
-    # findings remain visible in the log. Removing this line, once D-9 is applied, makes the
-    # job blocking.
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4

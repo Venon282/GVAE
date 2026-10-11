@@ -38,7 +38,7 @@ from global_vae.config.training import (
     resolveOptimizerClass,
     resolveReconstructionLossFn,
 )
-from global_vae.encoders.OneDCnnResidualEncoder import OneDCnnResidualEncoder
+from global_vae.encoders.one_d_cnn_residual_encoder import OneDCnnResidualEncoder
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
 from global_vae.training.callbacks.best_checkpoint import BestCheckpointCallback

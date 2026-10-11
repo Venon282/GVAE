@@ -213,8 +213,9 @@ These are **future directions**, listed to keep core abstractions (encoder/decod
 
 This is the layout of the repository as built. Entries marked `(planned)` do not exist yet and are
 tracked in `docs/roadmap.md`; everything else is present. Encoder and decoder modules are named after
-the class they hold (`OneDCnnEncoder.py` for `OneDCnnEncoder`, registered as `1d_cnn_encoder_v1`),
-one class per file (§10).
+the class they hold, in snake_case (`one_d_cnn_encoder.py` for `OneDCnnEncoder`, registered as
+`1d_cnn_encoder_v1`), one class per file (§10). The pre-1.3 CamelCase paths (`OneDCnnEncoder.py`)
+remain as deprecation shims until 2.0 and are left out of the tree below (ADR 0023).
 
 ```
 global-vae/
@@ -234,17 +235,17 @@ global-vae/
 │       ├── encoders/
 │       │   ├── base.py                    # AbstractEncoder interface
 │       │   ├── registry.py
-│       │   ├── OneDCnnEncoder.py          # 1d_cnn_encoder_v1 (signals, any 1D series)
-│       │   ├── OneDCnnResidualEncoder.py  # 1d_cnn_resnet_encoder_v1
-│       │   ├── TwoDCnnEncoder.py          # 2d_cnn_encoder_v1 (images, any 2D grid)
-│       │   └── TwoDCnnResidualEncoder.py  # 2d_cnn_resnet_encoder_v1
+│       │   ├── one_d_cnn_encoder.py           # 1d_cnn_encoder_v1 (signals, any 1D series)
+│       │   ├── one_d_cnn_residual_encoder.py  # 1d_cnn_resnet_encoder_v1
+│       │   ├── two_d_cnn_encoder.py           # 2d_cnn_encoder_v1 (images, any 2D grid)
+│       │   └── two_d_cnn_residual_encoder.py  # 2d_cnn_resnet_encoder_v1
 │       ├── decoders/
 │       │   ├── base.py                    # AbstractDecoder interface
 │       │   ├── registry.py
-│       │   ├── OneDCnnDecoder.py          # 1d_cnn_decoder_v1
-│       │   ├── OneDCnnResidualDecoder.py  # 1d_cnn_resnet_decoder_v1
-│       │   ├── TwoDCnnDecoder.py          # 2d_cnn_decoder_v1
-│       │   └── TwoDCnnResidualDecoder.py  # 2d_cnn_resnet_decoder_v1
+│       │   ├── one_d_cnn_decoder.py           # 1d_cnn_decoder_v1
+│       │   ├── one_d_cnn_residual_decoder.py  # 1d_cnn_resnet_decoder_v1
+│       │   ├── two_d_cnn_decoder.py           # 2d_cnn_decoder_v1
+│       │   └── two_d_cnn_residual_decoder.py  # 2d_cnn_resnet_decoder_v1
 │       ├── fusion/
 │       │   ├── base.py          # AbstractFusion interface
 │       │   ├── registry.py
@@ -428,6 +429,7 @@ All of these examples are illustrative, not final: the actual schema still needs
   - Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
   - Functions and methods -> same rule as classes but starting lowercase, i.e. `camelCase` (e.g. `computeLoss`, `encodeSignal`, `registerEncoder`), not PEP8's usual `snake_case` for callables.
   - Property not calculated -> snake_case
+  - Modules (files) and packages -> `snake_case`, as PEP 8 asks, named after the class they hold (`one_d_cnn_encoder.py` holds `OneDCnnEncoder`). `ruff`'s `N999` stays on, so a CamelCase module name is flagged (ADR 0023).
   - Since this deviates from PEP8, disable/adjust `ruff`'s naming rules (`N802`, `N803`, `N806`) in `pyproject.toml` and note the exception in the contributor docs, so linting doesn't silently "fix" it back to snake_case later.
 - **Typography:** no em dashes (U+2014) and no unicode arrows (U+2192) in code, comments, docstrings, commit messages, or project documentation. Use a period, a colon, parentheses, or two sentences instead of an em dash, and `->` instead of an arrow. This is a house style rule, enforced by `tests/unit/test_typography.py` over the tracked `.py`, `.md`, `.yaml`, `.yml` and `.toml` files. Commit messages are not scanned, so review those like any other style note.
 - **Typing:** type hints mandatory everywhere; `mypy` run in CI.

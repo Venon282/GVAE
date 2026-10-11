@@ -14,7 +14,7 @@ import torch
 from torch import nn
 
 import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
-from global_vae.decoders.OneDCnnResidualDecoder import OneDCnnResidualDecoder
+from global_vae.decoders.one_d_cnn_residual_decoder import OneDCnnResidualDecoder
 from global_vae.decoders.registry import getDecoderClass
 from global_vae.utils.autograd import backward
 from global_vae.utils.conv_blocks import Residual1DUpBlock

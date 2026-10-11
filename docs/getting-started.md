@@ -59,7 +59,7 @@ pytest --cov=global_vae --cov-fail-under=95
 
 The same four commands run in CI on every push and pull request
 (`.github/workflows/ci.yaml`). `pytest` must keep coverage at or above the 95% floor, and the
-`ruff` job is advisory until the lint clean-up (roadmap P0-2) lands.
+`ruff` job is blocking like the other two.
 
 `mypy` with no arguments checks `src/`, `scripts/`, `examples/` and `tests/` in strict mode, on
 Python 3.11 in CI. Test functions may carry no annotations, but a partly annotated one is an

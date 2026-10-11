@@ -22,12 +22,31 @@ src = root / "src"
 package_root = src / "global_vae"
 generated_count = 0
 
+
+def _isDeprecatedAlias(path: Path) -> bool:
+    """Whether `path` is a CamelCase shim kept at an old import path (roadmap D-9).
+
+    Every module of the package is snake_case. The few CamelCase files are the pre-1.3 paths of
+    renamed modules, kept until 2.0: each only re-exports a class that its snake_case module
+    already documents, so a page for it would document the same class twice.
+
+    Args:
+        path: A Python file under `src/global_vae`.
+
+    Returns:
+        `True` when the file name has an uppercase letter.
+    """
+    return path.stem != path.stem.lower()
+
+
 # rglob, not glob: this MUST walk every subpackage recursively (encoders/,
 # decoders/, fusion/, assemblers/, latent/, losses/, data/, training/,
 # models/, evaluation/, visualization/, utils/, config/, ...), not just the
 # top-level __init__.py. If a future edit accidentally swaps this back to a
 # non-recursive glob, the sanity check at the bottom catches it.
 for path in sorted(package_root.rglob("*.py")):
+    if _isDeprecatedAlias(path):
+        continue
     module_path = path.relative_to(src).with_suffix("")
     doc_path = path.relative_to(src).with_suffix(".md")
     full_doc_path = Path("reference", doc_path)
@@ -66,7 +85,11 @@ with mkdocs_gen_files.open("reference/SUMMARY.md", "w") as nav_file:
 # codebase has 60+ modules under src/global_vae; a run producing only a
 # handful of pages means the walk above broke (wrong package_root, glob
 # instead of rglob, ...), not that the package shrank.
-python_files = [path for path in package_root.rglob("*.py") if path.name != "__main__.py"]
+python_files = [
+    path
+    for path in package_root.rglob("*.py")
+    if path.name != "__main__.py" and not _isDeprecatedAlias(path)
+]
 if generated_count < len(python_files):
     raise RuntimeError(
         f"gen_ref_pages.py only generated {generated_count} reference page(s) "

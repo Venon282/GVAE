@@ -25,8 +25,8 @@ import torch
 
 import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
 import global_vae.encoders  # noqa: F401  (registers the built-in encoders)
-from global_vae.decoders.OneDCnnDecoder import OneDCnnDecoder
-from global_vae.encoders.OneDCnnEncoder import OneDCnnEncoder
+from global_vae.decoders.one_d_cnn_decoder import OneDCnnDecoder
+from global_vae.encoders.one_d_cnn_encoder import OneDCnnEncoder
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.trainer import Trainer
 from global_vae.utils.autograd import backward

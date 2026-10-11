@@ -17,7 +17,7 @@ from torch import nn
 
 import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
 from global_vae.decoders.registry import getDecoderClass
-from global_vae.decoders.TwoDCnnResidualDecoder import TwoDCnnResidualDecoder
+from global_vae.decoders.two_d_cnn_residual_decoder import TwoDCnnResidualDecoder
 from global_vae.utils.autograd import backward
 from global_vae.utils.conv_blocks import Residual2DUpBlock
 
@@ -350,7 +350,7 @@ class TestEncoderDecoderRoundTrip:
     """
 
     def test_square_rgb_round_trip(self) -> None:
-        from global_vae.encoders.TwoDCnnResidualEncoder import TwoDCnnResidualEncoder
+        from global_vae.encoders.two_d_cnn_residual_encoder import TwoDCnnResidualEncoder
 
         encoder = TwoDCnnResidualEncoder(latent_dim=12, in_channels=3, hidden_channels=(16, 32, 64))
         decoder = TwoDCnnResidualDecoder(
@@ -366,7 +366,7 @@ class TestEncoderDecoderRoundTrip:
         assert reconstruction.shape == batch.shape
 
     def test_rectangular_grayscale_round_trip(self) -> None:
-        from global_vae.encoders.TwoDCnnResidualEncoder import TwoDCnnResidualEncoder
+        from global_vae.encoders.two_d_cnn_residual_encoder import TwoDCnnResidualEncoder
 
         encoder = TwoDCnnResidualEncoder(latent_dim=8, hidden_channels=(16, 32, 64), strides=1)
         decoder = TwoDCnnResidualDecoder(

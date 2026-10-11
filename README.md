@@ -88,9 +88,7 @@ there is an error, not a warning. CI runs the whole suite, slow tests included.
 GitHub Actions (`.github/workflows/ci.yaml`) runs the same checks on every push and pull
 request: `lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest` on Python 3.11
 and 3.13). The tests fail under a coverage floor of 95%, set one point below the measured
-value; raise it as coverage improves. The `lint` job is advisory until the 8 `N999`
-findings (CamelCase module names, decision D-9 of the roadmap) are resolved, the other jobs
-are blocking.
+value; raise it as coverage improves. All three jobs are blocking.
 
 ## Releasing
 
@@ -125,6 +123,11 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
 
 - Classes -> `CamelCase` (e.g. `GlobalVae`, `OneDCnnEncoder`).
 - Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
+- Modules (files) and packages -> `snake_case`, named after the class they hold
+  (`one_d_cnn_encoder.py` holds `OneDCnnEncoder`). `ruff`'s `N999` is on, so a CamelCase
+  module name fails the lint job. The old CamelCase import paths of the eight CNN encoder
+  and decoder modules (`global_vae.encoders.OneDCnnEncoder`) still work and emit a
+  `DeprecationWarning` until 2.0 (ADR 0023): import from the snake_case module instead.
 - **Functions and methods -> `camelCase`** (e.g. `registerEncoder`,
   `computeRegularizationLoss`), not PEP8's usual `snake_case`. This is intentional
   (spec §10). `ruff`'s `N802`/`N803`/`N806` naming rules are disabled

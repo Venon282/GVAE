@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 import global_vae.encoders  # noqa: F401  (registers the built-in encoders)
-from global_vae.encoders.OneDCnnEncoder import OneDCnnEncoder
+from global_vae.encoders.one_d_cnn_encoder import OneDCnnEncoder
 from global_vae.encoders.registry import getEncoderClass
 from global_vae.utils.autograd import backward
 

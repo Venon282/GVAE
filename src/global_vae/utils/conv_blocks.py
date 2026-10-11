@@ -1,6 +1,6 @@
 """Reusable 1D residual building blocks (spec §6, §7, §12).
 
-Shared by `encoders.OneDCnnResidualEncoder` and `decoders.OneDCnnResidualDecoder`:
+Shared by `encoders.one_d_cnn_residual_encoder` and `decoders.one_d_cnn_residual_decoder`:
 a residual block stacks `depth` convolutional layers (`depth >= 1`,
 independently configurable per stage, e.g. "3 layers before the connection,
 then 4" for a deeper second stage) and adds a shortcut connection from the

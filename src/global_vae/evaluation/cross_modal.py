@@ -8,7 +8,12 @@ framework: when a latent space is fed by more than one encoder but only a subset
 them is present in `inputs`, Fusion is only invoked once more than one encoder is
 active; with exactly one active encoder, that latent space's `(mu, logvar)` is
 simply that encoder's own output, and every decoder consuming the latent space still
-runs regardless of which encoder(s) produced it (`models/global_vae.py`). This
+runs regardless of which encoder(s) produced it (`models/global_vae.py`). A decoder
+that consumes several latent spaces and is missing some of them (the private latent of
+a modality that was left out, in a shared plus private model) runs only if its
+assembler accepts a subset (`AbstractAssembler.handlesMissingLatents`: `sum`,
+`average`); with `concat` it is absent from that subset's results, and the matrix
+simply has no cell for it (ADR 0024). This
 module is purely a reporting layer over that existing mechanism
 (`docs/adr/0016-cross-modal-reconstruction-reporting.md`): it never changes how
 `GlobalVae.forward` behaves, it only runs it under several input-modality subsets

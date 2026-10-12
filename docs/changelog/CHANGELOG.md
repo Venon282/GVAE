@@ -24,6 +24,31 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `docs/how-to/add-a-strategy.md` covers latent heads: the table row, the constructor contract
   (`in_dim` and `out_dim` first) and the `forward` signature. The spec §8 tree no longer marks
   `heads/` as `(planned)`.
+- Encoder fan-out through latent heads (roadmap P1-2, spec §2.2, ADR 0024). One encoder can now
+  feed several latent spaces, each encoder -> latent edge with its own head, so the shared plus
+  private topology builds, trains and evaluates. `latent/base.py` gains `HeadSpec(name, out_dim,
+  kwargs)` and the `RoutingGraph.encoder_heads` field (encoder name -> latent space name ->
+  `HeadSpec`, declared last so positional construction keeps working). `GlobalVae` builds one head
+  module per entry, as `getHeadClass(name)(in_dim=<encoder latent_dim>, out_dim=<latent dim>,
+  **kwargs)`, stores them in `GlobalVae.heads` (state keys `heads.<encoder>.<latent>...`) and
+  applies each before fusion; `GlobalVae.getHead(encoder, latent)` returns a head, or `None` for
+  an identity edge. An edge with no entry is an identity edge and builds no module, so a graph
+  without heads builds, runs and checkpoints exactly as before.
+- `validateRoutingGraph` has three new rules (spec §10): a head must sit on an existing edge, a
+  head's declared `out_dim` must equal its latent space's `dim` (and `kwargs` may not set
+  `in_dim` or `out_dim`), and an encoder feeding several latent spaces may have at most one
+  identity edge, since two would give identical posteriors. A new `identity_head_names` argument
+  says which head names count as the identity.
+- `AbstractAssembler.handlesMissingLatents`, the assembler-side counterpart of
+  `AbstractFusion.handlesMissingModalities`: `True` for `sum` and `average`, `False` by default
+  (so for `concat` and for any assembler that does not say otherwise).
+- `docs/adr/0024-encoder-fan-out-through-latent-heads.md`, which supersedes the fan-out guard of
+  ADR 0002 (ADR 0002 is left as written).
+- `tests/integration/test_encoder_fan_out.py`: a signal plus image shared plus private model with
+  `z_shared` through PoE and linear private heads trains with a falling loss, every parameter
+  (heads included) receives a gradient, the three latent spaces differ, modality dropout removes
+  an absent encoder's edges, and evaluation and the cross-modal reports run. Unit tests cover the
+  new validation rules, the preset's head arguments and `handlesMissingLatents`.
 - `tests/unit/test_deprecated_module_paths.py` and `tests/unit/test_ci_workflow.py` (roadmap
   P0-2). The first pins the deprecation shims below: each old import path warns and names its
   replacement, returns the very same class, registers nothing twice and defines nothing of its
@@ -34,6 +59,22 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `GlobalVae.forward` and modality dropout (ADR 0024). A decoder that consumes several latent
+  spaces and is missing some of them in a pass (the private latent of a modality that was left
+  out) runs only if its assembler has `handlesMissingLatents`; otherwise it is absent from
+  `"reconstructions"`, like a decoder with no input. For `sum` and `average` nothing changes.
+  For `concat` the partial input could only fail with a width mismatch before. A custom assembler
+  that accepted a subset must now say so by overriding `handlesMissingLatents`.
+- `buildSharedPrivateRoutingGraph` writes a `HeadSpec` on every edge and takes `shared_head`
+  (default `"identity"`) and `private_head` (default `"linear"`). Its default graph used to have
+  two identity edges per encoder, which `validateRoutingGraph` now refuses, and which the model
+  could not build; the new default is the arrangement of spec §9 and builds.
+- `tests/integration/test_global_vae_construction_guards.py`: the P0-4(f) fan-out guard test is
+  inverted. The same graphs now build, and a graph with two identity edges raises `ValueError`
+  from `validateRoutingGraph`. `test_routing_graph_validation.py`,
+  `test_routing_graph_presets.py` and `test_assemblers.py` follow.
+- The how-to `add-a-strategy.md`, the README, the spec (§2.2 constraints, §8 tree, §10 validation
+  rule) and the `cross_modal.py` docstring describe fan-out as built.
 - Snake_case module names (roadmap P0-2, decision D-9, ADR 0023). The eight encoder and decoder
   modules named after their class are renamed with `git mv`: `encoders/one_d_cnn_encoder.py`,
   `one_d_cnn_residual_encoder.py`, `two_d_cnn_encoder.py`, `two_d_cnn_residual_encoder.py` and
@@ -53,5 +94,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `docs/getting-started.md` no longer call the job advisory.
 
 ### Removed
+
+- The `NotImplementedError` that `GlobalVae.__init__` raised for an encoder assigned to more than
+  one latent space (the fan-out guard of ADR 0002, superseded by ADR 0024).
 
 ### Fixed

@@ -171,16 +171,17 @@ independent latent spaces, and `GlobalVae` accepts an explicit `RoutingGraph`
 provided: `buildSingleLatentRoutingGraph` (`EN-L1-DN`, what
 `GlobalVae.createSingleLatent` and `configs/model/` build) and
 `buildSharedPrivateRoutingGraph` (a shared plus per-modality private latent
-space). Three limits remain:
+space, with a latent head on each encoder -> latent edge). An encoder may feed
+several latent spaces through latent heads (`identity`, `linear`;
+`docs/adr/0024-encoder-fan-out-through-latent-heads.md`). Two limits remain:
 
 - `buildModelFromConfig` only builds `latent_mode: single`, so a config file
-  cannot describe several latent spaces yet.
-- An encoder cannot feed two latent spaces: `GlobalVae` raises
-  `NotImplementedError`, which is why the shared plus private preset cannot be
-  trained today.
+  cannot describe several latent spaces, or heads, yet. Build a `RoutingGraph`
+  in Python for now.
 - Of the 8 configurations in spec §2.1, the four `EN-*` rows (one encoder per
-  modality) are built and covered by the configuration-matrix test, without
-  encoder fan-out. The four `E1-*` rows (one shared encoder) are not built.
+  modality) are built, including the shared plus private topology, which can
+  be trained and evaluated. The four `E1-*` rows (one shared encoder over
+  several modalities) are not built.
 
 Closing these gaps is tracked in the [roadmap](docs/roadmap.md) (Phase 1). See
 also `docs/adr/0001-phase1-default-configuration.md`.

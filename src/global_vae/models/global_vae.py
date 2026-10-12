@@ -9,16 +9,19 @@ Phase-1 default (ADR 0001); it is not a separate code path, just a
 `RoutingGraph` built from the `latent.single` preset before delegating
 to `__init__`.
 
-Fan-out from one encoder to several latent spaces is not yet
-supported, whether that encoder is a single shared trunk (the `E1-*`
-rows) or one of several per-modality encoders (an `EN-*` row where the
-same encoder is also assigned to more than one latent space, as in the
-shared-plus-private topology). `AbstractEncoder.forward` returns one
-`(mu, logvar)` pair; reusing it as-is for more than one independent
-latent space would give those spaces identical posteriors rather than
-the independent ones the routing graph promises. `__init__` rejects
-this case explicitly instead of silently producing the wrong shapes.
-See `docs/adr/0002-generalize-global-vae-to-routing-graph.md`.
+An encoder may feed several latent spaces (the shared-plus-private
+topology, or a single shared trunk over several latent spaces). Each
+encoder -> latent edge then carries a latent head (`heads/`, spec §2.2)
+that adapts the encoder's one `(mu, logvar)` pair to that latent space,
+applied before fusion, so the spaces get their own posteriors instead of
+the same one. The heads come from `RoutingGraph.encoder_heads`; an edge
+with no entry is an identity edge and builds no module, so a graph
+without heads builds and runs exactly as it did before heads existed.
+`validateRoutingGraph` refuses an encoder with two identity edges, which
+would give two spaces identical posteriors. See
+`docs/adr/0024-encoder-fan-out-through-latent-heads.md`, which supersedes
+the fan-out guard of
+`docs/adr/0002-generalize-global-vae-to-routing-graph.md`.
 
 Each latent space also gets its own regularization strategy (spec
 §2.3), selected per latent space exactly like Fusion, defaulting to
@@ -34,17 +37,20 @@ down via `selectEncoderInputs` before it ever reaches `forward()`. See
 """
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import nn
 
+from global_vae.assemblers.base import AbstractAssembler
 from global_vae.assemblers.registry import getAssemblerClass
 from global_vae.decoders.registry import getDecoderClass
 from global_vae.encoders.registry import getEncoderClass
 from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import getFusionClass
 from global_vae.fusion.residual import ResidualFusion
+from global_vae.heads.base import AbstractLatentHead
+from global_vae.heads.registry import getHeadClass
 from global_vae.latent.base import RoutingGraph, validateRoutingGraph
 from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
 from global_vae.losses.regularization import computeTotalRegularizationLoss
@@ -60,6 +66,10 @@ class GlobalVae(nn.Module):
             `routing_graph.latent_specs`.
         encoders: Encoder name -> encoder module.
         decoders: Decoder name -> decoder module.
+        heads: Encoder name -> latent space name -> latent head module,
+            one entry per edge with a `HeadSpec` in
+            `routing_graph.encoder_heads`. Empty for a graph without
+            heads.
         fusions: Latent space name -> fusion module, one entry per
             latent space fed by more than one encoder.
         assemblers: Decoder name -> assembler module, one entry per
@@ -124,30 +134,26 @@ class GlobalVae(nn.Module):
                 fusion, i.e. one fed by more than one encoder.
 
         Raises:
-            ValueError: If `routing_graph` is invalid (spec §2.2), if a
-                latent space fed by more than one encoder has no entry
-                in `fusion_strategies`, or if `fusion_residual` asks for
-                a residual connection on a latent space with no fusion
-                (unknown, or fed by fewer than two encoders).
-            NotImplementedError: If any encoder in `routing_graph` is
-                assigned to more than one latent space (fan-out is not
-                yet supported).
+            ValueError: If `routing_graph` is invalid (spec §2.2, §10:
+                this includes an encoder with two identity edges, and a
+                head whose declared `out_dim` is not its latent space's
+                `dim`), if a latent space fed by more than one encoder
+                has no entry in `fusion_strategies`, if
+                `fusion_residual` asks for a residual connection on a
+                latent space with no fusion (unknown, or fed by fewer
+                than two encoders), or if a latent head cannot be built:
+                its encoder is absent from `encoder_configs`, exposes no
+                integer `latent_dim`, or the head rejects its widths
+                (`identity` needs the encoder's `latent_dim` to equal
+                its latent space's `dim`).
             KeyError: If `regularizer_strategies` (or its default,
                 `"kl_standard_normal"`) names a strategy absent from
-                the regularizer registry.
+                the regularizer registry, or if `routing_graph.
+                encoder_heads` names a head absent from the head
+                registry.
         """
         super().__init__()
         validateRoutingGraph(routing_graph)
-        for encoder_name, latent_names in routing_graph.encoder_to_latents.items():
-            if len(latent_names) > 1:
-                raise NotImplementedError(
-                    f"Encoder '{encoder_name}' is assigned to {len(latent_names)} latent "
-                    f"spaces {latent_names}. Encoder fan-out to several latent spaces is "
-                    f"not yet supported: `AbstractEncoder.forward` returns a single "
-                    f"`(mu, logvar)` pair, which cannot correctly serve as an independent "
-                    f"posterior for more than one latent space. See "
-                    f"docs/adr/0002-generalize-global-vae-to-routing-graph.md."
-                )
 
         encoder_kwargs = encoder_kwargs or {}
         decoder_kwargs = decoder_kwargs or {}
@@ -191,6 +197,8 @@ class GlobalVae(nn.Module):
                 for name, registry_name in decoder_configs.items()
             }
         )
+
+        self.heads = nn.ModuleDict(self._buildHeads(routing_graph))
 
         fusions: dict[str, nn.Module] = {}
         for latent_name, encoder_names in self._feeding_encoders.items():
@@ -318,6 +326,94 @@ class GlobalVae(nn.Module):
                 result[latent_name].append(encoder_name)
         return result
 
+    def _buildHeads(self, routing_graph: RoutingGraph) -> dict[str, nn.Module]:
+        """Build one latent head module per entry of `routing_graph.encoder_heads`.
+
+        Each head is built as `getHeadClass(name)(in_dim=..., out_dim=...,
+        **kwargs)`, with `in_dim` the feeding encoder's `latent_dim` and
+        `out_dim` the target latent space's `dim`. An edge with no entry gets
+        no module (identity edge). Call after `self.encoders` exists.
+
+        Args:
+            routing_graph: The routing graph whose heads to build.
+
+        Returns:
+            Encoder name -> `nn.ModuleDict` of latent space name -> head.
+
+        Raises:
+            ValueError: If a head's encoder is absent from `self.encoders`,
+                exposes no integer `latent_dim`, or the head rejects the
+                widths it is built with.
+            KeyError: If a head name is absent from the head registry.
+        """
+        heads: dict[str, nn.Module] = {}
+        for encoder_name, edge_specs in routing_graph.encoder_heads.items():
+            if encoder_name not in self.encoders:
+                raise ValueError(
+                    f"Latent heads are declared for encoder '{encoder_name}', but that encoder "
+                    f"is not in `encoder_configs` (encoders: {sorted(self.encoders)})."
+                )
+            in_dim = getattr(self.encoders[encoder_name], "latent_dim", None)
+            if not isinstance(in_dim, int):
+                raise ValueError(
+                    f"Latent heads are declared for encoder '{encoder_name}', which exposes no "
+                    f"integer `latent_dim`, so the heads' input width is unknown."
+                )
+            edge_heads: dict[str, nn.Module] = {}
+            for latent_name, spec in edge_specs.items():
+                out_dim = routing_graph.latent_specs[latent_name].dim
+                head_class = getHeadClass(spec.name)
+                try:
+                    edge_heads[latent_name] = head_class(
+                        in_dim=in_dim, out_dim=out_dim, **spec.kwargs
+                    )
+                except ValueError as error:
+                    raise ValueError(
+                        f"Cannot build head '{spec.name}' on the edge '{encoder_name}' -> "
+                        f"'{latent_name}' (encoder latent_dim={in_dim}, latent space "
+                        f"dim={out_dim}): {error}"
+                    ) from error
+            heads[encoder_name] = nn.ModuleDict(edge_heads)
+        return heads
+
+    def getHead(self, encoder_name: str, latent_name: str) -> AbstractLatentHead | None:
+        """Return the latent head on one encoder -> latent edge.
+
+        Args:
+            encoder_name: The feeding encoder.
+            latent_name: The latent space the edge feeds.
+
+        Returns:
+            The head module, or `None` for an identity edge (one with no
+            entry in `routing_graph.encoder_heads`, which builds no module).
+        """
+        if encoder_name not in self.heads:
+            return None
+        edge_heads = cast(nn.ModuleDict, self.heads[encoder_name])
+        if latent_name not in edge_heads:
+            return None
+        return cast(AbstractLatentHead, edge_heads[latent_name])
+
+    def _adaptThroughHead(
+        self, encoder_name: str, latent_name: str, params: tuple[torch.Tensor, torch.Tensor]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Apply the latent head of one encoder -> latent edge, if it has one.
+
+        Args:
+            encoder_name: The feeding encoder.
+            latent_name: The latent space the edge feeds.
+            params: The encoder's `(mu, logvar)` output.
+
+        Returns:
+            The head's `(mu, logvar)`, or `params` itself for an identity
+            edge (one with no head module).
+        """
+        head = self.getHead(encoder_name, latent_name)
+        if head is None:
+            return params
+        adapted: tuple[torch.Tensor, torch.Tensor] = head(*params)
+        return adapted
+
     def selectEncoderInputs(
         self, batch: dict[str, torch.Tensor] | Mapping[str, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
@@ -428,11 +524,14 @@ class GlobalVae(nn.Module):
             active = [name for name in encoder_names if name in encoder_outputs]
             if not active:
                 continue
+            edge_params = {
+                name: self._adaptThroughHead(name, latent_name, encoder_outputs[name])
+                for name in active
+            }
             if len(active) == 1:
-                mu, logvar = encoder_outputs[active[0]]
+                mu, logvar = edge_params[active[0]]
             else:
-                params = {name: encoder_outputs[name] for name in active}
-                mu, logvar = self.fusions[latent_name](params)
+                mu, logvar = self.fusions[latent_name](edge_params)
             latent_params[latent_name] = (mu, logvar)
             latent_samples[latent_name] = (
                 mu if use_mean else self.latent_spaces[latent_name].reparameterize(mu, logvar)
@@ -440,12 +539,20 @@ class GlobalVae(nn.Module):
 
         reconstructions: dict[str, torch.Tensor] = {}
         for decoder_name, decoder in self.decoders.items():
-            consumed = [
+            required = [
                 latent_name
                 for latent_name, decoder_names in self.routing_graph.latent_to_decoders.items()
-                if decoder_name in decoder_names and latent_name in latent_samples
+                if decoder_name in decoder_names
             ]
+            consumed = [latent_name for latent_name in required if latent_name in latent_samples]
             if not consumed:
+                continue
+            if (
+                len(consumed) < len(required)
+                and not cast(AbstractAssembler, self.assemblers[decoder_name]).handlesMissingLatents
+            ):
+                # An incomplete input to an assembler that needs all of its latent
+                # spaces (`concat`): leave this decoder out of the pass (spec §5).
                 continue
             if len(consumed) == 1:
                 z_in = latent_samples[consumed[0]]

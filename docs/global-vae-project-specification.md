@@ -67,6 +67,8 @@ This **generalizes** the earlier "shared + private" idea rather than replacing i
 **Constraints to validate at model-construction time:**
 - Every latent space must have at least one encoder feeding it and at least one decoder consuming it: no orphan latent spaces.
 - `sum` and `average` assemblers require all their input latent spaces to share the same dimensionality; `concat` has no such restriction.
+- An encoder that feeds several latent spaces has at most one identity edge (§2.2, Latent Head).
+- When a modality is left out of a pass (modality dropout, §5), a decoder that is missing some of its latent spaces runs only if its assembler accepts a subset (`sum`, `average`); with `concat` that decoder is left out of the pass, a documented limitation of concatenation (§5) and not silently patched (ADR 0024).
 
 ### 2.3 Latent regularization
  
@@ -268,12 +270,12 @@ global-vae/
 │       │   ├── weighted_sum.py  # (planned)
 │       │   └── attention.py     # (planned)
 │       ├── latent/
-│       │   ├── base.py          # LatentSpace, RoutingGraph, validateRoutingGraph
+│       │   ├── base.py          # LatentSpace, HeadSpec, RoutingGraph, validateRoutingGraph
 │       │   └── routing_graph_builders/
 │       │       ├── single.py          # preset: one latent space feeding every decoder
-│       │       └── shared_private.py  # preset: shared + private latent spaces
+│       │       └── shared_private.py  # preset: shared + private latent spaces, a head per edge
 │       ├── models/
-│       │   └── global_vae.py    # assembles encoders + fusion + latent + decoders from a routing graph (heads: planned)
+│       │   └── global_vae.py    # assembles encoders + latent heads + fusion + latent + decoders from a routing graph
 │       ├── losses/
 │       │   ├── reconstruction.py     # computeTotalReconstructionLoss
 │       │   ├── regularization.py     # computeTotalRegularizationLoss
@@ -437,7 +439,7 @@ All of these examples are illustrative, not final: the actual schema still needs
 - **Modularity:** one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers/heads/regularizers/transforms. No god-files: a base class, its registry, and every concrete strategy each get their own file (see `fusion/`, `assemblers/`, `heads/`, `losses/regularizers/`, `data/transforms/`).
 - **Interfaces:** `AbstractEncoder`, `AbstractDecoder`, `AbstractFusion`, `AbstractAssembler`, `AbstractLatentHead`, `AbstractLatentRegularizer`, `AbstractTransform` as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (`@registerEncoder("signal")`); this is what makes "add a modality without touching the core" actually true, not just aspirational.
 - **Registry population:** a class decorated with `@registerX(...)` is only registered once its module has actually been imported. Each registry-based subpackage's `__init__.py` must import every concrete implementation for that side effect (`import global_vae.assemblers.concat  # noqa: F401`, one line per file), or `getXClass(name)` raises `KeyError` even though the file exists on disk.
-- **Routing graph validation:** `validateRoutingGraph` (`latent/base.py`) must run at model-construction time for every configuration, not just the Phase-1 default. It rejects orphan latent spaces, rejects a decoder that consumes more than one latent space without an assigned assembler, checks dimensional compatibility for `sum`/`average` assemblers, and rejects an encoder -> latent edge whose `head` output dimension does not match the target latent space's declared `dim`.
+- **Routing graph validation:** `validateRoutingGraph` (`latent/base.py`) must run at model-construction time for every configuration, not just the Phase-1 default. It rejects orphan latent spaces, rejects a decoder that consumes more than one latent space without an assigned assembler, checks dimensional compatibility for `sum`/`average` assemblers, rejects an encoder -> latent edge whose `head` output dimension does not match the target latent space's declared `dim`, and rejects an encoder that feeds several latent spaces through more than one identity edge (two spaces would get identical posteriors; ADR 0024). `GlobalVae` builds one head per edge that declares one and applies it before fusion; an edge with no head is an identity edge and builds no module.
 - **Latent regularization:** never hardcode `LatentSpace.klDivergence` (or an equivalent KL-only computation) as the only regularization path inside the model class; route it through the `AbstractLatentRegularizer` registry (§2.3) so alternative strategies (MMD, free-bits, learned priors) can be swapped in via config.
 - **Data transforms:** never hardcode a preprocessing step (log, normalization, resampling) inline in an encoder, a decoder, or the data pipeline; route it through the `AbstractTransform` registry (`data/transforms/`, §6.2) instead, and keep every transform fully generic across dimensionality (§6.2's hard requirement).
 - **Training loop:** a raw PyTorch loop (`training/trainer.py`) for now, favoring transparency while the architecture (routing graph, registries) is still actively changing; migrate to PyTorch Lightning (or `Lightning Fabric` as an intermediate step) once the model design stabilizes and multi-GPU/scaling needs become concrete.

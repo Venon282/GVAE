@@ -5,14 +5,16 @@ plain `RoutingGraph`; they are not special cases inside the framework. These tes
 each one returns, and that `validateRoutingGraph` accepts it, or rejects it for the documented
 reason (a dimension-locked assembler over latent spaces of different sizes).
 
-Building a `GlobalVae` from the shared plus private graph is a separate matter: it is refused for
-now because of encoder fan-out, which `tests/integration/test_global_vae_construction_guards.py`
-covers.
+The shared plus private graph is a fan-out graph: each encoder feeds `z_shared` and its own
+private space, through a latent head on each edge (roadmap P1-2, ADR 0024). The tests below check
+which heads the preset writes by default, that the head arguments are applied, and that a graph with
+two identity edges per encoder is refused. Building a `GlobalVae` from the graph is covered by
+`tests/integration/test_global_vae_construction_guards.py` and `test_encoder_fan_out.py`.
 """
 
 import pytest
 
-from global_vae.latent.base import RoutingGraph, validateRoutingGraph
+from global_vae.latent.base import HeadSpec, RoutingGraph, validateRoutingGraph
 from global_vae.latent.routing_graph_builders.shared_private import buildSharedPrivateRoutingGraph
 from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
 
@@ -67,6 +69,11 @@ class TestBuildSingleLatentRoutingGraph:
         """The preset returns the general `RoutingGraph`, not a special type."""
         graph = buildSingleLatentRoutingGraph(["signal"], ["signal"], 8)
         assert type(graph) is RoutingGraph
+
+    def test_single_latent_preset_has_no_heads(self) -> None:
+        """The single-latent preset is unchanged: no fan-out, so no heads."""
+        graph = buildSingleLatentRoutingGraph(["signal", "image"], ["signal", "image"], 8)
+        assert graph.encoder_heads == {}
 
     @pytest.mark.parametrize(
         ("encoders", "decoders"),
@@ -174,3 +181,62 @@ class TestBuildSharedPrivateRoutingGraph:
         assert list(graph.latent_specs) == ["z_shared"]
         with pytest.raises(ValueError, match="'z_shared' has no encoder feeding it"):
             validateRoutingGraph(graph)
+
+    def test_default_heads_are_identity_on_the_shared_edge_and_linear_on_the_private_edge(
+        self,
+    ) -> None:
+        """The arrangement of spec §9: `z_shared` untouched, the private space projected."""
+        graph = buildSharedPrivateRoutingGraph(["signal", "image"], 16, 4)
+        assert graph.encoder_heads == {
+            "signal": {
+                "z_shared": HeadSpec("identity"),
+                "z_private_signal": HeadSpec("linear"),
+            },
+            "image": {"z_shared": HeadSpec("identity"), "z_private_image": HeadSpec("linear")},
+        }
+
+    def test_every_encoder_edge_has_a_head(self) -> None:
+        """The preset writes an explicit head on every edge, so the model checks every width."""
+        graph = buildSharedPrivateRoutingGraph(["signal", "image", "spectrum"], 16, 4)
+        for encoder, latents in graph.encoder_to_latents.items():
+            assert list(graph.encoder_heads[encoder]) == latents
+
+    def test_head_arguments_are_applied_to_every_modality(self) -> None:
+        """`shared_head` and `private_head` choose the head name on every encoder."""
+        graph = buildSharedPrivateRoutingGraph(
+            ["signal", "image"], 16, 4, shared_head="linear", private_head="linear"
+        )
+        names = {
+            head.name for edge_heads in graph.encoder_heads.values() for head in edge_heads.values()
+        }
+        assert names == {"linear"}
+        validateRoutingGraph(graph)
+
+    def test_a_linear_shared_edge_with_an_identity_private_edge_is_valid(self) -> None:
+        """Either edge may be the identity one, as long as only one is."""
+        graph = buildSharedPrivateRoutingGraph(
+            ["signal", "image"], 16, 4, shared_head="linear", private_head="identity"
+        )
+        validateRoutingGraph(graph)
+
+    def test_two_identity_edges_per_encoder_are_refused_by_validation(self) -> None:
+        """Identity on both edges would give `z_shared` and the private space the same posterior."""
+        graph = buildSharedPrivateRoutingGraph(
+            ["signal", "image"], 8, 8, shared_head="identity", private_head="identity"
+        )
+        with pytest.raises(ValueError, match="identical posteriors"):
+            validateRoutingGraph(graph)
+
+    def test_heads_do_not_declare_a_width_of_their_own(self) -> None:
+        """`out_dim` stays `None`: each head's width is the latent space's `dim`."""
+        graph = buildSharedPrivateRoutingGraph(["signal", "image"], 16, 4)
+        heads = [
+            head for edge_heads in graph.encoder_heads.values() for head in edge_heads.values()
+        ]
+        assert all(head.out_dim is None and head.kwargs == {} for head in heads)
+
+    def test_head_specs_are_not_shared_between_edges(self) -> None:
+        """Editing one edge's `HeadSpec` does not edit another's."""
+        graph = buildSharedPrivateRoutingGraph(["signal", "image"], 16, 4)
+        graph.encoder_heads["signal"]["z_shared"].kwargs["x"] = 1
+        assert graph.encoder_heads["image"]["z_shared"].kwargs == {}

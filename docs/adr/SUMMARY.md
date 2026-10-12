@@ -22,3 +22,4 @@
 - [0021: Fusion residual connection](0021-fusion-residual-connection.md)
 - [0022: Training callback registry](0022-callback-registry.md)
 - [0023: Snake_case module names](0023-snake-case-module-names.md)
+- [0024: Encoder fan-out through latent heads](0024-encoder-fan-out-through-latent-heads.md)

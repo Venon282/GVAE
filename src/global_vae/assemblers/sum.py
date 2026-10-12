@@ -25,3 +25,13 @@ class SumAssembler(AbstractAssembler):
             The elementwise sum, shape `(batch, dim)`.
         """
         return torch.stack(latents, dim=0).sum(dim=0)
+
+    @property
+    def handlesMissingLatents(self) -> bool:
+        """The sum is defined for any non-empty list of latent vectors.
+
+        Returns:
+            `True`: with some latent spaces missing, the decoder receives the
+            sum of the ones that are available.
+        """
+        return True

@@ -180,6 +180,54 @@ class TestAssemblersAreParameterFree:
         assert list(getAssemblerClass(name)().parameters()) == []
 
 
+class TestHandlesMissingLatents:
+    """`handlesMissingLatents` says whether a decoder may run on some of its latent spaces.
+
+    `GlobalVae.forward` reads it when a modality is left out of a pass (spec §5, ADR 0024).
+    """
+
+    @pytest.mark.parametrize(
+        ("name", "expected"), [("concat", False), ("sum", True), ("average", True)]
+    )
+    def test_built_in_values(self, name: str, expected: bool) -> None:
+        """`sum` and `average` are defined for any non-empty subset; `concat` is not."""
+        assert getAssemblerClass(name)().handlesMissingLatents is expected
+
+    def test_an_assembler_that_says_nothing_is_not_assumed_to_tolerate_a_subset(self) -> None:
+        """The base default is `False`, so an unknown strategy is never fed a partial input."""
+
+        class _Silent(AbstractAssembler):
+            def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
+                return latents[0]
+
+        assert _Silent().handlesMissingLatents is False
+
+    def test_a_subclass_can_override_it(self) -> None:
+        """A custom assembler that accepts any non-empty list says so by overriding."""
+
+        class _Tolerant(AbstractAssembler):
+            def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
+                return latents[0]
+
+            @property
+            def handlesMissingLatents(self) -> bool:
+                return True
+
+        assert _Tolerant().handlesMissingLatents is True
+
+    @pytest.mark.parametrize("name", ["sum", "average"])
+    def test_tolerant_assemblers_do_accept_a_subset(self, name: str) -> None:
+        """The flag is honest: one input to `sum` or `average` still gives the full width."""
+        assert getAssemblerClass(name)()([_latent(4)]).shape == (BATCH_SIZE, 4)
+
+    def test_concat_with_a_subset_has_the_wrong_width(self) -> None:
+        """The reason `concat` says `False`: one of two inputs gives half the expected width."""
+        assert (
+            ConcatAssembler()([_latent(4)]).shape[-1]
+            != ConcatAssembler()([_latent(4), _latent(4)]).shape[-1]
+        )
+
+
 class TestAbstractAssembler:
     """`AbstractAssembler` is an interface, not something to instantiate."""
 

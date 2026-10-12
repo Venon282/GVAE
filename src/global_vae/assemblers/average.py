@@ -25,3 +25,13 @@ class AverageAssembler(AbstractAssembler):
             The elementwise mean, shape `(batch, dim)`.
         """
         return torch.stack(latents, dim=0).mean(dim=0)
+
+    @property
+    def handlesMissingLatents(self) -> bool:
+        """The mean is defined for any non-empty list of latent vectors.
+
+        Returns:
+            `True`: with some latent spaces missing, the decoder receives the
+            mean of the ones that are available.
+        """
+        return True

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 r"""Training entry point (spec §10 "Config management", §6.1 milestone 1).
 
-Trains a single-modality signal VAE end to end.
+Trains the model a `configs/experiment/*.yaml` file describes end to end: by default the
+single-modality signal VAE (spec §6.1 milestone 1), or any model of the config schema
+(several latent spaces, separate `encoders` and `decoders`, ADR 0025).
 
 Hydra-driven: composes `configs/model/*.yaml` + `configs/data/*.yaml` +
 `configs/training/*.yaml` (via `configs/experiment/*.yaml`'s own `defaults` list) into

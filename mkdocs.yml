@@ -34,6 +34,7 @@ nav:
       - Add a new modality: how-to/add-a-modality.md
       - Add a fusion / latent head / assembler / regularizer / transform / schedule: how-to/add-a-strategy.md
       - Choose and configure a fusion strategy: how-to/choose-a-fusion-strategy.md
+      - Configure encoders, decoders and latent spaces: how-to/configure-latent-spaces.md
       - Train a model (Hydra config): how-to/train.md
       - Evaluate and visualize a checkpoint: how-to/evaluate.md
   - Architecture Decisions: adr/  # literate-nav: expands adr/SUMMARY.md, one sidebar entry per ADR

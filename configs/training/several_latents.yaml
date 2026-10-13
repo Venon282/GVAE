@@ -1,0 +1,46 @@
+# Training configuration for models with several latent spaces (spec §9, ADR 0025). The same as
+# default.yaml except for what depends on the model's latent space names: beta is per latent
+# space (spec §2.3, docs/adr/0004-pluggable-beta-schedules.md), and a name that belongs to no
+# model would be ignored, so there is no `beta_schedules` entry here. The experiment file adds
+# one entry per latent space it declares (configs/experiment/signal_image_shared_private.yaml).
+# A latent space without an entry is weighted by the plain `beta` below.
+# Validated against global_vae.config.training.TrainingConfig (see
+# src/global_vae/config/training.py). `${output_dir}` interpolates against the composing
+# experiment config's own `output_dir`.
+num_epochs: 200
+
+optimizer:
+  name: adam
+  kwargs:
+    lr: 0.001
+
+reconstruction_loss: mse
+reconstruction_weight: 1.0
+
+beta: 1.0
+beta_schedules: {}
+
+# Several modalities, so a modality can be hidden from the encoders during training, which
+# trains the model to work from what is left (spec §5). At least one is always kept.
+modality_dropout_p: 0.15
+grad_clip_norm: null
+device: null # null auto-detects cuda, falling back to cpu
+log_every_n_steps: 50
+
+loggers:
+  - name: csv
+    kwargs:
+      path: ${output_dir}/metrics.csv
+  - name: tensorboard
+    kwargs:
+      log_dir: ${output_dir}/tensorboard
+
+callbacks:
+  checkpoint:
+    directory: ${output_dir}/checkpoints
+    every_n_epochs: 10
+    keep_last_n: 3
+  best_checkpoint:
+    path: ${output_dir}/checkpoints/best.pt
+    monitor: val/loss/total
+    mode: min

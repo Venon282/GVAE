@@ -35,6 +35,14 @@ python scripts/train.py \
 python scripts/train.py --config-name experiment/signal_resnet_vae
 ```
 
+Experiment files ship for each pattern of the model schema: `experiment/signal_vae`
+(one signal, one latent space), `experiment/signal_image_vae` (signal and image, one latent
+space), `experiment/signal_image_independent_latents` and `experiment/signal_image_shared_private`
+(several latent spaces). The last three read the data contract `configs/data/signal_image.yaml`, so
+your `loader_factory` yields `signal` and `image` batches (plus `image_out` for the independent
+latent spaces model). How the models are written is in
+[configure encoders, decoders and latent spaces](configure-latent-spaces.md).
+
 ## Loading a config programmatically
 
 Outside the `scripts/train.py` CLI entry point (e.g. from a notebook or your

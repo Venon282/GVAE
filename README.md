@@ -145,8 +145,9 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
    `@registerDecoder("your_decoder_name")`.
 3. Register both (the decorator does this: nothing else to wire up).
 4. Add a config entry referencing the two registry names (see
-   `configs/model/default.yaml` for a two-modality example and
-   `configs/model/signal_single_latent.yaml` for a single-modality one).
+   `configs/model/default.yaml` for a two-modality example,
+   `configs/model/signal_single_latent.yaml` for a single-modality one and
+   `docs/how-to/configure-latent-spaces.md` for several latent spaces).
 5. Add a test: a unit test for the encoder/decoder shapes (in `tests/unit/`), and
    ideally an entry in the relevant integration test (in `tests/integration/`).
 
@@ -173,15 +174,20 @@ provided: `buildSingleLatentRoutingGraph` (`EN-L1-DN`, what
 `buildSharedPrivateRoutingGraph` (a shared plus per-modality private latent
 space, with a latent head on each encoder -> latent edge). An encoder may feed
 several latent spaces through latent heads (`identity`, `linear`;
-`docs/adr/0024-encoder-fan-out-through-latent-heads.md`). Two limits remain:
+`docs/adr/0024-encoder-fan-out-through-latent-heads.md`). Config files can
+describe all of it (`docs/adr/0025-config-schema-for-several-latent-spaces.md`):
+`latent_mode: several` with `latent.spaces` and `latent.decoders_consume`, a
+`head` on each `fed_by` edge, and separate `encoders` and `decoders` sections
+for names that are not modality names. `configs/model/` has one file per
+pattern of spec §9 (`signal_image_independent_latents.yaml`,
+`signal_image_shared_private.yaml`) and the model of example 03
+(`signal_image_to_image.yaml`), and `configs/experiment/` an experiment for
+each, runnable with `scripts/train.py`. One limit remains:
 
-- `buildModelFromConfig` only builds `latent_mode: single`, so a config file
-  cannot describe several latent spaces, or heads, yet. Build a `RoutingGraph`
-  in Python for now.
 - Of the 8 configurations in spec §2.1, the four `EN-*` rows (one encoder per
   modality) are built, including the shared plus private topology, which can
-  be trained and evaluated. The four `E1-*` rows (one shared encoder over
-  several modalities) are not built.
+  be trained and evaluated, from Python or from a config file. The four `E1-*`
+  rows (one shared encoder over several modalities) are not built.
 
 Closing these gaps is tracked in the [roadmap](docs/roadmap.md) (Phase 1). See
 also `docs/adr/0001-phase1-default-configuration.md`.

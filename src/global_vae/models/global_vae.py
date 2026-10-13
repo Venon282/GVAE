@@ -92,6 +92,7 @@ class GlobalVae(nn.Module):
         fusion_kwargs: dict[str, dict[str, Any]] | None = None,
         regularizer_kwargs: dict[str, dict[str, Any]] | None = None,
         fusion_residual: dict[str, bool] | None = None,
+        assembler_kwargs: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Build a `GlobalVae` instance from a routing graph.
 
@@ -132,6 +133,10 @@ class GlobalVae(nn.Module):
                 leaves the strategy unwrapped, exactly as before. `True`
                 is only valid for a latent space that actually has a
                 fusion, i.e. one fed by more than one encoder.
+            assembler_kwargs: Optional decoder name -> constructor kwargs
+                for that decoder's assembler (`assemblers/`). Absent means
+                no kwargs, which is all the built-in `concat`, `sum` and
+                `average` assemblers take.
 
         Raises:
             ValueError: If `routing_graph` is invalid (spec §2.2, §10:
@@ -161,6 +166,7 @@ class GlobalVae(nn.Module):
         regularizer_kwargs = regularizer_kwargs or {}
         fusion_strategies = fusion_strategies or {}
         regularizer_strategies = regularizer_strategies or {}
+        assembler_kwargs = assembler_kwargs or {}
 
         self.routing_graph = routing_graph
         self.latent_spaces = routing_graph.latent_specs
@@ -227,7 +233,9 @@ class GlobalVae(nn.Module):
 
         self.assemblers = nn.ModuleDict(
             {
-                decoder_name: getAssemblerClass(assembler_name)()
+                decoder_name: getAssemblerClass(assembler_name)(
+                    **assembler_kwargs.get(decoder_name, {})
+                )
                 for decoder_name, assembler_name in routing_graph.decoder_assemblers.items()
             }
         )

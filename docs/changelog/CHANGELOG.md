@@ -49,6 +49,51 @@ versioning follows [Semantic Versioning](https://semver.org/).
   (heads included) receives a gradient, the three latent spaces differ, modality dropout removes
   an absent encoder's edges, and evaluation and the cross-modal reports run. Unit tests cover the
   new validation rules, the preset's head arguments and `handlesMissingLatents`.
+- Config schema for several latent spaces (roadmap P1-3, spec §9 and §11, ADR 0025). `buildModelFromConfig`
+  builds `latent_mode: several` into a `RoutingGraph` and no longer raises `NotImplementedError`;
+  `latent_mode: single` and every shipped YAML file stay valid and build the same model. `ModelConfig`
+  gains `encoders` and `decoders` (instance name -> `{name, kwargs}`, added to those of `modalities`,
+  so a decoder needs no encoder of the same name, in either mode) and `latent: LatentConfig` with
+  `spaces` (`LatentSpaceConfig`: `dim`, `fed_by`, `fusion`, `regularizer`) and `decoders_consume`
+  (`DecoderConsumptionConfig`: `spaces`, `assembler`, `kwargs`). `fed_by` is a list of encoder names
+  (identity edges) or a mapping `encoder -> {head, kwargs}` (`EdgeHeadConfig`, one latent head per
+  edge, mapped to `RoutingGraph.encoder_heads`). Beta stays in `TrainingConfig.beta_schedules`.
+  This is the default proposed for roadmap decision D-1, taken without an explicit answer, so it
+  needs the owner's approval.
+- The config package is split in three. `config/model_schema.py` holds the dataclasses,
+  `config/model_resolution.py` the validation and the derivation of `GlobalVae.__init__`'s
+  arguments (`validateModelConfig`, `resolveModelConfig`, `parseFedBy`, `ResolvedModel`), and
+  `config/model.py` the builder and the re-exports, so `from global_vae.config.model import
+  ModelConfig` keeps working. Every error starts with the dotted path of the field to edit
+  (`model.latent.spaces.z_shared.fed_by: unknown encoder 'audio'`), a section of the other latent
+  mode is refused instead of ignored, and an encoder, decoder or latent space with no partner is
+  refused. `latent_dim` is derived and never repeated: an encoder takes the `dim` of the space it
+  feeds through an identity edge, a decoder the width its assembler produces (the assembler is
+  run once on zero tensors, so a new assembler needs no change here), and an explicit value that
+  disagrees is an error in `several` mode.
+- `GlobalVae.__init__` takes `assembler_kwargs` (decoder name -> constructor kwargs), the
+  counterpart of `fusion_kwargs` and `regularizer_kwargs`. The built-in assemblers take none, so
+  nothing changes for them.
+- Shipped configs, one model and one experiment per pattern of spec §9:
+  `configs/model/signal_image_independent_latents.yaml` and `signal_image_shared_private.yaml`
+  with `configs/experiment/signal_image_independent_latents.yaml` and
+  `signal_image_shared_private.yaml`, plus `configs/experiment/signal_image_vae.yaml` for the
+  single latent space of `configs/model/default.yaml`. `configs/model/signal_image_to_image.yaml`
+  is the model of `examples/03_signal_image_to_image.py`, with the same parameters as the Python
+  one. `configs/data/signal_image.yaml` is the data contract of a signal plus image model, and
+  `configs/training/several_latents.yaml` the training defaults without a beta schedule (the
+  experiment files add one per latent space).
+- `buildTrainerFromConfig` logs a warning for a `training.beta_schedules` key that is not a latent
+  space of the model, instead of dropping the schedule without a sign.
+- `docs/adr/0025-config-schema-for-several-latent-spaces.md`, which supersedes the single-only part
+  of ADR 0011 (ADR 0011 is left as written), and `docs/how-to/configure-latent-spaces.md`.
+- `tests/unit/test_model_config_validation.py` (every validation rule, `parseFedBy`, the derived
+  widths and the resolved arguments, 106 tests) and `tests/integration/test_model_config_schema.py`
+  (every shipped model and experiment file validates and builds, the two new patterns build, run and
+  send a gradient to every parameter, the example 03 model equals the Python one, single-latent
+  files equal `GlobalVae.createSingleLatent`, errors name their field). `test_train_script.py` trains
+  the three signal plus image experiments through `scripts/train.py` and checks that a wrong
+  `fed_by` stops the run with the field path; `_train_script_fixtures.py` gains a paired dummy loader.
 - `tests/unit/test_deprecated_module_paths.py` and `tests/unit/test_ci_workflow.py` (roadmap
   P0-2). The first pins the deprecation shims below: each old import path warns and names its
   replacement, returns the very same class, registers nothing twice and defines nothing of its
@@ -75,6 +120,20 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `test_routing_graph_presets.py` and `test_assemblers.py` follow.
 - The how-to `add-a-strategy.md`, the README, the spec (§2.2 constraints, §8 tree, §10 validation
   rule) and the `cross_modal.py` docstring describe fan-out as built.
+- Spec §9 is rewritten to the final schema (ADR 0025): `latent.mode` and `single_latent` are
+  `latent_mode` and `single_latent`, `fusion: poe` is `fusion: {strategy: poe}`, `head: linear` moves
+  from the latent space to the edge (`fed_by`), the placeholder `joint_decoder_v1` is a registered 2D
+  decoder named `image_out`, and a fourth example shows `encoders` and `decoders`. §11's first
+  bullet is resolved, and the §8 tree notes the three config modules. The README, the notes in
+  `configs/experiment/` and `configs/data/`, the header of `configs/model/default.yaml`, the how-to
+  `train.md` and `choose-a-fusion-strategy.md`, and the docstrings of `scripts/train.py` and
+  `examples/03_signal_image_to_image.py` no longer say that a config cannot describe several latent
+  spaces or the example 03 model.
+- `tests/integration/test_config.py`: the test that expected `NotImplementedError` for
+  `latent_mode: several` now checks that a `several` model without a `latent` section names
+  `model.latent`, and new tests cover the other messages that name a field.
+- A `single` model that sets `latent`, or a `several` model that sets `single_latent`, is now an
+  error. It was accepted before, the unused section being ignored; no shipped file did it.
 - Snake_case module names (roadmap P0-2, decision D-9, ADR 0023). The eight encoder and decoder
   modules named after their class are renamed with `git mv`: `encoders/one_d_cnn_encoder.py`,
   `one_d_cnn_residual_encoder.py`, `two_d_cnn_encoder.py`, `two_d_cnn_residual_encoder.py` and

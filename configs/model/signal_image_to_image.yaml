@@ -1,0 +1,52 @@
+# Signal plus degraded image -> clean image (spec §2.1 `EN-L1-DN`, ADR 0019): the model of
+# `examples/03_signal_image_to_image.py`, written as a config. Two encoders feed ONE fused
+# latent space through Product-of-Experts (spec §4), and one decoder, `image_out`, reads it.
+# The decoder has no encoder of the same name: its reconstruction target is its own batch key.
+# That is what `modalities` cannot say (one encoder and one decoder per name), so the
+# instances are declared under `encoders` and `decoders` instead, each by its own name
+# (ADR 0025). `latent_mode: single` still ties them together: every encoder feeds
+# `single_latent`, every decoder consumes it.
+#
+# The batch an experiment feeds this model carries three keys: `signal` and `image_in` (the
+# encoder inputs) and `image_out` (the target, never encoded). `signal` is a 1D profile of
+# length 64 and the images are 32 x 32; change `output_shape` below with the images, and
+# `seed_shape` and `hidden_channels` with it (TwoDCnnResidualDecoder.computeOutputShape checks
+# a choice: 4 -> 8 -> 16 -> 32 through three doublings).
+# Validated against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+name: global_vae_signal_image_to_image
+latent_mode: single
+
+encoders:
+  signal:
+    name: 1d_cnn_resnet_encoder_v1
+    kwargs:
+      hidden_channels: [16, 32, 64]
+      modality_name: signal
+      # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+      # single_latent.dim below, for every encoder and decoder.
+  image_in:
+    name: 2d_cnn_resnet_encoder_v1
+    kwargs:
+      hidden_channels: [16, 32, 64]
+      modality_name: image_in
+
+decoders:
+  image_out:
+    name: 2d_cnn_resnet_decoder_v1
+    kwargs:
+      output_shape: [32, 32]
+      seed_shape: [4, 4]
+      hidden_channels: [64, 32, 16]
+      modality_name: image_out
+
+single_latent:
+  dim: 8
+  name: z_fused
+  # Two encoders feed z_fused, so it needs a fusion strategy (spec §4). PoE is natively
+  # subset-tolerant (spec §5): the decoder can be queried with either input alone.
+  fusion:
+    strategy: poe
+  regularizer:
+    strategy: free_bits_kl
+    kwargs:
+      free_bits: 0.5

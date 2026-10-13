@@ -5,8 +5,8 @@ plus `loadExperimentConfig`, the one function that turns a Hydra config director
 config name into a real, typed `ExperimentConfig` instance.
 
 Composition (which YAML files get merged) is Hydra's job, driven by each
-`configs/experiment/*.yaml`'s own `defaults` list (spec §9's illustrative examples,
-now backed by a real schema); **validation** (does the merged result actually match
+`configs/experiment/*.yaml`'s own `defaults` list (spec §9's examples,
+backed by a real schema); **validation** (does the merged result actually match
 `ExperimentConfig`'s shape, are all required fields present) is done explicitly here via
 `OmegaConf.merge(OmegaConf.structured(ExperimentConfig), composed)`, rather than relying
 on Hydra's `ConfigStore`-group-name-matching to catch every mismatch implicitly. This

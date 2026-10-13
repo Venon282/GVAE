@@ -1,0 +1,40 @@
+# @package _global_
+# Shared plus private latent spaces (spec §9, third pattern; ADR 0024, ADR 0025): each encoder
+# feeds the shared space and a private one through a latent head. Assembles model + data +
+# training into one composed, validated global_vae.config.experiment.ExperimentConfig.
+# Run with:
+#   python scripts/train.py --config-name experiment/signal_image_shared_private \
+#       data.train_path=/path/to/data data.loader_factory=my_project.data:buildPairedDataloaders
+# The batches carry `signal` and `image`, each both an encoder input and its decoder's target.
+defaults:
+  - /model: signal_image_shared_private
+  - /data: signal_image
+  - /training: several_latents
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/signal_image_shared_private
+
+# One beta warm-up per latent space, under the names the model file declares (spec §2.3). The
+# private spaces warm up like the shared one here; give them another schedule to change that.
+training:
+  beta_schedules:
+    z_shared:
+      strategy: linear_warmup
+      kwargs:
+        warmup_steps: 1000
+        start_value: 0.0
+        end_value: 1.0
+    z_signal_private:
+      strategy: linear_warmup
+      kwargs:
+        warmup_steps: 1000
+        start_value: 0.0
+        end_value: 1.0
+    z_image_private:
+      strategy: linear_warmup
+      kwargs:
+        warmup_steps: 1000
+        start_value: 0.0
+        end_value: 1.0

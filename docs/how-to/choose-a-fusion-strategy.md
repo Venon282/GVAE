@@ -160,3 +160,10 @@ modality it also writes a cross-modal reconstruction matrix
 strategy behaves when a modality is withheld.
 
 See also: [ADR 0020](../adr/0020-additional-fusion-strategies.md) and spec §4, §5.
+
+## With several latent spaces
+
+In a `latent_mode: several` model a fusion belongs to a latent space, not to the model: write it
+under `latent.spaces.<name>.fusion`, with the same `strategy`, `kwargs` and `residual` fields. A
+space fed by more than one encoder needs one, and a space fed by one encoder refuses one. See
+[configure encoders, decoders and latent spaces](configure-latent-spaces.md).

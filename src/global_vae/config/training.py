@@ -364,7 +364,10 @@ def buildTrainerFromConfig(
 
     Returns:
         A `Trainer` instance wired with the resolved optimizer,
-        reconstruction loss, beta schedules, and callbacks. Call
+        reconstruction loss, beta schedules, and callbacks. A key of
+        `config.beta_schedules` that is not a latent space of `model` is
+        logged as a warning and otherwise ignored (a schedule written for
+        another model's latent space names). Call
         `.fit(dataloaders.train, num_epochs=config.num_epochs,
         val_dataloader=dataloaders.val)` to actually train (spec §6.1
         milestone 1's data pipeline stays the caller's own
@@ -378,6 +381,15 @@ def buildTrainerFromConfig(
     optimizer_cls = resolveOptimizerClass(config.optimizer.name)
     reconstruction_loss_fn = resolveReconstructionLossFn(config.reconstruction_loss)
     beta_schedules = buildBetaSchedules(config)
+    unmatched = sorted(set(beta_schedules) - set(model.latent_spaces))
+    if unmatched:
+        logger.warning(
+            "training.beta_schedules names latent space(s) %s that the model does not have "
+            "(latent spaces: %s). Those schedules have no effect, and the spaces they were "
+            "meant for are weighted by `training.beta`.",
+            unmatched,
+            sorted(model.latent_spaces),
+        )
     callbacks = buildCallbacksFromConfig(config, config_snapshot=config_snapshot)
 
     return Trainer(

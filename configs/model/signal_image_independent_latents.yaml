@@ -1,0 +1,56 @@
+# Several independent latent spaces, no encoder fan-out (spec §9, second pattern; ADR 0025):
+# a signal and an image are each encoded into a latent space of their own, and ONE decoder
+# reads both, combined by the `concat` assembler (spec §2.2).
+#
+#   signal -> 1d_cnn_encoder_v1 -> z_signal -+
+#                                            +-> concat -> 2d_cnn_decoder_v1 -> image_out
+#   image  -> 2d_cnn_encoder_v1 -> z_image  -+
+#
+# Each latent space is fed by exactly one encoder, so none needs a fusion strategy, and each
+# edge is an identity edge, so no latent head is involved. The decoder is named `image_out`,
+# not after a modality: its reconstruction target is the batch key `image_out`. The shared
+# decoder of spec §9 is a placeholder (`joint_decoder_v1`); a registered 2D decoder stands in
+# for it here so the config builds as it is.
+#
+# `latent_dim` is omitted everywhere: each encoder takes the `dim` of the space it feeds, and
+# the decoder takes what `concat` makes of the two spaces (16 + 16 = 32). The latent space
+# names below are the keys of `training.beta_schedules` (configs/experiment/
+# signal_image_independent_latents.yaml).
+# Validated against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+name: global_vae_signal_image_independent_latents
+latent_mode: several
+
+encoders:
+  signal:
+    name: 1d_cnn_encoder_v1
+    kwargs:
+      hidden_channels: [8, 16, 32, 64, 128]
+      kernel_sizes: 5
+  image:
+    name: 2d_cnn_encoder_v1
+    kwargs:
+      hidden_channels: [16, 32, 64]
+
+decoders:
+  image_out:
+    name: 2d_cnn_decoder_v1
+    kwargs:
+      # output_shape must match the images your own loader_factory yields (height, width).
+      # With conv_transpose each of the 3 hidden_channels entries doubles the default 8 x 8
+      # seed: 8 -> 16 -> 32 -> 64.
+      output_shape: [64, 64]
+      hidden_channels: [64, 32, 16]
+      upsample_modes: conv_transpose
+
+latent:
+  spaces:
+    z_signal:
+      dim: 16
+      fed_by: [signal] # exactly one encoder: no fusion needed
+    z_image:
+      dim: 16
+      fed_by: [image] # exactly one encoder: no fusion needed
+  decoders_consume:
+    image_out:
+      spaces: [z_signal, z_image]
+      assembler: concat

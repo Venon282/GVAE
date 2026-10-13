@@ -13,17 +13,24 @@ signal_resnet_single_latent` override directly on top of `signal_vae.yaml`; both
 runnable end to end via `scripts/train.py`. See
 `docs/adr/0014-residual-1d-encoder-decoder.md`.
 
+`configs/experiment/signal_image_vae.yaml`, `signal_image_independent_latents.yaml` and
+`signal_image_shared_private.yaml` are one experiment for each pattern of spec §9 (single latent
+space, several independent latent spaces, shared plus private), composing a model from
+`configs/model/`, the paired data contract `configs/data/signal_image.yaml` and a training
+config (`configs/training/default.yaml` for the single latent space,
+`configs/training/several_latents.yaml` plus one `beta_schedules` entry per latent space for the
+others). All three train through `scripts/train.py`, which `tests/integration/test_train_script.py`
+checks on dummy paired batches. See `docs/adr/0025-config-schema-for-several-latent-spaces.md`.
+
 # Still open
 
-A second experiment file for spec §6.1 milestone 2 (paired signal+image, exercising
-Fusion) is not written yet. The image encoder and decoder it needs exist
-(`docs/adr/0017-2d-cnn-encoder-decoder.md`, `docs/adr/0018-2d-residual-encoder-decoder.md`),
-and `configs/model/default.yaml` is a buildable signal plus image model (PoE fusion, both
-modalities reconstructed). What is missing is a paired `configs/data/` file and the pairing
-mechanism itself (spec §11, roadmap P3-2): pairing stays the caller's `loader_factory`. The
-experiment file is roadmap P3-3, which proposes the name `signal_image_vae.yaml`.
+The paired data itself: `configs/data/signal_image.yaml` only states the contract (a
+`loader_factory` of your own that yields `signal`, `image` and, for the translation-style models,
+`image_out`), and pairing stays the caller's `loader_factory` (spec §11, roadmap P3-2). The
+image-only model configs and the review of `configs/model/default.yaml` are roadmap P3-3.
 
 A model whose decoder target is not an encoder input (signal and image to image, as in
-`examples/03_signal_image_to_image.py`) cannot be written as a `configs/model/` file yet:
-`buildModelFromConfig` supports `latent_mode: single` only, which ties one decoder to each
-encoder name (roadmap P1-3).
+`examples/03_signal_image_to_image.py`) is `configs/model/signal_image_to_image.yaml`: the
+`encoders` and `decoders` sections name instances independently of modalities. It has no
+experiment file, since it needs a data contract of its own (three batch keys, 64 point signals
+and 32 x 32 images).

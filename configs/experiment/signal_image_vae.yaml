@@ -1,0 +1,18 @@
+# @package _global_
+# Signal plus image fused into ONE latent space by Product-of-Experts, each decoded back to
+# itself (spec §9, first pattern; spec §6.1 milestone 2). Same shape as signal_vae.yaml, with
+# the two-modality model and its data contract. Assembles model + data + training into one
+# composed, validated global_vae.config.experiment.ExperimentConfig.
+# Run with:
+#   python scripts/train.py --config-name experiment/signal_image_vae \
+#       data.train_path=/path/to/data data.loader_factory=my_project.data:buildPairedDataloaders
+# The batches carry `signal` and `image`, each both an encoder input and its decoder's target.
+defaults:
+  - /model: default
+  - /data: signal_image
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/signal_image_vae

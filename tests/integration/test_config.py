@@ -14,6 +14,7 @@ initialize_config_dir(...)` block clears Hydra's global state on exit, verified 
 `TestRepeatedLoading` class below.
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -252,9 +253,43 @@ class TestBuildModelFromConfig:
         with pytest.raises(KeyError, match="not_a_registered_encoder_v1"):
             buildModelFromConfig(cfg.model)
 
-    def test_several_latent_mode_raises_not_implemented(self) -> None:
+    def test_several_latent_mode_without_a_latent_section_names_the_field(self) -> None:
+        """`latent_mode: several` builds now (ADR 0025), but needs its own `latent` section."""
         cfg = _loadSignalVaeConfig(overrides=["model.latent_mode=several"])
-        with pytest.raises(NotImplementedError, match="several"):
+        with pytest.raises(ValueError, match=r"model.latent: required"):
+            buildModelFromConfig(cfg.model)
+
+    def test_a_single_latent_section_left_in_several_mode_is_refused(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_image_shared_private",
+            overrides=[*_BASE_OVERRIDES, "+model.single_latent.dim=8"],
+        )
+        with pytest.raises(ValueError, match=r"model.single_latent: only used when"):
+            buildModelFromConfig(cfg.model)
+
+    def test_unknown_latent_mode_names_the_field(self) -> None:
+        cfg = _loadSignalVaeConfig(overrides=["model.latent_mode=multi"])
+        with pytest.raises(ValueError, match=r"model.latent_mode: expected one of"):
+            buildModelFromConfig(cfg.model)
+
+    def test_unregistered_name_error_starts_with_the_field_path(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_vae",
+            overrides=[
+                *_BASE_OVERRIDES,
+                "model=default",
+                "model.modalities.image.encoder.name=not_a_registered_encoder_v1",
+            ],
+        )
+        with pytest.raises(KeyError, match=r"model.modalities.image.encoder.name: "):
+            buildModelFromConfig(cfg.model)
+
+    def test_two_modalities_without_a_fusion_name_the_field(self) -> None:
+        cfg = loadExperimentConfig(
+            config_name="experiment/signal_vae",
+            overrides=[*_BASE_OVERRIDES, "model=default", "model.single_latent.fusion=null"],
+        )
+        with pytest.raises(ValueError, match=r"model.single_latent.fusion: required, since 2"):
             buildModelFromConfig(cfg.model)
 
     def test_single_mode_without_single_latent_raises_value_error(self) -> None:
@@ -556,6 +591,27 @@ class TestBuildTrainerFromConfig:
         assert isinstance(trainer, Trainer)
         assert isinstance(trainer.optimizer, torch.optim.Adam)
         assert trainer.optimizer.param_groups[0]["lr"] == pytest.approx(0.001)
+
+    def test_a_beta_schedule_for_a_missing_latent_space_is_warned_about(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        cfg = _loadSignalVaeConfig()
+        model = buildModelFromConfig(cfg.model)
+        cfg.training.beta_schedules["z_other"] = cfg.training.beta_schedules["z_fused"]
+        with caplog.at_level(logging.WARNING, logger="global_vae.config.training"):
+            trainer = buildTrainerFromConfig(model, cfg.training)
+        assert isinstance(trainer, Trainer)
+        assert "z_other" in caplog.text
+        assert "no effect" in caplog.text
+
+    def test_matching_beta_schedules_are_not_warned_about(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        cfg = _loadSignalVaeConfig()
+        model = buildModelFromConfig(cfg.model)
+        with caplog.at_level(logging.WARNING, logger="global_vae.config.training"):
+            buildTrainerFromConfig(model, cfg.training)
+        assert caplog.text == ""
 
     def test_beta_schedule_is_wired_and_used(self) -> None:
         cfg = _loadSignalVaeConfig(

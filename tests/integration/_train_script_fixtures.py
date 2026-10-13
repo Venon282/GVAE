@@ -14,6 +14,7 @@ import torch
 from global_vae.config.data import DataConfig, DataloaderBundle
 
 BATCH_SIZE = 4
+IMAGE_SIZE = 64
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
@@ -27,5 +28,39 @@ def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
 
     def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
         return [{"signal": torch.randn(BATCH_SIZE, length)} for _ in range(num_batches)]
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummySignalImageDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the models that take a signal and an image.
+
+    Serves every shipped signal plus image experiment (`configs/experiment/signal_image_*.yaml`)
+    with one set of batches: `signal` of shape `(batch, length)`, `image` of shape `(batch, 64,
+    64)`, and `image_out`, the target of the translation-style models whose decoder is named
+    that (a key with no encoder is never encoded, ADR 0019; the models that have none leave it
+    unused). Like `buildDummyDataloaders`, it never touches disk.
+
+    Args:
+        config: The data config; `seed` and `sequence_length["signal"]` are read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+    length = (config.sequence_length or {}).get("signal", 256)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        batches = []
+        for _ in range(num_batches):
+            image = torch.randn(BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE)
+            batches.append(
+                {
+                    "signal": torch.randn(BATCH_SIZE, length),
+                    "image": image,
+                    "image_out": image.clone(),
+                }
+            )
+        return batches
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))

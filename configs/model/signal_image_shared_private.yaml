@@ -1,0 +1,77 @@
+# Shared plus private latent spaces (spec §9, third pattern; ADR 0024, ADR 0025): the
+# encoder fan-out case. Each encoder feeds the shared space `z_shared` (fused by PoE with the
+# other one) AND a private space of its own, and each modality's decoder reads the shared space
+# plus its own private space, combined by `concat`.
+#
+#   signal -> 1d_cnn_encoder_v1 -+-> (identity) ---+
+#                                |                 +-> PoE -> z_shared -+
+#                                +-> (linear) -> z_signal_private       |
+#   image  -> 2d_cnn_encoder_v1 -+-> (identity) ---+                     |
+#                                +-> (linear) -> z_image_private         |
+#
+#   decoder signal = concat(z_shared, z_signal_private), decoder image likewise.
+#
+# One encoder produces ONE `(mu, logvar)`. Left alone on two edges it would give both latent
+# spaces the same posterior, so every encoder here has one identity edge (to z_shared, which
+# fixes its output width at 32) and one edge through a `linear` head down to the private
+# space's 8 dimensions. That is the mapping form of `fed_by`: `encoder -> {head, kwargs}`.
+# `modalities` is the shorthand that gives each name one encoder and one decoder, which is what
+# this model is.
+#
+# Beta is per latent space and lives in `training.beta_schedules` under the names declared
+# here (configs/experiment/signal_image_shared_private.yaml).
+# Validated against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+name: global_vae_signal_image_shared_private
+latent_mode: several
+
+modalities:
+  signal:
+    encoder:
+      name: 1d_cnn_encoder_v1
+      kwargs:
+        hidden_channels: [8, 16, 32, 64, 128]
+        kernel_sizes: 5
+    decoder:
+      name: 1d_cnn_decoder_v1
+      kwargs:
+        # output_length must match configs/data/signal_image.yaml's sequence_length.signal.
+        output_length: 256
+        hidden_channels: [128, 64, 32, 16, 8]
+        upsample_modes: conv_transpose
+  image:
+    encoder:
+      name: 2d_cnn_encoder_v1
+      kwargs:
+        hidden_channels: [16, 32, 64]
+    decoder:
+      name: 2d_cnn_decoder_v1
+      kwargs:
+        # output_shape must match the images your own loader_factory yields.
+        output_shape: [64, 64]
+        hidden_channels: [64, 32, 16]
+        upsample_modes: conv_transpose
+
+latent:
+  spaces:
+    z_shared:
+      dim: 32
+      fed_by: [signal, image] # more than one encoder: needs a fusion strategy
+      fusion:
+        strategy: poe
+    z_signal_private:
+      dim: 8
+      fed_by:
+        signal: # same encoder as z_shared: this is encoder fan-out
+          head: linear # projects the signal encoder's 32-dim output down to 8
+    z_image_private:
+      dim: 8
+      fed_by:
+        image: # same encoder as z_shared: this is encoder fan-out
+          head: linear # projects the image encoder's 32-dim output down to 8
+  decoders_consume:
+    signal:
+      spaces: [z_shared, z_signal_private]
+      assembler: concat
+    image:
+      spaces: [z_shared, z_image_private]
+      assembler: concat

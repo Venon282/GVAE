@@ -17,6 +17,13 @@ other modality already configured. `configs/data/signal.yaml` ships a working
 `log` + `standardize` example for its one `signal` modality (see that file's own
 comments for how to fill in real statistics).
 
+`configs/data/signal_image.yaml` is the same kind of contract for the models that take a signal
+and an image (`configs/experiment/signal_image_*.yaml`, `docs/adr/0025-config-schema-for-several-latent-spaces.md`):
+a `loader_factory` of your own, per-modality `transforms` for `signal` and `image`, and
+`sequence_length.signal`. It describes the batches the experiments expect (`signal`, `image`, and
+`image_out` for the translation-style models); pairing a signal with its image stays the
+`loader_factory`'s job.
+
 # Still deferred / permanent scope boundary
 
 No dataset/pairing/splitting *code* exists in this framework, and none is planned:

@@ -33,6 +33,10 @@ that helper ties one decoder to every encoder name, whereas here the decoder is 
                                                                     -> image_out
     image_in -> 2d_cnn_resnet_encoder_v1 -+
 
+The same model can be written as a config file, `configs/model/signal_image_to_image.yaml`
+(separate `encoders` and `decoders` sections, ADR 0025); this script builds it in Python so that
+the wiring stays visible next to the training code.
+
 **Training with a target that is not an input.** `Trainer` restricts what reaches the
 encoders to the batch keys that actually have an encoder (`GlobalVae.selectEncoderInputs`,
 ADR 0019) and uses the whole batch, unrestricted, as the reconstruction target; a target-only

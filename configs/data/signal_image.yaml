@@ -1,0 +1,46 @@
+# Data contract for the models that take a 1D signal AND a 2D image (spec §6.1 milestone 2,
+# §9). Same stance as signal.yaml: framework-agnostic, no dataset code anywhere in this
+# framework (data/NOTE.md). `loader_factory` must point at your own
+# "module.path:function_name" returning a global_vae.config.data.DataloaderBundle whose
+# batches carry one tensor per key the model uses: `signal` of shape (batch, 256), `image` of
+# shape (batch, 64, 64), plus `image_out` (the target) for the models whose decoder is named
+# that. Pairing a signal with its image is yours too (spec §11, roadmap P3-2).
+# `train_path`/`loader_factory` are left as required (`???`, Hydra's MISSING marker): fill them
+# in, or override them on the command line.
+loader_factory: ??? # e.g. "my_project.data:buildPairedDataloaders"
+train_path: ???      # e.g. "data/raw/saxs_paired_train"
+val_path: null
+test_path: null
+
+batch_size: 32
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing steps (spec §6.2), keyed per modality
+# (docs/adr/0015-per-modality-data-transforms.md). Nothing here is applied automatically: your
+# own `loader_factory` decides whether and how to use it. The values are placeholders (identity
+# `standardize`): replace `mean` and `std` with statistics of your own training split.
+transforms:
+  signal:
+    - name: log
+      kwargs:
+        eps: 1.0e-6
+    - name: standardize
+      kwargs:
+        mean: 0.0
+        std: 1.0
+  image:
+    - name: standardize
+      kwargs:
+        mean: 0.0
+        std: 1.0
+
+# Target length of the signal on the common grid. "signal" must match the model's signal
+# decoder `output_length` (configs/model/signal_image_shared_private.yaml). Images need no entry:
+# their size is the decoder's `output_shape`.
+sequence_length:
+  signal: 256
+
+seed: 0

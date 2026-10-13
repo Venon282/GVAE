@@ -295,7 +295,7 @@ global-vae/
 │       │   ├── beta_schedules/  # AbstractBetaSchedule + registry: constant, linear_warmup, cyclical_annealing
 │       │   ├── callbacks/       # TrainerCallback + registry: checkpoint, best_checkpoint, early_stopping, reduce_lr_on_plateau
 │       │   └── loggers/         # experiment logger interface + registry: csv, tensorboard
-│       ├── config/              # structured dataclass schema + builders (data, model, training, experiment)
+│       ├── config/              # structured dataclass schema + builders (data, model, training, experiment); the model schema, its validation and its builder are three modules
 │       ├── evaluation/          # metrics, evaluate(), cross-modal reports, figure export
 │       ├── visualization/       # latent, reconstruction and loss-curve plots (optional `visualization` extra)
 │       └── utils/               # seed, convolution arithmetic and blocks, shared builders
@@ -309,98 +309,120 @@ global-vae/
 ```
 
 ---
-## 9. Illustrative config examples
- 
-Not final: these show how the registry + config-driven pattern is meant to operate in practice, matching `GlobalVae`'s two constructors (`__init__` with an explicit `RoutingGraph`, and the `createSingleLatent()` convenience wrapper; see `models/global_vae.py` and ADR 0002). The encoder and decoder names are real registry keys (§8), except `joint_decoder_v1` in the second example, a placeholder for a shared decoder you would write and register yourself. For the YAML shape `buildModelFromConfig` accepts today, see `configs/model/default.yaml` (signal + image, single latent space) and `configs/model/signal_single_latent.yaml`.
- 
-**Single latent space** (`GlobalVae.createSingleLatent`, the `EN-L1-DN` Phase-1 default):
+## 9. Config examples
+
+These are the shapes `buildModelFromConfig` accepts (`config/model_schema.py`, `docs/adr/0025-config-schema-for-several-latent-spaces.md`), shown as they sit in a composed experiment config, under `model:`. A shipped `configs/model/*.yaml` file is the content of that key, without the `model:` line. The encoder and decoder names are real registry keys (§8); decoder kwargs that depend on the data (`output_length`, `output_shape`) are left out here to keep the focus on the wiring, and each example names the shipped file that has them.
+
+A model is written with `modalities` (one encoder and one decoder per name, both under that name), with separate `encoders` and `decoders` sections keyed by instance name (no tie between the two), or with both. `latent_mode` picks where they go: `single` takes `single_latent`, `several` takes `latent`, and the section of the other mode is refused. In `latent`, `spaces.<name>.fed_by` is a list of encoder names (identity edges) or a mapping `encoder -> {head, kwargs}` (one latent head per edge), and `decoders_consume.<decoder>` gives the spaces a decoder reads and the assembler that combines them. `latent_dim` is never repeated in an encoder's or decoder's `kwargs`: it is derived from the latent space dimensions, and an explicit value wins. Beta is per latent space and stays under `training.beta_schedules`, keyed by the latent space names declared here.
+
+**Single latent space** (`GlobalVae.createSingleLatent`, the `EN-L1-DN` Phase-1 default; shipped as `configs/model/default.yaml`):
  
 ```yaml
 model:
   name: global_vae
+  latent_mode: single
   modalities:
     signal:                    # first concrete dataset for this modality: SAXS
-      encoder: 1d_cnn_encoder_v1
-      decoder: 1d_cnn_decoder_v1
+      encoder: {name: 1d_cnn_encoder_v1}
+      decoder: {name: 1d_cnn_decoder_v1}
     image:
-      encoder: 2d_cnn_resnet_encoder_v1
-      decoder: 2d_cnn_resnet_decoder_v1
-  latent:
-    mode: single              # single | several
+      encoder: {name: 2d_cnn_resnet_encoder_v1}
+      decoder: {name: 2d_cnn_resnet_decoder_v1}
+  single_latent:
     dim: 128
-    fusion:                   # only meaningful because this latent space is fed by 2 encoders
+    fusion:                    # only meaningful because this latent space is fed by 2 encoders
       strategy: poe            # poe | moe | concat_mlp | cross_attention
       residual: true
-  training:
-    beta: linear_warmup       # constant | schedule name | per-space dict (see §2.3)
-    modality_dropout_p: 0.15  # trains robustness to missing modalities
 ```
  
-**Several independent latent spaces, no encoder fan-out** (`GlobalVae.__init__` with an explicit `RoutingGraph`; this pattern works end to end today, verified against ADR 0002):
+**Independent encoder and decoder names** (the translation model of `examples/03_signal_image_to_image.py`; shipped as `configs/model/signal_image_to_image.yaml`): the decoder `image_out` has no encoder of the same name, so the instances are declared apart.
+ 
+```yaml
+model:
+  latent_mode: single
+  encoders:
+    signal:   {name: 1d_cnn_resnet_encoder_v1}
+    image_in: {name: 2d_cnn_resnet_encoder_v1}
+  decoders:
+    image_out: {name: 2d_cnn_resnet_decoder_v1}   # its target is the batch key image_out
+  single_latent:
+    dim: 8
+    fusion: {strategy: poe}
+    regularizer: {strategy: free_bits_kl, kwargs: {free_bits: 0.5}}
+```
+ 
+**Several independent latent spaces, no encoder fan-out** (`GlobalVae.__init__` with an explicit `RoutingGraph`; shipped as `configs/model/signal_image_independent_latents.yaml`): one decoder reads both spaces. The shared decoder of this pattern is a decoder you register yourself when it needs to take more than one tensor (§2.1, roadmap D-2); a registered 2D decoder, named `image_out`, stands in for it here so that the example builds as written.
  
 ```yaml
 model:
   name: global_vae
-  modalities:
-    signal:
-      encoder: 1d_cnn_encoder_v1
-      decoder: joint_decoder_v1        # shares a decoder with image: its own key, not "signal"
-    image:
-      encoder: 2d_cnn_resnet_encoder_v1
-      decoder: joint_decoder_v1
+  latent_mode: several
+  encoders:
+    signal: {name: 1d_cnn_encoder_v1}
+    image:  {name: 2d_cnn_encoder_v1}
+  decoders:
+    image_out: {name: 2d_cnn_decoder_v1}   # its own key, not "signal" or "image"
   latent:
-    mode: several
     spaces:
       z_signal:
-        dim: 128
-        fed_by: [signal]                # exactly one encoder: no fusion needed
+        dim: 16
+        fed_by: [signal]               # exactly one encoder: no fusion needed
       z_image:
-        dim: 128
-        fed_by: [image]                 # exactly one encoder: no fusion needed
+        dim: 16
+        fed_by: [image]                # exactly one encoder: no fusion needed
     decoders_consume:
-      joint: {spaces: [z_signal, z_image], assembler: concat}
-  training:
-    beta: linear_warmup       # constant | schedule name | per-space dict (see §2.3)
-    modality_dropout_p: 0.15
+      image_out: {spaces: [z_signal, z_image], assembler: concat}
 ```
  
-**Shared plus private latent spaces** (`latent/routing_graph_builders/shared_private.py`'s preset . the encoder fan-out case, resolved via the Latent Head, §2.2):
+**Shared plus private latent spaces** (`latent/routing_graph_builders/shared_private.py`'s preset . the encoder fan-out case, resolved via the Latent Head, §2.2; shipped as `configs/model/signal_image_shared_private.yaml`):
  
 ```yaml
 model:
   name: global_vae
+  latent_mode: several
   modalities:
     signal:
-      encoder: 1d_cnn_encoder_v1
-      decoder: 1d_cnn_decoder_v1
+      encoder: {name: 1d_cnn_encoder_v1}
+      decoder: {name: 1d_cnn_decoder_v1}
     image:
-      encoder: 2d_cnn_resnet_encoder_v1
-      decoder: 2d_cnn_resnet_decoder_v1
+      encoder: {name: 2d_cnn_encoder_v1}
+      decoder: {name: 2d_cnn_decoder_v1}
   latent:
-    mode: several
     spaces:
       z_shared:
-        dim: 128
+        dim: 32
         fed_by: [signal, image]        # more than one encoder: needs a fusion strategy
-        fusion: poe
+        fusion: {strategy: poe}
       z_signal_private:
-        dim: 32
-        fed_by: [signal]                # same encoder as z_shared: this is encoder fan-out
-        head: linear                    # projects the signal encoder's 128-dim output down to 32
+        dim: 8
+        fed_by:
+          signal:                      # same encoder as z_shared: this is encoder fan-out
+            head: linear               # projects the signal encoder's 32-dim output down to 8
       z_image_private:
-        dim: 32
-        fed_by: [image]                  # same encoder as z_shared: this is encoder fan-out
-        head: linear                    # projects the image encoder's 128-dim output down to 32
+        dim: 8
+        fed_by:
+          image:                       # same encoder as z_shared: this is encoder fan-out
+            head: linear               # projects the image encoder's 32-dim output down to 8
     decoders_consume:
       signal: {spaces: [z_shared, z_signal_private], assembler: concat}
       image:  {spaces: [z_shared, z_image_private],  assembler: concat}
-  training:
-    beta: linear_warmup            # constant | schedule name | per-space dict (see §2.3)
-    modality_dropout_p: 0.15
 ```
  
-`signal` feeds both `z_shared` (through Fusion, combined with `image`) and its own `z_signal_private`. This is the encoder fan-out case from §2.2: the `signal` encoder produces one `(mu, logvar)` pair, and the `head: linear` on the `z_signal_private` edge adapts that shared output down to this latent space's own dimensionality (128 -> 32), so the two latent spaces stay genuinely independent instead of accidentally sharing the same values.
-
+`signal` feeds both `z_shared` (through Fusion, combined with `image`) and its own `z_signal_private`. This is the encoder fan-out case from §2.2: the `signal` encoder produces one `(mu, logvar)` pair, and the `head: linear` on the `z_signal_private` edge adapts that shared output down to this latent space's own dimensionality (32 -> 8), so the two latent spaces stay genuinely independent instead of accidentally sharing the same values. The head is written on the edge, in `fed_by`, not on the latent space, because a latent space fed by several encoders needs one head per encoder. The encoder's `latent_dim` (32) is not written: the identity edge to `z_shared` fixes it.
+ 
+**Beta and the training side** (`TrainingConfig`, §2.3): beta is per latent space, under the names declared in `latent.spaces` (or `single_latent.name`).
+ 
+```yaml
+training:
+  modality_dropout_p: 0.15        # trains robustness to missing modalities
+  beta_schedules:                 # latent space name -> schedule; absent spaces use `beta`
+    z_shared:
+      strategy: linear_warmup
+      kwargs: {warmup_steps: 1000, start_value: 0.0, end_value: 1.0}
+```
+ 
+The shipped experiments that compose these models with a data contract and a training config are `configs/experiment/signal_image_vae.yaml` (single latent space), `signal_image_independent_latents.yaml` and `signal_image_shared_private.yaml`.
+ 
 **Data preprocessing pipeline** (§6.2, `DataConfig.transforms`, resolved by `config.data.buildTransformPipeline`; keyed per modality (docs/adr/0015-per-modality-data-transforms.md) so a second signal dataset never has to share the first's statistics):
 
 ```yaml
@@ -418,7 +440,7 @@ data:
           std: 1.13                # never guessed by this framework (see StandardizeTransform)
 ```
  
-All of these examples are illustrative, not final: the actual schema still needs validation logic and a Hydra/dataclass binding (§11).
+Every model example above builds, and trains through `scripts/train.py` (`tests/integration/test_model_config_schema.py`, `tests/integration/test_train_script.py`). A config error names the field to edit, for example `model.latent.spaces.z_shared.fed_by: unknown encoder 'audio'`.
  
 ---
 
@@ -464,7 +486,6 @@ All of these examples are illustrative, not final: the actual schema still needs
 
 ## 11. Open questions (deliberately deferred)
 
-- Exact schema (YAML/dataclass) for expressing the routing graph, the Latent Head assignments, and the regularizer/beta configuration . §2.2, §2.3, and §9 are illustrative, not final; the validation logic (`validateRoutingGraph` and its Hydra/Pydantic binding, §10) still needs to be written.
 - Which assembler operators to implement first: `concat`, `sum`, `average`, `weighted_sum`, and `attention` are all wanted (§2.2) . order of implementation is open, but none is deferred indefinitely.
 - Which regularizer strategies to implement beyond the default `kl_standard_normal` (§2.3) . MMD and free-bits KL are candidates; not needed immediately, but the registry should stay open.
 - Exact pairing mechanism for the first paired signal+image dataset (§6.1) . matching by filename/sample-ID convention is the likely approach, but the concrete scheme isn't decided yet. (Note: this is a *pairing* question, i.e. a `loader_factory` concern, distinct from and not blocking §6.2's generic transforms, which are already implemented and do not depend on how pairing is eventually done.)
@@ -472,6 +493,8 @@ All of these examples are illustrative, not final: the actual schema still needs
 - Concrete production/serving target (API serving, batch inference, edge deployment, ...) . in scope longer-term (§1), but sequenced after the model is functionally complete; specific requirements aren't known yet.
 
 **Resolved, no longer open:** whether any part of the data pipeline belongs inside the framework (§6.2). Generic, invertible preprocessing (`data/transforms/`) does; dataset loading, pairing, and splitting (`datamodule.py`) permanently does not, for the reasons given in §6.2. This was previously bundled as one deferred item; it is now a settled design decision, not an open question.
+
+**Also resolved:** the YAML schema for the routing graph, the Latent Head assignments and the regularizer/beta configuration (§9, ADR 0025). Heads sit on the encoder -> latent edge (`fed_by`), decoder instances are named independently of modalities (`encoders`, `decoders`), the regularizer is a field of each latent space, and beta stays per latent space in `TrainingConfig.beta_schedules`. `validateRoutingGraph` and `validateModelConfig` check the result, and an error starts with the dotted path of the field. Per-modality `reconstruction_loss` and `reconstruction_weight` are not part of this schema and stay a Python-only option of `Trainer`.
 
 ---
 

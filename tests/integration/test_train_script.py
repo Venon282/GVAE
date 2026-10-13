@@ -27,6 +27,9 @@ from global_vae.training.checkpoint import loadCheckpoint
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "train.py"
 _REPO_ROOT = _SCRIPT_PATH.parents[1]
 _LOADER_FACTORY = "tests.integration._train_script_fixtures:buildDummyDataloaders"
+_SIGNAL_IMAGE_LOADER_FACTORY = (
+    "tests.integration._train_script_fixtures:buildDummySignalImageDataloaders"
+)
 
 # Every test in this module runs `scripts/train.py` in a subprocess.
 pytestmark = pytest.mark.slow
@@ -173,3 +176,111 @@ def test_invalid_loader_factory_spec_fails_clearly(tmp_path: Path, bad_spec: str
     )
     assert completed.returncode != 0
     assert "module.path:function_name" in completed.stderr
+
+
+def _runExperiment(
+    tmp_path: Path, experiment: str, warmup_space: str
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """Run `scripts/train.py --config-name experiment/<experiment>` on the dummy paired data.
+
+    Args:
+        tmp_path: pytest's per-test temporary directory; every file the run writes is in it.
+        experiment: Stem of a `configs/experiment/*.yaml` file.
+        warmup_space: A latent space of that experiment's model, whose beta warm-up is
+            shortened so two epochs cover it.
+
+    Returns:
+        `(completed_process, output_dir)`.
+    """
+    output_dir = tmp_path / "run"
+    overrides = [
+        "--config-name",
+        f"experiment/{experiment}",
+        f"data.loader_factory={_SIGNAL_IMAGE_LOADER_FACTORY}",
+        "data.train_path=unused",
+        f"output_dir={output_dir}",
+        "training.num_epochs=2",
+        f"training.beta_schedules.{warmup_space}.kwargs.warmup_steps=5",
+        f"hydra.run.dir={tmp_path / 'hydra_run'}",
+    ]
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
+    completed = subprocess.run(
+        [sys.executable, str(_SCRIPT_PATH), *overrides],
+        cwd=_REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    return completed, output_dir
+
+
+@pytest.mark.parametrize(
+    ("experiment", "warmup_space", "latent_spaces"),
+    [
+        ("signal_image_vae", "z_fused", {"z_fused"}),
+        ("signal_image_independent_latents", "z_signal", {"z_signal", "z_image"}),
+        (
+            "signal_image_shared_private",
+            "z_shared",
+            {"z_shared", "z_signal_private", "z_image_private"},
+        ),
+    ],
+)
+class TestSignalImageExperiments:
+    """One experiment per pattern of spec §9 trains through the script (roadmap P1-3, ADR 0025)."""
+
+    def test_trains_and_logs_completion(
+        self, tmp_path: Path, experiment: str, warmup_space: str, latent_spaces: set[str]
+    ) -> None:
+        completed, output_dir = _runExperiment(tmp_path, experiment, warmup_space)
+        assert completed.returncode == 0, completed.stderr
+        assert "Training complete" in (completed.stdout + completed.stderr)
+        assert (output_dir / "metrics.csv").exists()
+
+    def test_writes_a_checkpoint_the_configured_model_loads(
+        self, tmp_path: Path, experiment: str, warmup_space: str, latent_spaces: set[str]
+    ) -> None:
+        completed, output_dir = _runExperiment(tmp_path, experiment, warmup_space)
+        assert completed.returncode == 0, completed.stderr
+
+        from global_vae.config.experiment import loadExperimentConfig
+        from global_vae.config.model import buildModelFromConfig
+
+        cfg = loadExperimentConfig(
+            f"experiment/{experiment}",
+            overrides=[f"data.loader_factory={_SIGNAL_IMAGE_LOADER_FACTORY}", "data.train_path=x"],
+        )
+        model = buildModelFromConfig(cfg.model)
+        assert set(model.latent_spaces) == latent_spaces
+        metadata = loadCheckpoint(output_dir / "checkpoints" / "best.pt", model=model)
+        assert metadata.global_step > 0
+
+
+def test_a_broken_model_section_fails_before_training_with_the_field_path(
+    tmp_path: Path,
+) -> None:
+    """A wrong name in `fed_by` stops the run at model construction, naming the field."""
+    output_dir = tmp_path / "run"
+    env = {**os.environ, "PYTHONPATH": str(_REPO_ROOT)}
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(_SCRIPT_PATH),
+            "--config-name",
+            "experiment/signal_image_shared_private",
+            f"data.loader_factory={_SIGNAL_IMAGE_LOADER_FACTORY}",
+            "data.train_path=unused",
+            "model.latent.spaces.z_shared.fed_by=[signal,audio]",
+            f"output_dir={output_dir}",
+            f"hydra.run.dir={tmp_path / 'hydra_run'}",
+        ],
+        cwd=_REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert completed.returncode != 0
+    assert "model.latent.spaces.z_shared.fed_by: unknown encoder 'audio'" in completed.stderr
+    assert not (output_dir / "metrics.csv").exists()

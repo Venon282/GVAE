@@ -1,0 +1,34 @@
+# @package _global_
+# Several independent latent spaces, no encoder fan-out (spec §9, second pattern; ADR 0025):
+# a signal and an image each get a latent space, one decoder reads both. Assembles model + data
+# + training into one composed, validated global_vae.config.experiment.ExperimentConfig.
+# Run with:
+#   python scripts/train.py --config-name experiment/signal_image_independent_latents \
+#       data.train_path=/path/to/data data.loader_factory=my_project.data:buildPairedDataloaders
+# The batches carry `signal`, `image` and `image_out` (the decoder's target, see
+# configs/model/signal_image_independent_latents.yaml).
+defaults:
+  - /model: signal_image_independent_latents
+  - /data: signal_image
+  - /training: several_latents
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/signal_image_independent_latents
+
+# One beta warm-up per latent space, under the names the model file declares (spec §2.3).
+training:
+  beta_schedules:
+    z_signal:
+      strategy: linear_warmup
+      kwargs:
+        warmup_steps: 1000
+        start_value: 0.0
+        end_value: 1.0
+    z_image:
+      strategy: linear_warmup
+      kwargs:
+        warmup_steps: 1000
+        start_value: 0.0
+        end_value: 1.0

@@ -5,10 +5,11 @@
 # the encoder of the same name. Buildable as is: the registry names below are the ones
 # `encoders/` and `decoders/` register (ADR 0017 for the 2D pair).
 #
-# The decoder that is NOT an input (signal + image -> image, example 03) cannot be written
-# in this schema yet: `buildModelFromConfig` only wires `latent_mode: single`, which
-# requires one decoder per encoder name. Build that model in Python instead, as
-# `examples/03_signal_image_to_image.py` does (ADR 0019).
+# A decoder that is NOT an input (signal + image -> image, example 03) is written with the
+# separate `encoders` and `decoders` sections: see `signal_image_to_image.yaml`. Several
+# latent spaces and encoder fan-out are `latent_mode: several`: see
+# `signal_image_independent_latents.yaml` and `signal_image_shared_private.yaml`
+# (docs/adr/0025-config-schema-for-several-latent-spaces.md).
 #
 # Single-modality starting points: `signal_single_latent.yaml` and
 # `signal_resnet_single_latent.yaml`. Validated against

@@ -52,8 +52,9 @@ latent:
   (`fusion: {strategy: poe}`, see [choose a fusion strategy](choose-a-fusion-strategy.md)); one
   encoder refuses it, since it would never run.
 - `decoders_consume.<decoder>.spaces` lists what a decoder reads. More than one space needs an
-  `assembler` (`concat`, `sum` or `average`; `sum` and `average` need equal dimensions), and
-  `kwargs` go to the assembler's constructor. Every declared decoder needs an entry, and every
+  `assembler` (`concat`, `sum`, `average`, `weighted_sum` or `attention`; `sum`, `average` and
+  `weighted_sum` need equal dimensions), and `kwargs` go to the assembler's constructor, next to the
+  widths of the spaces, which the model supplies (see [the assemblers](#choose-an-assembler)). Every declared decoder needs an entry, and every
   space needs a decoder that reads it.
 - Each space takes its own `regularizer` (`strategy` and `kwargs`), `kl_standard_normal` by
   default.
@@ -77,14 +78,45 @@ A list entry is an identity edge. A mapping entry builds a head (`identity` or `
 refused. The shipped shared plus private model has one identity edge (to `z_shared`) and one
 `linear` edge per encoder.
 
+## Choose an assembler
+
+A decoder that reads several latent spaces needs an `assembler` that merges the sampled vectors into
+its one input. The model builds it from the widths of those spaces, so `kwargs` holds only the
+strategy's own options.
+
+| `assembler` | What it does | Equal widths | `kwargs` (defaults) | Learned |
+|---|---|---|---|---|
+| `concat` | joins the vectors side by side | no | none | no |
+| `sum` | adds them | yes | none | no |
+| `average` | takes their mean | yes | none | no |
+| `weighted_sum` | adds them, each scaled by a learned weight per space | yes | `normalize: true` | `n` weights |
+| `attention` | pools one token per space with a learned-query cross-attention | no | `output_dim` (the widest space), `num_heads: 1` | projections, query, attention |
+
+```yaml
+decoders_consume:
+  image_out:
+    spaces: [z_signal, z_image]
+    assembler: attention
+    kwargs: {output_dim: 32, num_heads: 4}   # output_dim must be a multiple of num_heads
+```
+
+- `weighted_sum` starts as `average` (`normalize: true`: the weights are a softmax over the spaces
+  present, so they sum to 1) or as `sum` (`normalize: false`: raw weights starting at 1).
+- With a modality left out of a pass (modality dropout, cross-modal reports), `sum`, `average`,
+  `weighted_sum` and `attention` still decode from the spaces that remain. `concat` cannot, and its
+  decoder is left out of that pass.
+- The decoder's width is the assembler's `output_dim` (next section), so for `attention` the width
+  you set is the width the decoder gets.
+
 ## Widths are derived
 
 Leave `latent_dim` out of encoder and decoder `kwargs`.
 
 - An encoder takes the `dim` of the space it feeds through an identity edge. If every edge goes
   through a head, set `latent_dim` on the encoder yourself.
-- A decoder takes the width of what its assembler produces: the space's `dim` for one space,
-  the sum for `concat`, the common `dim` for `sum` and `average`.
+- A decoder takes the width of what its assembler announces as its `output_dim`: the space's `dim`
+  for one space, the sum for `concat`, the common `dim` for `sum`, `average` and `weighted_sum`,
+  the `output_dim` kwarg of `attention` (the widest space by default).
 
 An explicit value is kept, and in `several` mode a value that disagrees with the derived one is an
 error.

@@ -23,6 +23,8 @@ from typing import Any
 
 import torch
 
+from global_vae.assemblers.registry import getAssemblerClass
+
 
 @dataclass
 class LatentSpace:
@@ -88,7 +90,9 @@ class RoutingGraph:
         decoder_assemblers: Decoder name -> assembler strategy name.
             Required for every decoder consuming more than one latent
             space (see `assemblers/`); not needed for decoders
-            consuming exactly one.
+            consuming exactly one. Its arguments are not part of the
+            graph: `GlobalVae` takes them from `assembler_kwargs`, and its
+            `input_dims` from `decoderInputs`.
         encoder_heads: Encoder name -> latent space name -> `HeadSpec`,
             the latent head on that encoder -> latent edge. An edge with
             no entry is an identity edge: the encoder's `(mu, logvar)`
@@ -103,10 +107,29 @@ class RoutingGraph:
     decoder_assemblers: dict[str, str] = field(default_factory=dict)
     encoder_heads: dict[str, dict[str, HeadSpec]] = field(default_factory=dict)
 
+    def decoderInputs(self) -> dict[str, list[str]]:
+        """Invert `latent_to_decoders` into decoder name -> latent spaces it consumes.
+
+        The order of each list is the order of `latent_to_decoders` (the order
+        the latent spaces were declared in), and it is the order in which
+        `GlobalVae` hands the latent vectors to the decoder's assembler and
+        sizes it: the `input_dims` of an assembler follow it. Code that builds
+        an assembler outside the model, such as the config resolution, reads it
+        from here so both agree.
+
+        Returns:
+            Decoder name -> list of the latent space names it consumes. A
+            decoder that consumes nothing has no entry.
+        """
+        result: dict[str, list[str]] = {}
+        for latent_name, decoder_names in self.latent_to_decoders.items():
+            for decoder_name in decoder_names:
+                result.setdefault(decoder_name, []).append(latent_name)
+        return result
+
 
 def validateRoutingGraph(
     graph: RoutingGraph,
-    dimension_locked_assemblers: frozenset[str] = frozenset({"sum", "average"}),
     identity_head_names: frozenset[str] = frozenset({"identity"}),
 ) -> None:
     """Validate a routing graph against the constraints in spec §2.2 and §10.
@@ -119,9 +142,12 @@ def validateRoutingGraph(
          have an assembler assigned in `decoder_assemblers`. A decoder
          consuming several latent spaces with no assembler was
          previously accepted silently; this is now rejected.
-      3. `sum`/`average` assemblers require all of their input latent
-         spaces to share the same dimensionality (`concat` has no such
-         restriction).
+      3. An assembler whose class sets `requires_matching_dims` (`sum`,
+         `average`, `weighted_sum`) requires all of its input latent
+         spaces to share the same dimensionality (`concat` and `attention`
+         have no such restriction). The flag is read from the assembler
+         registry, so this function names no assembler and a new strategy
+         needs no change here (spec §10, §12).
       4. Every entry of `encoder_heads` is on an edge that exists in
          `encoder_to_latents`.
       5. A head's declared `out_dim` equals the target latent space's
@@ -134,13 +160,13 @@ def validateRoutingGraph(
 
     Args:
         graph: The routing graph to validate.
-        dimension_locked_assemblers: Assembler names that require
-            matching dimensionality across their inputs.
         identity_head_names: Head registry names that pass `(mu,
             logvar)` through unchanged.
 
     Raises:
         ValueError: If any constraint is violated.
+        KeyError: If a decoder that consumes several latent spaces names an
+            assembler absent from the assembler registry.
     """
     fed_latents = {latent for latents in graph.encoder_to_latents.values() for latent in latents}
 
@@ -150,12 +176,7 @@ def validateRoutingGraph(
         if not graph.latent_to_decoders.get(name):
             raise ValueError(f"Latent space '{name}' has no decoder consuming it (orphan latent).")
 
-    decoder_to_latents: dict[str, list[str]] = {}
-    for latent_name, decoder_names in graph.latent_to_decoders.items():
-        for decoder_name in decoder_names:
-            decoder_to_latents.setdefault(decoder_name, []).append(latent_name)
-
-    for decoder_name, latent_names in decoder_to_latents.items():
+    for decoder_name, latent_names in graph.decoderInputs().items():
         if len(latent_names) <= 1:
             continue
 
@@ -166,7 +187,7 @@ def validateRoutingGraph(
                 f"{latent_names} but has no assembler assigned in `decoder_assemblers`."
             )
 
-        if assembler_name in dimension_locked_assemblers:
+        if getAssemblerClass(assembler_name).requires_matching_dims:
             dims = {graph.latent_specs[name].dim for name in latent_names}
             if len(dims) > 1:
                 raise ValueError(

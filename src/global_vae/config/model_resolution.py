@@ -619,32 +619,33 @@ def _decoderInputWidth(consumption: DecoderConsumptionConfig, dims: list[int], p
 
     Args:
         consumption: The decoder's `decoders_consume` entry.
-        dims: The `dim` of each latent space it consumes, in order.
+        dims: The `dim` of each latent space it consumes, in `RoutingGraph.decoderInputs` order
+            (the order `GlobalVae` sizes the assembler with).
         path: Dotted path of the entry, for the error message.
 
     Returns:
-        The latent dimension itself for a single space; otherwise the last dimension of what the
-        assembler produces from tensors of those widths, so any registered assembler works.
+        The latent dimension itself for a single space; otherwise the `output_dim` of the
+        assembler built from `dims` and `consumption.kwargs`, so any registered assembler works.
+        The throwaway assembler is built with the random number generator state saved and
+        restored, so resolving a config does not shift the initialisation of the real model.
 
     Raises:
         KeyError: If the assembler name is not registered.
-        ValueError: If the assembler cannot be built from `kwargs`, or cannot combine tensors of
-            these widths.
+        ValueError: If the assembler cannot be built from `kwargs` and these widths.
     """
     if len(dims) == 1:
         return dims[0]
     assembler_name = consumption.assembler or ""
     assembler_class = _lookup(getAssemblerClass, assembler_name, f"{path}.assembler")
     try:
-        assembler = assembler_class(**consumption.kwargs)
-        with torch.no_grad():
-            output = assembler([torch.zeros(1, dim) for dim in dims])
-    except (TypeError, ValueError, RuntimeError) as error:
+        with torch.random.fork_rng(devices=[]):
+            assembler = assembler_class(dims, **consumption.kwargs)
+    except (TypeError, ValueError) as error:
         raise ValueError(
             f"{path}: assembler '{assembler_name}' cannot be built from `kwargs` "
-            f"{consumption.kwargs} or cannot combine latent spaces of widths {dims}: {error}"
+            f"{consumption.kwargs} and latent spaces of widths {dims}: {error}"
         ) from error
-    return int(output.shape[-1])
+    return assembler.output_dim
 
 
 def _resolveSingle(parsed: _Parsed, single: SingleLatentConfig, prefix: str) -> ResolvedModel:
@@ -737,6 +738,14 @@ def _resolveSeveral(parsed: _Parsed, latent: LatentConfig, prefix: str) -> Resol
     for decoder_name, consumption in latent.decoders_consume.items():
         for space_name in consumption.spaces:
             latent_to_decoders[space_name].append(decoder_name)
+        if consumption.assembler is not None:
+            # Before `validateRoutingGraph`, which reads the assembler's class from the registry:
+            # an unknown name is reported here, with the path of the field that holds it.
+            _lookup(
+                getAssemblerClass,
+                consumption.assembler,
+                f"{prefix}.latent.decoders_consume.{decoder_name}.assembler",
+            )
 
     graph = RoutingGraph(
         latent_specs={name: LatentSpace(name, space.dim) for name, space in spaces.items()},
@@ -779,7 +788,7 @@ def _resolveSeveral(parsed: _Parsed, latent: LatentConfig, prefix: str) -> Resol
         consumption = latent.decoders_consume[decoder_name]
         width = _decoderInputWidth(
             consumption,
-            [spaces[name].dim for name in consumption.spaces],
+            [spaces[name].dim for name in graph.decoderInputs()[decoder_name]],
             f"{prefix}.latent.decoders_consume.{decoder_name}",
         )
         kwargs = dict(decoder.kwargs)

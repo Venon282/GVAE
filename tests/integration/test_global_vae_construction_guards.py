@@ -12,19 +12,28 @@ Two things are checked in `GlobalVae.__init__`, before any module is created:
   reusing it would give two independent latent spaces identical posteriors (ADR 0002). That test
   was inverted when fan-out through latent heads landed (ADR 0024): the same graphs now build, each
   encoder -> latent edge with its head, and the graph that would still give identical posteriors
-  (two identity edges) is refused by `validateRoutingGraph` with a `ValueError`. The last class
+  (two identity edges) is refused by `validateRoutingGraph` with a `ValueError`. The next class
   covers the errors a head can raise while the model is being built.
+* Decoder width. Roadmap P1-4: a decoder's `latent_dim` is checked against what its assembler (or
+  its single latent space) delivers when the model is built, and filled in when omitted, instead of
+  failing at the first forward pass with `mat1 and mat2 shapes cannot be multiplied`. The last
+  class covers that, and the assemblers the model builds from the routing graph.
 """
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
+import torch
 
+import global_vae.assemblers  # noqa: F401  (registers the built-in assemblers)
 import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
+import global_vae.decoders.registry as decoder_registry_module
 import global_vae.encoders  # noqa: F401  (registers the built-in encoders)
 import global_vae.fusion  # noqa: F401  (registers the built-in fusion strategies)
 import global_vae.heads  # noqa: F401  (registers the built-in latent heads)
 import global_vae.heads.registry as registry_module
+from global_vae.decoders.base import AbstractDecoder
+from global_vae.decoders.registry import registerDecoder
 from global_vae.heads.identity import IdentityHead
 from global_vae.heads.linear import LinearHead
 from global_vae.heads.registry import registerHead
@@ -316,3 +325,211 @@ class TestHeadsThatCannotBeBuilt:
         graph = self._graph({"signal": {"z": HeadSpec("linear", out_dim=16)}})
         with pytest.raises(ValueError, match="declares out_dim=16"):
             _buildModel(graph, encoder_dim=8, decoder_dim=4)
+
+
+class TestDecoderWidthFollowsTheRoutingGraph:
+    """A decoder's `latent_dim` is what its assembler delivers: checked, or filled in (P1-4)."""
+
+    @staticmethod
+    def _graph(assembler: str, dim_a: int = 8, dim_b: int = 4) -> RoutingGraph:
+        """Two encoders, one latent space each, one decoder over both through `assembler`."""
+        return RoutingGraph(
+            latent_specs={"z_a": LatentSpace("z_a", dim_a), "z_b": LatentSpace("z_b", dim_b)},
+            encoder_to_latents={"enc_a": ["z_a"], "enc_b": ["z_b"]},
+            latent_to_decoders={"z_a": ["dec"], "z_b": ["dec"]},
+            decoder_assemblers={"dec": assembler},
+        )
+
+    @staticmethod
+    def _model(
+        graph: RoutingGraph,
+        decoder_kwargs: dict[str, Any],
+        assembler_kwargs: dict[str, dict[str, Any]] | None = None,
+    ) -> GlobalVae:
+        """Build the model of `_graph`, with explicit decoder kwargs (`latent_dim` or not).
+
+        Each encoder is as wide as the one latent space it feeds, so the model also runs.
+        """
+        return GlobalVae(
+            encoder_configs={"enc_a": ENCODER, "enc_b": ENCODER},
+            decoder_configs={"dec": DECODER},
+            routing_graph=graph,
+            encoder_kwargs={
+                encoder: _encoderKwargs(graph.latent_specs[spaces[0]].dim)
+                for encoder, spaces in graph.encoder_to_latents.items()
+            },
+            decoder_kwargs={"dec": decoder_kwargs},
+            assembler_kwargs=assembler_kwargs,
+        )
+
+    @staticmethod
+    def _reconstruct(model: GlobalVae) -> torch.Tensor:
+        """One forward pass over both encoders; returns the decoder's reconstruction."""
+        inputs = {name: torch.randn(2, SIGNAL_LENGTH) for name in ("enc_a", "enc_b")}
+        return cast(torch.Tensor, model(inputs)["reconstructions"]["dec"])
+
+    def test_a_wrong_latent_dim_behind_concat_is_refused_when_the_model_is_built(self) -> None:
+        """The audit's case: dims 8 and 4 need a 12-wide decoder, and 8 used to fail at forward."""
+        with pytest.raises(ValueError) as excinfo:
+            self._model(self._graph("concat"), _decoderKwargs(latent_dim=8))
+        message = str(excinfo.value)
+        assert "Decoder 'dec' is built with latent_dim=8, but it receives 12 features" in message
+        assert "ConcatAssembler" in message and "[8, 4]" in message
+        assert "Remove `latent_dim`" in message
+
+    def test_the_right_latent_dim_behind_concat_builds_and_runs(self) -> None:
+        """The sum of the widths, written by hand as before, is still accepted."""
+        model = self._model(self._graph("concat"), _decoderKwargs(latent_dim=12))
+        assert self._reconstruct(model).shape == (2, SIGNAL_LENGTH)
+
+    def test_a_wrong_latent_dim_behind_a_single_latent_space_is_refused(self) -> None:
+        """No assembler: the width is the latent space's `dim`, and a mismatch is refused too."""
+        graph = RoutingGraph(
+            latent_specs={"z": LatentSpace("z", 4)},
+            encoder_to_latents={"signal": ["z"]},
+            latent_to_decoders={"z": ["signal"]},
+        )
+        with pytest.raises(
+            ValueError, match=r"latent_dim=8, but it receives 4 features from latent space 'z'"
+        ):
+            _buildModel(graph, encoder_dim=4, decoder_dim=8)
+
+    @pytest.mark.parametrize(
+        ("assembler", "dims", "assembler_kwargs", "width"),
+        [
+            ("concat", (8, 4), {}, 12),
+            ("sum", (8, 8), {}, 8),
+            ("average", (8, 8), {}, 8),
+            ("weighted_sum", (8, 8), {}, 8),
+            ("weighted_sum", (8, 8), {"normalize": False}, 8),
+            ("attention", (8, 4), {}, 8),
+            ("attention", (8, 4), {"output_dim": 6, "num_heads": 2}, 6),
+        ],
+        ids=[
+            "concat",
+            "sum",
+            "average",
+            "weighted_sum",
+            "weighted_sum-raw",
+            "attention",
+            "attention-sized",
+        ],
+    )
+    def test_latent_dim_is_filled_in_from_the_assembler_when_omitted(
+        self,
+        assembler: str,
+        dims: tuple[int, int],
+        assembler_kwargs: dict[str, Any],
+        width: int,
+    ) -> None:
+        """With no `latent_dim`, every assembler sizes its decoder, and the model runs."""
+        decoder_kwargs = {k: v for k, v in _decoderKwargs(0).items() if k != "latent_dim"}
+        model = self._model(
+            self._graph(assembler, *dims),
+            decoder_kwargs,
+            assembler_kwargs={"dec": assembler_kwargs},
+        )
+        assert model.assemblers["dec"].output_dim == width
+        assert self._reconstruct(model).shape == (2, SIGNAL_LENGTH)
+
+    @pytest.mark.parametrize("assembler", ["weighted_sum", "attention"])
+    def test_a_wrong_latent_dim_behind_a_learned_assembler_is_refused(self, assembler: str) -> None:
+        """The learned assemblers announce their width like the others, so they are checked too."""
+        with pytest.raises(ValueError, match=r"latent_dim=3, but it receives 8 features"):
+            self._model(self._graph(assembler, 8, 8), _decoderKwargs(latent_dim=3))
+
+    def test_an_explicit_latent_dim_that_matches_an_attention_output_dim_is_accepted(self) -> None:
+        """`output_dim` in the assembler kwargs is the width to give the decoder."""
+        model = self._model(
+            self._graph("attention"), _decoderKwargs(latent_dim=6), {"dec": {"output_dim": 6}}
+        )
+        assert self._reconstruct(model).shape == (2, SIGNAL_LENGTH)
+
+    def test_assembler_kwargs_and_input_dims_reach_the_assembler(self) -> None:
+        """The model passes the widths of the consumed latent spaces, in graph order."""
+        model = self._model(
+            self._graph("attention", 8, 4),
+            _decoderKwargs(latent_dim=6),
+            {"dec": {"output_dim": 6, "num_heads": 3}},
+        )
+        assembler = model.assemblers["dec"]
+        assert assembler.input_dims == (8, 4)
+        assert assembler.num_heads == 3
+
+    def test_input_dims_follow_the_order_of_the_routing_graph(self) -> None:
+        """The first latent space of `latent_to_decoders` is the first input, whatever its name."""
+        graph = RoutingGraph(
+            latent_specs={"z_b": LatentSpace("z_b", 4), "z_a": LatentSpace("z_a", 8)},
+            encoder_to_latents={"enc_a": ["z_a"], "enc_b": ["z_b"]},
+            latent_to_decoders={"z_b": ["dec"], "z_a": ["dec"]},
+            decoder_assemblers={"dec": "concat"},
+        )
+        model = self._model(graph, _decoderKwargs(latent_dim=12))
+        assert model.assemblers["dec"].input_dims == (4, 8)
+        assert graph.decoderInputs() == {"dec": ["z_b", "z_a"]}
+
+    def test_an_assembler_that_cannot_be_built_names_the_decoder_and_the_widths(self) -> None:
+        """A bad kwarg is reported with the decoder, the latent spaces and their widths."""
+        with pytest.raises(ValueError) as excinfo:
+            self._model(self._graph("concat"), _decoderKwargs(12), {"dec": {"nonsense": 1}})
+        message = str(excinfo.value)
+        assert "Cannot build assembler 'concat' for decoder 'dec'" in message
+        assert "['z_a', 'z_b']" in message and "[8, 4]" in message and "nonsense" in message
+
+    def test_invalid_attention_arguments_are_reported_with_the_decoder(self) -> None:
+        """A `ValueError` from the assembler's own check keeps its message."""
+        with pytest.raises(ValueError, match=r"decoder 'dec'.*must be a multiple of `num_heads`"):
+            self._model(
+                self._graph("attention"),
+                _decoderKwargs(latent_dim=10),
+                {"dec": {"output_dim": 10, "num_heads": 4}},
+            )
+
+    def test_unknown_assembler_name_raises_key_error_listing_the_registered_ones(self) -> None:
+        """An unregistered assembler fails like every other registry lookup."""
+        with pytest.raises(
+            KeyError, match="does_not_exist.*attention, average, concat, sum, weighted_sum"
+        ):
+            self._model(self._graph("does_not_exist"), _decoderKwargs(latent_dim=12))
+
+    def test_an_assembler_entry_for_a_decoder_that_consumes_nothing_builds_no_module(self) -> None:
+        """There is nothing to size it from and it would never run, so none is built."""
+        graph = self._graph("concat")
+        graph.decoder_assemblers["ghost"] = "concat"
+        model = self._model(graph, _decoderKwargs(latent_dim=12))
+        assert set(model.assemblers) == {"dec"}
+
+    def test_a_decoder_with_no_latent_dim_parameter_is_built_from_its_kwargs_untouched(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing is injected into a decoder whose constructor takes no `latent_dim`."""
+        monkeypatch.setattr(
+            decoder_registry_module,
+            "_DECODER_REGISTRY",
+            dict(decoder_registry_module._DECODER_REGISTRY),
+        )
+
+        @registerDecoder("fixed_width_decoder_for_test")
+        class _FixedWidthDecoder(AbstractDecoder):
+            def __init__(self, scale: float = 1.0) -> None:
+                super().__init__()
+                self.scale = scale
+
+            def forward(self, z: torch.Tensor) -> torch.Tensor:
+                return z * self.scale
+
+            @property
+            def modality_name(self) -> str:
+                return "vector"
+
+        graph = self._graph("concat")
+        model = GlobalVae(
+            encoder_configs={"enc_a": ENCODER, "enc_b": ENCODER},
+            decoder_configs={"dec": "fixed_width_decoder_for_test"},
+            routing_graph=graph,
+            encoder_kwargs={"enc_a": _encoderKwargs(8), "enc_b": _encoderKwargs(4)},
+            decoder_kwargs={"dec": {"scale": 2.0}},
+        )
+        assert model.decoders["dec"].scale == 2.0
+        reconstruction = self._reconstruct(model)
+        assert reconstruction.shape == (2, 12)

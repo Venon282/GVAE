@@ -101,6 +101,40 @@ versioning follows [Semantic Versioning](https://semver.org/).
   module files left under `src/global_vae` are the eight shims. The second fails when
   `continue-on-error` returns to the CI workflow or one of its three jobs is dropped.
 - `docs/adr/0023-snake-case-module-names.md`, the decision record of the rename below.
+- Assemblers `weighted_sum` and `attention` (roadmap P1-4, spec §2.2 and §11, ADR 0026), one class per
+  file, registered and imported in `assemblers/__init__.py`. `weighted_sum` has one learned weight per
+  latent space: with `normalize=True` (default) the weights are the softmax of the stored values over
+  the spaces present in the pass and start equal, so it starts as `average`; with `normalize=False`
+  the stored values are the weights and start at 1, so it starts as `sum`. Same dimension rule as
+  `sum`. `attention` turns each latent vector into a token with its own linear projection, pools the
+  tokens with one learned query (`nn.MultiheadAttention`) and returns an `output_dim`-wide vector; it
+  has no dimensionality requirement, `output_dim` defaults to `max(input_dims)` and `num_heads` to 1.
+  Both accept a subset of the latent spaces (`handlesMissingLatents` is `True`), so a decoder keeps
+  running when a modality is left out. They are the first assemblers with parameters: a checkpoint
+  carries them as `assemblers.<decoder>.*`. This is the order proposed for roadmap decision D-3,
+  taken without an explicit answer, so it needs the owner's approval.
+- Assembler constructor contract (ADR 0026). `AbstractAssembler.__init__(input_dims)` takes the
+  width of each latent vector and validates it, `input_dims` and the abstract `output_dim` expose
+  what the strategy receives and returns, `requires_matching_dims` is a class-level flag
+  (`True` for `sum`, `average` and `weighted_sum`) that the base constructor enforces, and
+  `forward(latents, present=None)` gets the position of each latent space when only some are
+  present. `_resolvePresent` checks the inputs against `input_dims` and refuses a subset when
+  `handlesMissingLatents` is `False`. `RoutingGraph.decoderInputs()` gives, for each decoder, the
+  latent spaces it consumes in the order its assembler is built and called with.
+- `GlobalVae` builds each assembler as `getAssemblerClass(name)(input_dims, **kwargs)` and checks
+  each decoder's `latent_dim` against what it receives (the assembler's `output_dim`, or the `dim` of
+  its one latent space) when the model is built. An omitted `latent_dim` is filled in when the
+  decoder's constructor takes one. The caller no longer adds up the widths by hand for `concat`, and
+  a wrong value no longer waits for the first forward pass to fail with `mat1 and mat2 shapes cannot
+  be multiplied`.
+- `docs/adr/0026-assembler-constructor-contract-and-learned-assemblers.md`, which supersedes the
+  zero-tensor derivation of a decoder width in ADR 0025 (ADR 0025 is left as written).
+- `tests/unit/test_learned_assemblers.py` (values, gradients that reach the parameters, subsets of
+  the latent spaces, state dict round trip) and `tests/integration/test_learned_assemblers.py`
+  (`EN-LN-DN` with real 1D and 2D modules: decoders sized from the assembler, every parameter
+  receives a gradient, the loss falls, a modality left out still decodes, the model written in YAML
+  with its `kwargs`, a checkpoint round trip). `test_configuration_matrix.py` runs the `LN` rows once
+  per registered assembler, five in all, and fails if one is missing.
 
 ### Changed
 
@@ -151,10 +185,42 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - The CI `lint` job is blocking (roadmap P0-2). `ruff check .` and `ruff format --check .` exit 0
   now that the eight `N999` findings are gone, so `continue-on-error` is removed. The README and
   `docs/getting-started.md` no longer call the job advisory.
+- `validateRoutingGraph` reads the dimension rule from the assembler registry
+  (`getAssemblerClass(name).requires_matching_dims`) and names no assembler. An assembler name that
+  is not registered now raises the registry's `KeyError` (it lists the available names) from the
+  validator, for a decoder that consumes several latent spaces; the config layer looks the names up
+  first, so its errors keep the path of the field. `RoutingGraph.decoderInputs()` replaces the
+  inverse it computed inline.
+- `GlobalVae.forward` sends a decoder's latent vectors through its assembler whenever the decoder
+  has one, including when a single latent space is present (it used to pass that vector straight
+  to the decoder). The output is unchanged for `concat`, `sum` and `average`; `weighted_sum` and
+  `attention` need it, since they transform the vector and the decoder is sized for their output.
+  An assembler entry for a decoder that consumes no latent space is skipped, since there is nothing
+  to size it from.
+- The config layer reads the decoder width from the assembler's `output_dim` instead of running the
+  assembler on zero tensors (ADR 0026). It builds that throwaway assembler with the random state
+  saved and restored, so resolving a config does not shift the initialisation of the model.
+  Assembler errors are reported as before, with the path of the `decoders_consume` entry.
+- Spec §2.2 and §10 (assemblers with a matching-dimension rule, not only `sum` and `average`), §8
+  tree (`weighted_sum.py` and `attention.py` no longer `(planned)`) and §11 (the assembler question
+  is answered), the how-to `add-a-strategy.md` and `configure-latent-spaces.md`, and the roadmap
+  (P1-4 done) describe the five assemblers and the constructor contract.
+- `tests/unit/test_assemblers.py` builds every assembler from `input_dims` and covers the contract
+  (flag, `output_dim`, `present`, subsets); `test_routing_graph_validation.py` checks the flag
+  through the registry and that the validator names no assembler; the custom assemblers of the P1-3
+  tests follow the new contract; `test_global_vae_construction_guards.py` covers a wrong or omitted
+  decoder `latent_dim`.
+- `ruff format` applies to three files that failed it: `scripts/visualize_latent.py` (a line over
+  100 characters), `src/global_vae/config/model_schema.py` and
+  `src/global_vae/training/callbacks/checkpoint.py` (no newline at the end of the file).
 
 ### Removed
 
 - The `NotImplementedError` that `GlobalVae.__init__` raised for an encoder assigned to more than
   one latent space (the fan-out guard of ADR 0002, superseded by ADR 0024).
+- The `dimension_locked_assemblers` argument of `validateRoutingGraph` (default `{"sum", "average"}`):
+  the rule is the `requires_matching_dims` flag of each assembler class (ADR 0026). Code that passed
+  its own set sets the flag on its assembler class instead. The no-argument construction of an
+  assembler (`getAssemblerClass(name)()`) is gone with it: assemblers need `input_dims`.
 
 ### Fixed

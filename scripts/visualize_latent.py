@@ -388,7 +388,11 @@ def main(argv: list[str] | None = None) -> None:
             if args.history_no_twin_axis
             else [key for key in metadata.history[0] if "regularization" in key] or None
         )
-        metrics = [key for key in metadata.history[0] if "total" not in key and (twin_metrics is None or key not in twin_metrics)]
+        metrics = [
+            key
+            for key in metadata.history[0]
+            if "total" not in key and (twin_metrics is None or key not in twin_metrics)
+        ]
         history_fig = plotLossCurves(
             metadata.history,
             metrics=metrics,

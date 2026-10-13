@@ -7,6 +7,7 @@ runs through all the refusals is that the message starts with the dotted path of
 edit, so most tests match on that path.
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -687,11 +688,17 @@ class TestResolveSeveral:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         class _Widening(AbstractAssembler):
-            def __init__(self, extra: int) -> None:
-                super().__init__()
+            def __init__(self, input_dims: Sequence[int], extra: int) -> None:
+                super().__init__(input_dims)
                 self.extra = extra
 
-            def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
+            @property
+            def output_dim(self) -> int:
+                return sum(self.input_dims) + self.extra
+
+            def forward(
+                self, latents: list[torch.Tensor], present: Sequence[int] | None = None
+            ) -> torch.Tensor:
                 return torch.cat([*latents, latents[0][:, : self.extra]], dim=-1)
 
         monkeypatch.setitem(assembler_registry._ASSEMBLER_REGISTRY, "widening_test", _Widening)

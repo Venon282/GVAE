@@ -7,7 +7,9 @@ simply rejecting everything:
 1. a latent space with no encoder feeding it,
 2. a latent space with no decoder consuming it,
 3. a decoder consuming several latent spaces with no assembler,
-4. a `sum` or `average` assembler over latent spaces of different dimensionality.
+4. an assembler whose class sets `requires_matching_dims` (`sum`, `average`, `weighted_sum`) over
+   latent spaces of different dimensionality. The flag is read through the assembler registry, so
+   `validateRoutingGraph` names no assembler (roadmap P1-4, spec §10 and §12).
 
 Three further rejections concern latent heads (spec §2.2, §10, roadmap P1-2, ADR 0024):
 
@@ -18,8 +20,18 @@ Three further rejections concern latent heads (spec §2.2, §10, roadmap P1-2, A
    give those spaces identical posteriors (the reason ADR 0002 added its guard).
 """
 
-import pytest
+import ast
+import inspect
+import textwrap
+from collections.abc import Sequence
 
+import pytest
+import torch
+
+import global_vae.assemblers  # noqa: F401  (registers the built-in assemblers)
+import global_vae.assemblers.registry as assembler_registry
+from global_vae.assemblers.base import AbstractAssembler
+from global_vae.assemblers.registry import listRegisteredAssemblers
 from global_vae.latent.base import HeadSpec, LatentSpace, RoutingGraph, validateRoutingGraph
 
 
@@ -163,12 +175,33 @@ class TestRejectsMultiLatentDecoderWithoutAssembler:
             validateRoutingGraph(graph)
 
 
-class TestRejectsDimensionLockedAssemblerOverDifferentDims:
-    """Rejection 4: `sum` and `average` need every input latent space to share one dimension."""
+class _LockedAssembler(AbstractAssembler):
+    """Test strategy that sets the class-level flag, to prove the validator reads it."""
 
-    @pytest.mark.parametrize("assembler", ["sum", "average"])
+    requires_matching_dims = True
+
+    @property
+    def output_dim(self) -> int:
+        return self.input_dims[0]
+
+    def forward(
+        self, latents: list[torch.Tensor], present: Sequence[int] | None = None
+    ) -> torch.Tensor:
+        return latents[0]
+
+
+class _FreeAssembler(_LockedAssembler):
+    """Test strategy that leaves the flag at its default."""
+
+    requires_matching_dims = False
+
+
+class TestRejectsDimensionLockedAssemblerOverDifferentDims:
+    """Rejection 4: a class with `requires_matching_dims` needs one dimension across its inputs."""
+
+    @pytest.mark.parametrize("assembler", ["sum", "average", "weighted_sum"])
     def test_differing_dims_are_rejected(self, assembler: str) -> None:
-        """Both dimension-locked built-ins reject latent spaces of dims 8 and 4."""
+        """The three dimension-locked built-ins reject latent spaces of dims 8 and 4."""
         graph = _twoLatentGraph(assembler=assembler, dim_a=8, dim_b=4)
         with pytest.raises(ValueError, match="requires matching dimensionality"):
             validateRoutingGraph(graph)
@@ -197,11 +230,45 @@ class TestRejectsDimensionLockedAssemblerOverDifferentDims:
         with pytest.raises(ValueError, match=r"differing dims \[8, 16\]"):
             validateRoutingGraph(graph)
 
-    def test_custom_dimension_locked_set_is_honoured(self) -> None:
-        """A strategy added to `dimension_locked_assemblers` gets the same check."""
-        graph = _twoLatentGraph(assembler="weighted_sum", dim_a=8, dim_b=4)
-        with pytest.raises(ValueError, match="requires matching dimensionality"):
-            validateRoutingGraph(graph, dimension_locked_assemblers=frozenset({"weighted_sum"}))
+    def test_a_strategy_that_sets_the_flag_gets_the_same_check_without_any_change_here(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A registered class with `requires_matching_dims = True` is rejected over dims 8, 4."""
+        monkeypatch.setitem(
+            assembler_registry._ASSEMBLER_REGISTRY, "locked_for_test", _LockedAssembler
+        )
+        graph = _twoLatentGraph(assembler="locked_for_test", dim_a=8, dim_b=4)
+        with pytest.raises(
+            ValueError,
+            match=r"uses assembler 'locked_for_test', which requires matching dimensionality",
+        ):
+            validateRoutingGraph(graph)
+
+    def test_a_strategy_that_leaves_the_flag_unset_is_not_checked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The default is `False`: any widths pass, as for `concat` and `attention`."""
+        monkeypatch.setitem(assembler_registry._ASSEMBLER_REGISTRY, "free_for_test", _FreeAssembler)
+        validateRoutingGraph(_twoLatentGraph(assembler="free_for_test", dim_a=8, dim_b=4))
+
+    def test_the_validator_names_no_assembler(self) -> None:
+        """Roadmap P1-4: no registered assembler name appears as a literal in the function."""
+        source = textwrap.dedent(inspect.getsource(validateRoutingGraph))
+        literals = {
+            node.value
+            for node in ast.walk(ast.parse(source))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        # Docstrings and messages are prose; a name used as data would be a whole literal.
+        assert not literals & set(listRegisteredAssemblers())
+        signature = inspect.signature(validateRoutingGraph)
+        assert "dimension_locked_assemblers" not in signature.parameters
+
+    def test_an_unknown_assembler_on_a_multi_latent_decoder_raises_key_error(self) -> None:
+        """The flag is read from the registry, so an unregistered name is a registry `KeyError`."""
+        graph = _twoLatentGraph(assembler="does_not_exist")
+        with pytest.raises(KeyError, match="does_not_exist.*Available:.*concat"):
+            validateRoutingGraph(graph)
 
 
 class TestAcceptsValidGraphs:
@@ -222,13 +289,29 @@ class TestAcceptsValidGraphs:
 
     @pytest.mark.parametrize(
         ("assembler", "dim_a", "dim_b"),
-        [("concat", 8, 8), ("concat", 8, 4), ("sum", 8, 8), ("average", 4, 4)],
-        ids=["concat-equal", "concat-different", "sum-equal", "average-equal"],
+        [
+            ("concat", 8, 8),
+            ("concat", 8, 4),
+            ("sum", 8, 8),
+            ("average", 4, 4),
+            ("weighted_sum", 8, 8),
+            ("attention", 8, 8),
+            ("attention", 8, 4),
+        ],
+        ids=[
+            "concat-equal",
+            "concat-different",
+            "sum-equal",
+            "average-equal",
+            "weighted_sum-equal",
+            "attention-equal",
+            "attention-different",
+        ],
     )
     def test_multi_latent_decoder_with_a_compatible_assembler(
         self, assembler: str, dim_a: int, dim_b: int
     ) -> None:
-        """`concat` accepts any dims; `sum` and `average` accept equal ones."""
+        """`concat` and `attention` accept any dims; the dimension-locked ones accept equal dims."""
         validateRoutingGraph(_twoLatentGraph(assembler=assembler, dim_a=dim_a, dim_b=dim_b))
 
     def test_assembler_on_a_single_input_decoder_is_not_checked(self) -> None:
@@ -251,10 +334,11 @@ class TestAcceptsValidGraphs:
         )
         validateRoutingGraph(graph)
 
-    def test_empty_dimension_locked_set_disables_the_dimension_check(self) -> None:
-        """With no locked assemblers, `sum` over different dims passes this gate."""
-        graph = _twoLatentGraph(assembler="sum", dim_a=8, dim_b=4)
-        validateRoutingGraph(graph, dimension_locked_assemblers=frozenset())
+    def test_an_unregistered_assembler_on_a_single_input_decoder_is_not_looked_up(self) -> None:
+        """Nothing is assembled for one input, so the name is not resolved by the gate."""
+        graph = _singleLatentGraph()
+        graph.decoder_assemblers["dec"] = "does_not_exist"
+        validateRoutingGraph(graph)
 
     def test_encoder_fan_out_with_a_head_on_one_edge_is_valid(self) -> None:
         """Fan-out is legal when at most one of the encoder's edges is an identity edge."""
@@ -453,3 +537,45 @@ class TestRejectsTwoIdentityEdgesFromOneEncoder:
             validateRoutingGraph(
                 graph, identity_head_names=frozenset({"identity", "my_passthrough"})
             )
+
+
+class TestDecoderInputs:
+    """`RoutingGraph.decoderInputs` says which latents a decoder gets, and in which order.
+
+    `GlobalVae` sizes each assembler with it and hands the latent vectors over in this order, and
+    the config resolution reads it to compute the width a decoder receives (roadmap P1-4).
+    """
+
+    def test_inverts_latent_to_decoders(self) -> None:
+        """Latent space -> decoders becomes decoder -> latent spaces."""
+        graph = RoutingGraph(
+            latent_specs={"z_a": LatentSpace("z_a", 8), "z_b": LatentSpace("z_b", 4)},
+            encoder_to_latents={"enc_a": ["z_a"], "enc_b": ["z_b"]},
+            latent_to_decoders={"z_a": ["dec_1", "dec_2"], "z_b": ["dec_1"]},
+            decoder_assemblers={"dec_1": "concat"},
+        )
+        assert graph.decoderInputs() == {"dec_1": ["z_a", "z_b"], "dec_2": ["z_a"]}
+
+    def test_order_is_the_order_of_latent_to_decoders_not_alphabetical(self) -> None:
+        """A latent space declared first is the first input, even if its name sorts last."""
+        graph = RoutingGraph(
+            latent_specs={"z_b": LatentSpace("z_b", 4), "z_a": LatentSpace("z_a", 8)},
+            encoder_to_latents={"enc_a": ["z_a"], "enc_b": ["z_b"]},
+            latent_to_decoders={"z_b": ["dec"], "z_a": ["dec"]},
+            decoder_assemblers={"dec": "concat"},
+        )
+        assert graph.decoderInputs()["dec"] == ["z_b", "z_a"]
+
+    def test_a_graph_with_no_consumer_has_no_entries(self) -> None:
+        """A decoder that consumes nothing has no entry, and an empty graph gives `{}`."""
+        assert RoutingGraph(latent_specs={}).decoderInputs() == {}
+        graph = _singleLatentGraph()
+        graph.latent_to_decoders = {"z": []}
+        assert graph.decoderInputs() == {}
+
+    def test_the_validator_and_the_inverse_agree_on_a_multi_latent_decoder(self) -> None:
+        """The decoder the validator checks for an assembler is the one `decoderInputs` lists."""
+        graph = _twoLatentGraph(assembler=None)
+        assert graph.decoderInputs() == {"dec": ["z_a", "z_b"]}
+        with pytest.raises(ValueError, match=r"consumes 2 latent spaces \['z_a', 'z_b'\]"):
+            validateRoutingGraph(graph)

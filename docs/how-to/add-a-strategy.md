@@ -53,6 +53,29 @@ The built-ins are `identity` (the default, a no-op that needs
 `in_dim == out_dim`) and `linear` (one learned projection for `mu` and
 another for `logvar`, Xavier uniform weights and zero biases).
 
+## A note specific to assemblers
+
+An assembler merges the sampled latent vectors of a decoder that consumes several latent spaces
+(spec §2.2). `GlobalVae` builds it as `getAssemblerClass(name)(input_dims, **kwargs)`, with
+`input_dims` the `dim` of each latent space the decoder reads, in the order of
+`RoutingGraph.decoderInputs()`. So a new assembler must:
+
+- accept `input_dims` first, call `super().__init__(input_dims)`, and give every further argument
+  a default (they come from `decoders_consume.<decoder>.kwargs`);
+- implement `output_dim`, the width of what `forward` returns. The model checks it against the
+  decoder's `latent_dim`, or fills `latent_dim` in when the decoder's kwargs omit it;
+- implement `forward(latents, present=None)`, calling `self._resolvePresent(latents, present)` first.
+  `present` is the position in `input_dims` of each tensor when only some latent spaces are
+  present, which a strategy with one parameter per space needs to pick the right ones;
+- set `requires_matching_dims = True` if all the input widths must be equal. The base constructor
+  then refuses differing widths, and `validateRoutingGraph` reads the flag through the registry, so
+  neither needs an edit for your class;
+- override `handlesMissingLatents` to return `True` only if `forward` is defined for any non-empty
+  subset of the spaces. The default is `False`, and a decoder with an incomplete input to such an
+  assembler is left out of that pass.
+
+The built-ins are `concat`, `sum`, `average`, and the learned `weighted_sum` and `attention`.
+
 ## A note specific to data transforms
 
 Transforms carry one extra constraint (spec §6.2): they must work on a

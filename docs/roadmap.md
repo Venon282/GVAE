@@ -355,6 +355,7 @@ train through `scripts/train.py`, and the model of example 03 can be written in 
 **Depends on.** D-1, P1-2.
 
 ### P1-4. Assemblers `weighted_sum` and `attention` (M)
+**Status:** done
 
 **Spec.** §2.2 and §11 (second bullet: none is deferred indefinitely).
 **Do.** Both are learned modules, but `GlobalVae` builds assemblers with no arguments

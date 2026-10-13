@@ -24,3 +24,4 @@
 - [0023: Snake_case module names](0023-snake-case-module-names.md)
 - [0024: Encoder fan-out through latent heads](0024-encoder-fan-out-through-latent-heads.md)
 - [0025: Config schema for several latent spaces](0025-config-schema-for-several-latent-spaces.md)
+- [0026: Assembler constructor contract and learned assemblers](0026-assembler-constructor-contract-and-learned-assemblers.md)

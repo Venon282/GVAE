@@ -36,6 +36,7 @@ down via `selectEncoderInputs` before it ever reaches `forward()`. See
 `docs/adr/0019-decouple-encoder-inputs-from-decoder-targets.md`.
 """
 
+import inspect
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -73,7 +74,11 @@ class GlobalVae(nn.Module):
         fusions: Latent space name -> fusion module, one entry per
             latent space fed by more than one encoder.
         assemblers: Decoder name -> assembler module, one entry per
-            decoder consuming more than one latent space.
+            decoder with an entry in `routing_graph.decoder_assemblers`
+            (every decoder consuming more than one latent space has one).
+            An assembler is built from the widths of the latent spaces its
+            decoder consumes (`input_dims`), and its `output_dim` is the
+            decoder's `latent_dim`.
         regularizers: Latent space name -> regularizer module (spec
             §2.3), one entry per latent space in `routing_graph`.
             Defaults to `"kl_standard_normal"` for any latent space not
@@ -134,9 +139,12 @@ class GlobalVae(nn.Module):
                 is only valid for a latent space that actually has a
                 fusion, i.e. one fed by more than one encoder.
             assembler_kwargs: Optional decoder name -> constructor kwargs
-                for that decoder's assembler (`assemblers/`). Absent means
-                no kwargs, which is all the built-in `concat`, `sum` and
-                `average` assemblers take.
+                for that decoder's assembler (`assemblers/`), next to the
+                `input_dims` the model derives from the latent spaces the
+                decoder consumes (`RoutingGraph.decoderInputs`), so
+                `input_dims` is never given here. Absent means no kwargs,
+                which is all `concat`, `sum` and `average` take and what
+                `weighted_sum` and `attention` default to.
 
         Raises:
             ValueError: If `routing_graph` is invalid (spec §2.2, §10:
@@ -150,12 +158,18 @@ class GlobalVae(nn.Module):
                 its encoder is absent from `encoder_configs`, exposes no
                 integer `latent_dim`, or the head rejects its widths
                 (`identity` needs the encoder's `latent_dim` to equal
-                its latent space's `dim`).
+                its latent space's `dim`), if an assembler cannot be built
+                from its `assembler_kwargs` and the widths of its latent
+                spaces, or if a decoder's `decoder_kwargs` set a `latent_dim`
+                different from the width it receives (the latent space's
+                `dim` for one latent space, the assembler's `output_dim`
+                for several).
             KeyError: If `regularizer_strategies` (or its default,
                 `"kl_standard_normal"`) names a strategy absent from
-                the regularizer registry, or if `routing_graph.
+                the regularizer registry, if `routing_graph.
                 encoder_heads` names a head absent from the head
-                registry.
+                registry, or if `routing_graph.decoder_assemblers` names
+                an assembler absent from the assembler registry.
         """
         super().__init__()
         validateRoutingGraph(routing_graph)
@@ -171,6 +185,10 @@ class GlobalVae(nn.Module):
         self.routing_graph = routing_graph
         self.latent_spaces = routing_graph.latent_specs
         self._feeding_encoders = self._encodersFeeding(routing_graph)
+        self._decoder_inputs = routing_graph.decoderInputs()
+        # Built before the decoders, whose `latent_dim` is the assembler's `output_dim`, but
+        # registered as `self.assemblers` after everything else, where it always was.
+        assemblers = self._buildAssemblers(routing_graph, assembler_kwargs)
 
         fusion_residual = fusion_residual or {}
         fused_latent_names = {
@@ -199,7 +217,9 @@ class GlobalVae(nn.Module):
         )
         self.decoders = nn.ModuleDict(
             {
-                name: getDecoderClass(registry_name)(**decoder_kwargs.get(name, {}))
+                name: self._buildDecoder(
+                    name, registry_name, decoder_kwargs.get(name, {}), assemblers
+                )
                 for name, registry_name in decoder_configs.items()
             }
         )
@@ -231,14 +251,7 @@ class GlobalVae(nn.Module):
             }
         )
 
-        self.assemblers = nn.ModuleDict(
-            {
-                decoder_name: getAssemblerClass(assembler_name)(
-                    **assembler_kwargs.get(decoder_name, {})
-                )
-                for decoder_name, assembler_name in routing_graph.decoder_assemblers.items()
-            }
-        )
+        self.assemblers = nn.ModuleDict(assemblers)
 
     @classmethod
     def createSingleLatent(
@@ -333,6 +346,105 @@ class GlobalVae(nn.Module):
             for latent_name in latent_names:
                 result[latent_name].append(encoder_name)
         return result
+
+    def _buildAssemblers(
+        self,
+        routing_graph: RoutingGraph,
+        assembler_kwargs: dict[str, dict[str, Any]],
+    ) -> dict[str, AbstractAssembler]:
+        """Build one assembler per entry of `routing_graph.decoder_assemblers`.
+
+        Each assembler is built as `getAssemblerClass(name)(input_dims,
+        **kwargs)`, with `input_dims` the `dim` of each latent space its
+        decoder consumes, in `RoutingGraph.decoderInputs` order, which is also
+        the order `forward` hands the latent vectors over. An entry for a
+        decoder that consumes no latent space is skipped: there is nothing to
+        size it from, and it would never run.
+
+        Args:
+            routing_graph: The routing graph whose assemblers to build.
+            assembler_kwargs: Decoder name -> constructor kwargs of its assembler.
+
+        Returns:
+            Decoder name -> assembler.
+
+        Raises:
+            ValueError: If an assembler cannot be built from its kwargs and
+                the widths of its latent spaces.
+            KeyError: If an assembler name is absent from the assembler registry.
+        """
+        assemblers: dict[str, AbstractAssembler] = {}
+        for decoder_name, assembler_name in routing_graph.decoder_assemblers.items():
+            latent_names = self._decoder_inputs.get(decoder_name)
+            if not latent_names:
+                continue
+            input_dims = [routing_graph.latent_specs[name].dim for name in latent_names]
+            try:
+                assemblers[decoder_name] = getAssemblerClass(assembler_name)(
+                    input_dims, **assembler_kwargs.get(decoder_name, {})
+                )
+            except (TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Cannot build assembler '{assembler_name}' for decoder '{decoder_name}' "
+                    f"(latent spaces {latent_names}, widths {input_dims}, kwargs "
+                    f"{assembler_kwargs.get(decoder_name, {})}): {error}"
+                ) from error
+        return assemblers
+
+    def _buildDecoder(
+        self,
+        decoder_name: str,
+        registry_name: str,
+        kwargs: Mapping[str, Any],
+        assemblers: Mapping[str, AbstractAssembler],
+    ) -> nn.Module:
+        """Build one decoder, checking or filling in its `latent_dim`.
+
+        The width a decoder receives is known from the routing graph: the `dim`
+        of its latent space when it consumes one, the `output_dim` of its
+        assembler otherwise. A `latent_dim` in `kwargs` must equal it, so a
+        wrong value fails here, naming both widths, instead of at the first
+        forward pass with a matrix shape error. When `kwargs` has no
+        `latent_dim` and the decoder class takes one, it is filled in.
+
+        Args:
+            decoder_name: The decoder instance name.
+            registry_name: The decoder registry name.
+            kwargs: The decoder's constructor kwargs, not modified.
+            assemblers: Decoder name -> assembler, as built by `_buildAssemblers`.
+
+        Returns:
+            The decoder module.
+
+        Raises:
+            ValueError: If `kwargs` sets a `latent_dim` different from the width
+                the decoder receives.
+            KeyError: If `registry_name` is absent from the decoder registry.
+        """
+        decoder_class = getDecoderClass(registry_name)
+        resolved = dict(kwargs)
+        latent_names = self._decoder_inputs.get(decoder_name)
+        if latent_names:
+            if decoder_name in assemblers:
+                assembler = assemblers[decoder_name]
+                width = assembler.output_dim
+                source = (
+                    f"the '{type(assembler).__name__}' assembler over latent spaces "
+                    f"{latent_names} (widths {list(assembler.input_dims)})"
+                )
+            else:
+                width = self.routing_graph.latent_specs[latent_names[0]].dim
+                source = f"latent space '{latent_names[0]}'"
+            explicit = resolved.get("latent_dim")
+            if explicit is not None and explicit != width:
+                raise ValueError(
+                    f"Decoder '{decoder_name}' is built with latent_dim={explicit!r}, but it "
+                    f"receives {width} features from {source}. Remove `latent_dim` from its "
+                    f"kwargs to take it from the routing graph."
+                )
+            if explicit is None and "latent_dim" in inspect.signature(decoder_class).parameters:
+                resolved["latent_dim"] = width
+        return decoder_class(**resolved)
 
     def _buildHeads(self, routing_graph: RoutingGraph) -> dict[str, nn.Module]:
         """Build one latent head module per entry of `routing_graph.encoder_heads`.
@@ -547,25 +659,28 @@ class GlobalVae(nn.Module):
 
         reconstructions: dict[str, torch.Tensor] = {}
         for decoder_name, decoder in self.decoders.items():
-            required = [
-                latent_name
-                for latent_name, decoder_names in self.routing_graph.latent_to_decoders.items()
-                if decoder_name in decoder_names
-            ]
+            required = self._decoder_inputs.get(decoder_name, [])
             consumed = [latent_name for latent_name in required if latent_name in latent_samples]
             if not consumed:
                 continue
-            if (
-                len(consumed) < len(required)
-                and not cast(AbstractAssembler, self.assemblers[decoder_name]).handlesMissingLatents
-            ):
-                # An incomplete input to an assembler that needs all of its latent
-                # spaces (`concat`): leave this decoder out of the pass (spec §5).
-                continue
-            if len(consumed) == 1:
+            if decoder_name not in self.assemblers:
+                # One latent space and no assembler: the sample is the decoder input.
                 z_in = latent_samples[consumed[0]]
             else:
-                z_in = self.assemblers[decoder_name]([latent_samples[name] for name in consumed])
+                assembler = cast(AbstractAssembler, self.assemblers[decoder_name])
+                if len(consumed) < len(required) and not assembler.handlesMissingLatents:
+                    # An incomplete input to an assembler that needs all of its latent
+                    # spaces (`concat`): leave this decoder out of the pass (spec §5).
+                    continue
+                # Always through the assembler, even for a single remaining latent space:
+                # `weighted_sum` and `attention` transform it, and the decoder was sized
+                # for the assembler's `output_dim`. `present` says which spaces these are.
+                present = (
+                    None
+                    if len(consumed) == len(required)
+                    else [required.index(name) for name in consumed]
+                )
+                z_in = assembler([latent_samples[name] for name in consumed], present)
             reconstructions[decoder_name] = decoder(z_in)
 
         return {

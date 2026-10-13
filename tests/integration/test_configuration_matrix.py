@@ -13,8 +13,9 @@ image) instead of the linear dummies of `test_en_l1_dn_default.py`:
 | `EN-LN-DN` | signal, image | two (`z_signal`, `z_image`) | signal, image, each over both latents |
 | `EN-LN-D1` | signal, image | two (`z_signal`, `z_image`) | one (`image_out`) over both latents |
 
-The two `LN` rows run once per assembler (`concat`, `sum`, `average`), which is what puts the
-assembler call in `GlobalVae.forward` under test. In none of the rows does an encoder feed more
+The two `LN` rows run once per assembler (`concat`, `sum`, `average`, `weighted_sum`,
+`attention`: every registered one, roadmap P1-4), which is what puts the assembler call in
+`GlobalVae.forward` under test. In none of the rows does an encoder feed more
 than one latent space, so no fan-out is involved (that is stage 2, after roadmap P1-2). The `E1-*`
 rows (stage 3) need a shared encoder and decoder, which waits on roadmap P1-5.
 
@@ -25,8 +26,10 @@ which `GlobalVae.selectEncoderInputs` filters out of the encoder inputs (ADR 001
 
 For each case the tests check: the graph has no fan-out, the model has the expected latent spaces,
 fusions and assemblers, the reconstruction and latent shapes, that each assembler received the
-latents in graph order and returned the right combination, a finite loss, and a finite gradient on
-every parameter.
+latents in graph order and returned the right combination (the value of the learned assemblers is
+checked in `tests/unit/test_learned_assemblers.py`; here `weighted_sum` must start as the average,
+and `attention` must return the width its decoder was built for), a finite loss, and a finite
+gradient on every parameter, the assemblers' own included.
 """
 
 from collections.abc import Callable
@@ -57,7 +60,7 @@ SIGNAL_DECODER = "1d_cnn_decoder_v1"
 IMAGE_ENCODER = "2d_cnn_encoder_v1"
 IMAGE_DECODER = "2d_cnn_decoder_v1"
 
-ASSEMBLERS = ("concat", "sum", "average")
+ASSEMBLERS = ("concat", "sum", "average", "weighted_sum", "attention")
 STAGE_1_ROWS = frozenset({"EN-L1-DN", "EN-L1-D1", "EN-LN-DN", "EN-LN-D1"})
 
 
@@ -89,8 +92,10 @@ def _decoderKwargs(registry_name: str, latent_dim: int) -> dict[str, Any]:
 def _latentDims(assembler: str) -> tuple[int, int, int]:
     """Dimensions for the two latent spaces of an `LN` row, and for the assembled tensor.
 
-    `concat` has no dimension restriction, so it gets two different sizes, which makes a wrong
-    input order or a wrong decoder width visible. `sum` and `average` need equal sizes.
+    `concat` and `attention` have no dimension restriction, so they get two different sizes, which
+    makes a wrong input order or a wrong decoder width visible. `attention` is given no `output_dim`
+    here, so it takes the default, the widest input. `sum`, `average` and `weighted_sum` need equal
+    sizes.
 
     Args:
         assembler: Assembler name.
@@ -100,6 +105,8 @@ def _latentDims(assembler: str) -> tuple[int, int, int]:
     """
     if assembler == "concat":
         return 6, 10, 16
+    if assembler == "attention":
+        return 6, 10, 10
     return 8, 8, 8
 
 
@@ -271,8 +278,20 @@ class _Run:
     assembler_calls: dict[str, list[tuple[list[torch.Tensor], torch.Tensor]]]
 
 
-def _combine(assembler: str, latents: list[torch.Tensor]) -> torch.Tensor:
-    """What each assembler is specified to return, written out without the assembler classes."""
+def _combine(assembler: str, latents: list[torch.Tensor]) -> torch.Tensor | None:
+    """What each assembler is specified to return, written out without the assembler classes.
+
+    Args:
+        assembler: Assembler name.
+        latents: The latents the assembler received.
+
+    Returns:
+        The expected output, or `None` for `attention`, whose value depends on random parameters
+        (its output width is checked instead). `weighted_sum` starts with equal weights, so it
+        returns the mean until it is trained.
+    """
+    if assembler == "attention":
+        return None
     if assembler == "concat":
         return torch.cat(latents, dim=-1)
     stacked = torch.stack(latents, dim=0)
@@ -336,7 +355,7 @@ def test_stage_1_lists_every_en_row_without_fan_out() -> None:
     for code in ("EN-L1-DN", "EN-L1-D1"):
         covered = {case.values[1] for case in STAGE_1_CASES if case.values[0] == code}
         assert covered == {None}, code
-    assert set(ASSEMBLERS) <= set(listRegisteredAssemblers())
+    assert set(ASSEMBLERS) == set(listRegisteredAssemblers())
 
 
 @pytest.mark.parametrize(("row_code", "assembler"), STAGE_1_CASES)
@@ -389,7 +408,10 @@ class TestStage1Rows:
             assert torch.equal(latents_in[0], samples["z_signal"])
             assert torch.equal(latents_in[1], samples["z_image"])
             assert assembled.shape == (BATCH_SIZE, decoder_dim)
-            assert torch.equal(assembled, _combine(run.assembler, latents_in))
+            assert assembled.shape[-1] == run.model.assemblers[decoder_name].output_dim
+            expected = _combine(run.assembler, latents_in)
+            if expected is not None:
+                assert torch.allclose(assembled, expected, atol=1e-6)
 
     def test_loss_is_a_finite_scalar(self, run: _Run) -> None:
         """Reconstruction plus regularization is one finite number."""

@@ -17,6 +17,7 @@ Training through `scripts/train.py` is in `test_train_script.py`.
 """
 
 import importlib.util
+from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
 
@@ -423,11 +424,17 @@ class TestAssemblerKwargs:
     class _Weighted(AbstractAssembler):
         """Test assembler: concatenates the latents after scaling the first one."""
 
-        def __init__(self, first_weight: float) -> None:
-            super().__init__()
+        def __init__(self, input_dims: Sequence[int], first_weight: float) -> None:
+            super().__init__(input_dims)
             self.first_weight = first_weight
 
-        def forward(self, latents: list[torch.Tensor]) -> torch.Tensor:
+        @property
+        def output_dim(self) -> int:
+            return sum(self.input_dims)
+
+        def forward(
+            self, latents: list[torch.Tensor], present: Sequence[int] | None = None
+        ) -> torch.Tensor:
             return torch.cat([latents[0] * self.first_weight, *latents[1:]], dim=-1)
 
     def test_kwargs_from_the_config_reach_the_built_assembler(

@@ -151,6 +151,11 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
 5. Add a test: a unit test for the encoder/decoder shapes (in `tests/unit/`), and
    ideally an entry in the relevant integration test (in `tests/integration/`).
 
+For one encoder over several modalities, or one decoder reconstructing
+several, subclass `AbstractSharedEncoder` / `AbstractSharedDecoder` instead
+and name them under `encoders` / `decoders` (see
+`docs/how-to/add-a-modality.md`).
+
 No core framework file should need to change. If it does, that's a
 signal the registry pattern is being bypassed somewhere. Flag it
 rather than special-casing the new modality into `GlobalVae`.
@@ -182,15 +187,23 @@ for names that are not modality names. `configs/model/` has one file per
 pattern of spec §9 (`signal_image_independent_latents.yaml`,
 `signal_image_shared_private.yaml`) and the model of example 03
 (`signal_image_to_image.yaml`), and `configs/experiment/` an experiment for
-each, runnable with `scripts/train.py`. One limit remains:
+each, runnable with `scripts/train.py`.
 
-- Of the 8 configurations in spec §2.1, the four `EN-*` rows (one encoder per
-  modality) are built, including the shared plus private topology, which can
-  be trained and evaluated, from Python or from a config file. The four `E1-*`
-  rows (one shared encoder over several modalities) are not built.
+All 8 configurations of spec §2.1 are built. The four `EN-*` rows (one encoder
+per modality) include the shared plus private topology, which can be trained
+and evaluated, from Python or from a config file. The four `E1-*` rows (one
+shared encoder over several modalities) and the `*-D1` rows (one shared decoder
+reconstructing several) use `AbstractSharedEncoder` and `AbstractSharedDecoder`
+(`docs/adr/0027-shared-encoders-and-decoders.md`): a shared encoder declares
+the modalities it ingests and receives them as a `dict[str, Tensor]`, a shared
+decoder returns one, and `GlobalVae` flattens it into `"reconstructions"` by
+modality, so the losses, the evaluation and the figures are unchanged. No
+concrete shared backbone ships yet (roadmap P3-5): the tests build the four
+rows with small dummy modules, and `docs/how-to/add-a-modality.md` says what to
+implement.
 
-Closing these gaps is tracked in the [roadmap](docs/roadmap.md) (Phase 1). See
-also `docs/adr/0001-phase1-default-configuration.md`.
+Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
+`docs/adr/0001-phase1-default-configuration.md`.
 
 ## Roadmap
 

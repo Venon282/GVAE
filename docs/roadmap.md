@@ -374,6 +374,7 @@ names any assembler.
 **Depends on.** P0-4(b). Reaching their kwargs from YAML needs P1-3.
 
 ### P1-5. Shared encoder and shared decoder, the `E1` and `D1` rows (XL)
+**Status:** done
 
 **Spec.** §2.1.
 **Why.** `AbstractEncoder.forward` takes one tensor, and `GlobalVae` feeds `inputs[name]` to
@@ -389,6 +390,12 @@ lives inside the concrete shared module, which is where transformer backbones (P
 matrix test with dummy shared modules, and modality dropout and cross-modal reports work with a
 shared encoder.
 **Depends on.** D-2, P1-2 (the `E1-LN` rows need fan-out), P1-3.
+**Delivered.** [ADR 0027](adr/0027-shared-encoders-and-decoders.md), taking option A of D-2 as the
+default (it needs the owner's approval). One departure from the plan: the cross-modal reports, the
+figure export and `scripts/visualize_latent.py` needed a small change, not none. They used the
+encoder names as the modality names, and now use `GlobalVae.input_modalities` and
+`output_modalities`, which are the same sets for every model without a shared module. No concrete
+shared backbone ships; P3-5 writes the first one.
 
 ### P1-6. Configuration matrix test (M, three stages)
 
@@ -398,7 +405,7 @@ tensors, with shape and gradient checks.
 list of the 8 row codes and a builder per row. Each case checks the reconstruction shapes, a finite
 loss, a gradient on every parameter, and that a few optimizer steps lower the loss. Stage 1 (the
 four `EN-*` rows without fan-out) is delivered by P0-4(d). Stage 2 adds the shared plus private
-variants after P1-2. Stage 3 adds the four `E1-*` rows after P1-5.
+variants after P1-2. Stage 3 adds the four `E1-*` rows after P1-5 (delivered with P1-5).
 **Done when.** 8 of 8 rows pass, and the test fails if a row is dropped from the list.
 
 ---

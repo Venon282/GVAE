@@ -55,6 +55,8 @@ This gives 8 valid configurations. None is "the" architecture: all must remain s
 
 The table above is a simplified overview. For any "several latent spaces" row, the actual topology (which encoder feeds which latent space(s), which decoder consumes which latent space(s), and with what assembler) is a further configuration choice, detailed in §2.2.
 
+**Who builds the stream.** A "single shared" encoder or decoder is a module that handles several modalities, and the modules that do so own the tokenisation. A shared encoder (`AbstractSharedEncoder`) declares the modalities it ingests and receives them as a `dict[str, Tensor]`, with the missing ones omitted; a shared decoder (`AbstractSharedDecoder`) returns a `dict[str, Tensor]` with one reconstruction per modality it declares. The model never concatenates or reshapes modalities itself. A one-modality encoder or decoder (`AbstractEncoder`, `AbstractDecoder`) is unchanged, and a single decoder that produces one tensor (a translation model) is still a valid `D1` row. See ADR 0027.
+
 ### 2.2 Latent routing graph
 
 "Several latent spaces" does not mean a fixed shared/private split. It means the model can have **any number of independent latent spaces**, each with its own posterior, its own prior, and its own regularization term (§2.3), wired to encoders and decoders through a **configurable routing graph**:
@@ -86,6 +88,7 @@ The weight applied to a latent space's regularization term (`beta`) is likewise 
  
 - **Modality**: a data type/source (1D signal, image, ...). A modality may have several concrete datasets (e.g. SAXS is one dataset within the "1D signal" modality).
 - **Encoder**: network mapping one modality's raw input to distribution parameters (or to features destined for fusion).
+- **Shared encoder / shared decoder**: an encoder that ingests several modalities (receiving them as a dict, with missing ones omitted), or a decoder that reconstructs several (returning a dict). The `E1` and `D1` rows of §2.1 use them. The batch key of a modality is its name, whichever module handles it.
 - **Latent head**: optional per-edge module adapting an encoder's `(mu, logvar)` output to a specific latent space's dimensionality/purpose, used when that encoder feeds more than one latent space. Identity by default.
 - **Fusion module**: combines outputs of multiple *encoders* into a single set of latent distribution parameters, for one given latent space. Operates on distribution parameters, before sampling.
 - **Latent space**: an independent probabilistic code `z_i`, with its own posterior, its own prior, and its own regularization term (not necessarily KL divergence, see §2.3). A model has one or several; when several, they are wired to encoders and decoders through the routing graph (§2.2), not a fixed shared/private split.
@@ -235,14 +238,16 @@ global-vae/
 ├── src/
 │   └── global_vae/
 │       ├── encoders/
-│       │   ├── base.py                    # AbstractEncoder interface
+│       │   ├── base.py                    # AbstractEncoder interface (one modality)
+│       │   ├── shared_base.py             # AbstractSharedEncoder interface (several modalities, ADR 0027)
 │       │   ├── registry.py
 │       │   ├── one_d_cnn_encoder.py           # 1d_cnn_encoder_v1 (signals, any 1D series)
 │       │   ├── one_d_cnn_residual_encoder.py  # 1d_cnn_resnet_encoder_v1
 │       │   ├── two_d_cnn_encoder.py           # 2d_cnn_encoder_v1 (images, any 2D grid)
 │       │   └── two_d_cnn_residual_encoder.py  # 2d_cnn_resnet_encoder_v1
 │       ├── decoders/
-│       │   ├── base.py                    # AbstractDecoder interface
+│       │   ├── base.py                    # AbstractDecoder interface (one modality)
+│       │   ├── shared_base.py             # AbstractSharedDecoder interface (several modalities, ADR 0027)
 │       │   ├── registry.py
 │       │   ├── one_d_cnn_decoder.py           # 1d_cnn_decoder_v1
 │       │   ├── one_d_cnn_residual_decoder.py  # 1d_cnn_resnet_decoder_v1
@@ -351,7 +356,7 @@ model:
     regularizer: {strategy: free_bits_kl, kwargs: {free_bits: 0.5}}
 ```
  
-**Several independent latent spaces, no encoder fan-out** (`GlobalVae.__init__` with an explicit `RoutingGraph`; shipped as `configs/model/signal_image_independent_latents.yaml`): one decoder reads both spaces. The shared decoder of this pattern is a decoder you register yourself when it needs to take more than one tensor (§2.1, roadmap D-2); a registered 2D decoder, named `image_out`, stands in for it here so that the example builds as written.
+**Several independent latent spaces, no encoder fan-out** (`GlobalVae.__init__` with an explicit `RoutingGraph`; shipped as `configs/model/signal_image_independent_latents.yaml`): one decoder reads both spaces. The shared decoder of this pattern is a decoder you register yourself (an `AbstractSharedDecoder` when it reconstructs several modalities, §2.1 and ADR 0027); a registered 2D decoder, named `image_out`, stands in for it here so that the example builds as written.
  
 ```yaml
 model:
@@ -459,7 +464,7 @@ Every model example above builds, and trains through `scripts/train.py` (`tests/
 - **Typing:** type hints mandatory everywhere; `mypy` run in CI.
 - **Docstrings:** Google-style, mandatory on every public class/function: purpose, `Args`, `Returns`, `Raises`.
 - **Modularity:** one responsibility per file; one class per file for encoders/decoders/fusion strategies/assemblers/heads/regularizers/transforms. No god-files: a base class, its registry, and every concrete strategy each get their own file (see `fusion/`, `assemblers/`, `heads/`, `losses/regularizers/`, `data/transforms/`).
-- **Interfaces:** `AbstractEncoder`, `AbstractDecoder`, `AbstractFusion`, `AbstractAssembler`, `AbstractLatentHead`, `AbstractLatentRegularizer`, `AbstractTransform` as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (`@registerEncoder("signal")`); this is what makes "add a modality without touching the core" actually true, not just aspirational.
+- **Interfaces:** `AbstractEncoder`, `AbstractDecoder`, `AbstractSharedEncoder`, `AbstractSharedDecoder` (the last two are siblings of the first two, for modules that handle several modalities; they register in the same registries, and a modality has exactly one encoder and one decoder that handle it), `AbstractFusion`, `AbstractAssembler`, `AbstractLatentHead`, `AbstractLatentRegularizer`, `AbstractTransform` as ABCs. Every concrete implementation subclasses one of these and self-registers via a decorator (`@registerEncoder("signal")`); this is what makes "add a modality without touching the core" actually true, not just aspirational.
 - **Registry population:** a class decorated with `@registerX(...)` is only registered once its module has actually been imported. Each registry-based subpackage's `__init__.py` must import every concrete implementation for that side effect (`import global_vae.assemblers.concat  # noqa: F401`, one line per file), or `getXClass(name)` raises `KeyError` even though the file exists on disk.
 - **Routing graph validation:** `validateRoutingGraph` (`latent/base.py`) must run at model-construction time for every configuration, not just the Phase-1 default. It rejects orphan latent spaces, rejects a decoder that consumes more than one latent space without an assigned assembler, checks dimensional compatibility for every assembler whose class sets `requires_matching_dims` (`sum`, `average`, `weighted_sum`; read through the assembler registry, never a list of names in the validator), rejects an encoder -> latent edge whose `head` output dimension does not match the target latent space's declared `dim`, and rejects an encoder that feeds several latent spaces through more than one identity edge (two spaces would get identical posteriors; ADR 0024). `GlobalVae` builds one head per edge that declares one and applies it before fusion; an edge with no head is an identity edge and builds no module.
 - **Latent regularization:** never hardcode `LatentSpace.klDivergence` (or an equivalent KL-only computation) as the only regularization path inside the model class; route it through the `AbstractLatentRegularizer` registry (§2.3) so alternative strategies (MMD, free-bits, learned priors) can be swapped in via config.
@@ -505,6 +510,7 @@ Every model example above builds, and trains through `scripts/train.py` (`tests/
 - Any new component (encoder, decoder, fusion strategy, assembler, latent head, regularizer, **data transform**) must follow the registry pattern in §10, not be hardcoded into the model class (or, for transforms, into an encoder/decoder or the data pipeline), and must be added to its subpackage's `__init__.py` imports so it actually registers.
 - Latent spaces are independent by construction: never hardcode a shared/private split as *the* meaning of "several latent spaces"; always go through the routing graph (§2.2). Fusion is chosen per latent space, not once for the whole model.
 - Encoder fan-out to several latent spaces goes through a Latent Head (§2.2), never by giving `AbstractEncoder` multiple output heads or duplicating the encoder.
+- A module that handles several modalities (the `E1` and `D1` rows) subclasses `AbstractSharedEncoder` or `AbstractSharedDecoder` (§2.1, ADR 0027), never by packing modalities into one tensor under one batch key or by widening `AbstractEncoder.forward`.
 - Regularization is never hardcoded to KL-to-standard-normal inside the model class; it goes through the `AbstractLatentRegularizer` registry (§2.3).
 - Data transforms (`data/transforms/`, §6.2) must stay fully generic across dimensionality (1D/2D/3D/other) and must never encode anything specific to one dataset or modality (e.g. SAXS); modality-specific preprocessing decisions (which transforms, in what order, with what parameters) stay in the caller's own data pipeline, exactly as they always have. `datamodule.py` is a permanent scope boundary (§6.2), not a pending milestone: do not build it, and do not treat its absence as a gap to fill.
 - Build routing graphs through `RoutingGraph` directly or through a preset in `latent/routing_graph_builders/` (`single.py`, `shared_private.py`, or a new one); never re-derive the same construction inline in a model class.

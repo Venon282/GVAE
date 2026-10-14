@@ -14,6 +14,7 @@ working file for each case below, and `buildModelFromConfig` turns any of them i
 | One latent space; a decoder whose target is not an encoder input | `latent_mode: single`, `encoders`, `decoders`, `single_latent` | `signal_image_to_image.yaml` |
 | Several independent latent spaces | `latent_mode: several`, `latent` | `signal_image_independent_latents.yaml` |
 | Shared plus private latent spaces (encoder fan-out) | `latent_mode: several`, `latent` with a `head` on some `fed_by` edges | `signal_image_shared_private.yaml` |
+| One encoder over several modalities, or one decoder reconstructing several | `encoders` or `decoders` naming a shared module, in either `latent_mode` | none yet (no shared backbone ships) |
 
 `latent_mode` is explicit. `single` takes `single_latent` and refuses `latent`; `several` takes
 `latent` and refuses `single_latent`. A section that would be ignored is an error.
@@ -35,6 +36,41 @@ decoders:
 The two sections and `modalities` can be mixed in one file, as long as a name is not used twice
 on the same side. A batch may carry keys with no encoder (here `image_out`): they are never
 encoded, only used as targets.
+
+## Share an encoder or a decoder across modalities
+
+The `E1` and `D1` rows of spec §2.1 use one encoder that reads several modalities, or one decoder
+that reconstructs several ([ADR 0027](../adr/0027-shared-encoders-and-decoders.md)). Nothing in the
+config changes shape: name the shared module under `encoders` or `decoders`, with the instance name
+you like, and give it the arguments its constructor takes.
+
+```yaml
+encoders:
+  backbone:
+    name: my_shared_encoder_v1          # an AbstractSharedEncoder
+    kwargs:
+      input_dims: {signal: 128, image: 1024}
+decoders:
+  backbone_out:
+    name: my_shared_decoder_v1          # an AbstractSharedDecoder
+    kwargs:
+      output_shapes: {signal: [128], image: [32, 32]}
+```
+
+- The modalities are what the class declares (`input_modalities`, `output_modalities`), and each is
+  a batch key. The instance name (`backbone`) is what `fed_by` and `decoders_consume` refer to.
+- Do not write a shared module under `modalities`: that section pairs one encoder and one decoder
+  under one name.
+- A modality has one owner on each side. Two encoders that ingest `signal`, or two decoders that
+  reconstruct it, are refused when the model is built. One-modality and shared modules can be mixed
+  (a `signal` encoder next to a shared encoder over `image` and `audio`, fused by PoE in one space).
+- One shared encoder feeding several latent spaces (`E1-LN`) is the encoder fan-out of
+  [the next sections](#one-encoder-several-latent-spaces): the same `fed_by` mappings and heads.
+  `E1-LN-D1` is the same model with one shared decoder reading the assembled latent spaces.
+- Modality dropout and the cross-modal reports hand the shared encoder a dict with the missing
+  modalities left out, and the shared decoder always returns every modality it declares. See
+  [add a modality](add-a-modality.md#one-encoder-or-decoder-for-several-modalities) for what a
+  shared class must implement.
 
 ## Several latent spaces
 

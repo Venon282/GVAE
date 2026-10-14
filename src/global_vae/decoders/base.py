@@ -7,7 +7,10 @@ from torch import nn
 
 
 class AbstractDecoder(nn.Module, ABC):
-    """Base class for every modality-specific (or shared) decoder.
+    """Base class for every one-modality decoder.
+
+    A decoder shared by several modalities (the `D1` rows of spec §2.1)
+    subclasses `AbstractSharedDecoder` instead (ADR 0027).
 
     A decoder maps a latent vector back to a modality-specific
     reconstruction. If this decoder consumes more than one latent

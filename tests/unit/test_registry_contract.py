@@ -43,8 +43,10 @@ from global_vae.data.transforms.registry import (
 )
 from global_vae.decoders.base import AbstractDecoder
 from global_vae.decoders.registry import getDecoderClass, listRegisteredDecoders, registerDecoder
+from global_vae.decoders.shared_base import AbstractSharedDecoder
 from global_vae.encoders.base import AbstractEncoder
 from global_vae.encoders.registry import getEncoderClass, listRegisteredEncoders, registerEncoder
+from global_vae.encoders.shared_base import AbstractSharedEncoder
 from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import getFusionClass, listRegisteredFusions, registerFusion
 from global_vae.heads.base import AbstractLatentHead
@@ -85,6 +87,8 @@ class _RegistrySpec:
         registry_module: Dotted path of the module holding the registry dictionary.
         registry_attr: Name of that dictionary in `registry_module`.
         base: Abstract base class every entry subclasses.
+        shared_base: A second abstract base class an entry may subclass instead of `base`, for the
+            registries that also hold shared modules (encoders and decoders, ADR 0027).
         register: The `registerX(name)` class decorator.
         get: The `getXClass(name)` lookup.
         list_names: The `listRegisteredX()` function.
@@ -98,6 +102,7 @@ class _RegistrySpec:
     register: Callable[[str], Callable[[Any], Any]]
     get: Callable[[str], type]
     list_names: Callable[[], list[str]]
+    shared_base: type | None = None
 
 
 _REGISTRIES: tuple[_RegistrySpec, ...] = (
@@ -110,6 +115,7 @@ _REGISTRIES: tuple[_RegistrySpec, ...] = (
         registerEncoder,
         getEncoderClass,
         listRegisteredEncoders,
+        AbstractSharedEncoder,
     ),
     _RegistrySpec(
         "decoders",
@@ -120,6 +126,7 @@ _REGISTRIES: tuple[_RegistrySpec, ...] = (
         registerDecoder,
         getDecoderClass,
         listRegisteredDecoders,
+        AbstractSharedDecoder,
     ),
     _RegistrySpec(
         "fusion",
@@ -382,6 +389,7 @@ class TestBuiltIns:
         assert spec.list_names() != []
 
     def test_every_built_in_resolves_to_a_subclass_of_the_base(self, spec: _RegistrySpec) -> None:
-        """Each registered built-in implements the registry's abstract interface."""
+        """Each registered entry implements one of the registry's abstract interfaces."""
+        accepted = (spec.base,) if spec.shared_base is None else (spec.base, spec.shared_base)
         for name in spec.list_names():
-            assert issubclass(spec.get(name), spec.base), name
+            assert issubclass(spec.get(name), accepted), name

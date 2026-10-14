@@ -71,7 +71,7 @@ def exportEvaluationFigures(
     inverse_transforms = inverse_transforms or {}
     written_paths: list[Path] = []
 
-    for modality_name in model.decoders:
+    for modality_name in model.output_modalities:
         originals, reconstructions = collectReconstructions(
             model, dataloader, modality_name, device=device
         )

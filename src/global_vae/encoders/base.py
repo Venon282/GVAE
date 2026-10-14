@@ -7,7 +7,10 @@ from torch import nn
 
 
 class AbstractEncoder(nn.Module, ABC):
-    """Base class for every modality-specific (or shared) encoder.
+    """Base class for every one-modality encoder.
+
+    An encoder shared by several modalities (the `E1` rows of spec §2.1)
+    subclasses `AbstractSharedEncoder` instead (ADR 0027).
 
     An encoder maps a modality's raw input to distribution parameters
     `(mu, logvar)` of a Gaussian. When used upstream of a Fusion module

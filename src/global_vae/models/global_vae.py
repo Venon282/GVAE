@@ -28,16 +28,27 @@ Each latent space also gets its own regularization strategy (spec
 `"kl_standard_normal"` when unspecified. See
 `docs/adr/0003-pluggable-latent-regularization.md`.
 
-`forward()`'s own `inputs` dict must be restricted to registered
-encoder names; a raw per-modality batch that also carries decoder-only
-reconstruction targets (a translation-style `image_in -> image_out`
-model, where the target is not itself an encoder input) is filtered
-down via `selectEncoderInputs` before it ever reaches `forward()`. See
+`forward()`'s own `inputs` dict must be restricted to input modalities
+(the batch keys some encoder ingests, `input_modalities`); a raw
+per-modality batch that also carries decoder-only reconstruction targets
+(a translation-style `image_in -> image_out` model, where the target is
+not itself an encoder input) is filtered down via `selectEncoderInputs`
+before it ever reaches `forward()`. See
 `docs/adr/0019-decouple-encoder-inputs-from-decoder-targets.md`.
+
+An encoder or a decoder may also be shared by several modalities (the
+`E1` and `D1` rows of spec §2.1). An `AbstractSharedEncoder` ingests a
+dict of the modalities it declares in `input_modalities`, with those
+missing from the batch omitted, and an `AbstractSharedDecoder` returns
+one tensor per modality in `output_modalities`, which `forward` flattens
+into `"reconstructions"` by modality name. Both are nodes of the routing
+graph like any other, named by their instance name, so the graph and
+its validation do not change. See
+`docs/adr/0027-shared-encoders-and-decoders.md`.
 """
 
 import inspect
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 import torch
@@ -46,7 +57,9 @@ from torch import nn
 from global_vae.assemblers.base import AbstractAssembler
 from global_vae.assemblers.registry import getAssemblerClass
 from global_vae.decoders.registry import getDecoderClass
+from global_vae.decoders.shared_base import AbstractSharedDecoder
 from global_vae.encoders.registry import getEncoderClass
+from global_vae.encoders.shared_base import AbstractSharedEncoder
 from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import getFusionClass
 from global_vae.fusion.residual import ResidualFusion
@@ -65,8 +78,16 @@ class GlobalVae(nn.Module):
         routing_graph: The `RoutingGraph` this model was built from.
         latent_spaces: Latent space name -> `LatentSpace`, taken from
             `routing_graph.latent_specs`.
-        encoders: Encoder name -> encoder module.
-        decoders: Decoder name -> decoder module.
+        encoders: Encoder instance name -> encoder module.
+        decoders: Decoder instance name -> decoder module.
+        input_modalities: The batch keys the encoders ingest, in encoder order. An
+            `AbstractEncoder` ingests the modality named like itself, an
+            `AbstractSharedEncoder` those of its own `input_modalities`. Equal to
+            `tuple(encoders)` when no encoder is shared.
+        output_modalities: The keys of `"reconstructions"`, in decoder order. An
+            `AbstractDecoder` reconstructs the modality named like itself, an
+            `AbstractSharedDecoder` those of its own `output_modalities`. Equal to
+            `tuple(decoders)` when no decoder is shared.
         heads: Encoder name -> latent space name -> latent head module,
             one entry per edge with a `HeadSpec` in
             `routing_graph.encoder_heads`. Empty for a graph without
@@ -104,7 +125,9 @@ class GlobalVae(nn.Module):
         Args:
             encoder_configs: Encoder name -> registry name (spec §9).
                 Encoder names must match the encoder names used in
-                `routing_graph.encoder_to_latents`.
+                `routing_graph.encoder_to_latents`. The registry name may be
+                that of a shared encoder (the `E1` rows of spec §2.1, ADR
+                0027), whose instance name is then not a modality name.
             decoder_configs: Decoder name -> registry name. Decoder
                 names must match the decoder names used in
                 `routing_graph.latent_to_decoders` /
@@ -160,10 +183,14 @@ class GlobalVae(nn.Module):
                 (`identity` needs the encoder's `latent_dim` to equal
                 its latent space's `dim`), if an assembler cannot be built
                 from its `assembler_kwargs` and the widths of its latent
-                spaces, or if a decoder's `decoder_kwargs` set a `latent_dim`
+                spaces, if a decoder's `decoder_kwargs` set a `latent_dim`
                 different from the width it receives (the latent space's
                 `dim` for one latent space, the assembler's `output_dim`
-                for several).
+                for several), or if the modules cannot name their modalities
+                unambiguously: a shared encoder or decoder declares no
+                modality, a repeated one or a name that is not a string, two
+                encoders ingest the same modality, or two decoders
+                reconstruct the same one (ADR 0027).
             KeyError: If `regularizer_strategies` (or its default,
                 `"kl_standard_normal"`) names a strategy absent from
                 the regularizer registry, if `routing_graph.
@@ -223,6 +250,15 @@ class GlobalVae(nn.Module):
                 for name, registry_name in decoder_configs.items()
             }
         )
+
+        self._encoder_modalities = self._declaredModalities("encoder", self.encoders)
+        self._decoder_modalities = self._declaredModalities("decoder", self.decoders)
+        self._modality_owner = self._ownersOf("ingested", "encoder", self._encoder_modalities)
+        self._reconstruction_owner = self._ownersOf(
+            "reconstructed", "decoder", self._decoder_modalities
+        )
+        self.input_modalities: tuple[str, ...] = tuple(self._modality_owner)
+        self.output_modalities: tuple[str, ...] = tuple(self._reconstruction_owner)
 
         self.heads = nn.ModuleDict(self._buildHeads(routing_graph))
 
@@ -346,6 +382,82 @@ class GlobalVae(nn.Module):
             for latent_name in latent_names:
                 result[latent_name].append(encoder_name)
         return result
+
+    @staticmethod
+    def _declaredModalities(kind: str, modules: nn.ModuleDict) -> dict[str, tuple[str, ...]]:
+        """Name the modalities each encoder or decoder instance ingests or reconstructs.
+
+        A one-modality module (`AbstractEncoder`, `AbstractDecoder`) stands for the modality
+        named like its instance. A shared module (`AbstractSharedEncoder`,
+        `AbstractSharedDecoder`) declares its own, in `input_modalities` or
+        `output_modalities`.
+
+        Args:
+            kind: `"encoder"` or `"decoder"`, for the error messages.
+            modules: Instance name -> module, `self.encoders` or `self.decoders`.
+
+        Returns:
+            Instance name -> its modality names, in the order of `modules`.
+
+        Raises:
+            ValueError: If a shared module declares no modality, a name that is not a non-empty
+                string, a bare string instead of a tuple of names, or a name twice.
+        """
+        attribute = "input_modalities" if kind == "encoder" else "output_modalities"
+        shared_class = AbstractSharedEncoder if kind == "encoder" else AbstractSharedDecoder
+        result: dict[str, tuple[str, ...]] = {}
+        for name, module in modules.items():
+            if not isinstance(module, shared_class):
+                result[name] = (name,)
+                continue
+            declared: Sequence[str] = getattr(module, attribute)
+            problem: str | None = None
+            if isinstance(declared, str):
+                problem = f"a bare string {declared!r}, not a tuple of names"
+            elif len(declared) == 0:
+                problem = "none"
+            elif not all(isinstance(item, str) and item for item in declared):
+                problem = f"{list(declared)!r}, and every name must be a non-empty string"
+            elif len(set(declared)) != len(declared):
+                problem = f"{list(declared)!r}, and a name is repeated"
+            if problem is not None:
+                raise ValueError(
+                    f"Shared {kind} '{name}' must declare the modalities it handles in "
+                    f"`{attribute}`, at least one and each once, but declares {problem}."
+                )
+            result[name] = tuple(declared)
+        return result
+
+    @staticmethod
+    def _ownersOf(
+        verb: str, kind: str, modalities: Mapping[str, tuple[str, ...]]
+    ) -> dict[str, str]:
+        """Invert instance name -> modalities into modality -> owning instance.
+
+        Args:
+            verb: `"ingested"` or `"reconstructed"`, for the error message.
+            kind: `"encoder"` or `"decoder"`, for the error message.
+            modalities: Instance name -> its modality names, as `_declaredModalities` returns it.
+
+        Returns:
+            Modality name -> the instance that owns it, in the order of `modalities`.
+
+        Raises:
+            ValueError: If two instances claim the same modality: a batch key must name exactly
+                one owner, or `forward` could not tell which encoder receives it.
+        """
+        owners: dict[str, str] = {}
+        for instance, names in modalities.items():
+            for modality in names:
+                if modality in owners:
+                    raise ValueError(
+                        f"Modality '{modality}' is {verb} by both {kind} '{owners[modality]}' and "
+                        f"{kind} '{instance}'. A modality is a batch key and must belong to "
+                        f"exactly one {kind}: rename one of them, or give the shared {kind} "
+                        f"different modality names."
+                    )
+                owners[modality] = instance
+        return owners
 
     def _buildAssemblers(
         self,
@@ -546,14 +658,15 @@ class GlobalVae(nn.Module):
         the same modality (e.g. a translation-style `image_in ->
         image_out` model, ADR 0019): the batch then also carries
         decoder-only target keys `forward()` has no encoder for, and
-        passing it straight through raises `KeyError` from
-        `self.encoders[encoder_name]`. This is the one place that
-        restriction happens, so every framework entry point that walks
-        a raw per-modality batch (`Trainer.computeLosses`,
+        passing it straight through raises `KeyError`. This is the one
+        place that restriction happens, so every framework entry point
+        that walks a raw per-modality batch (`Trainer.computeLosses`,
         `evaluation.evaluate.evaluate`, and the `visualization`
         collectors) can call `model.selectEncoderInputs(batch)` before
         `forward()` and stay correct regardless of whether inputs and
-        targets share a name.
+        targets share a name. A key is kept when it is one of
+        `input_modalities`: the name of a one-modality encoder, or a
+        modality a shared encoder ingests (ADR 0027).
 
         Args:
             batch: Modality name -> tensor: encoder inputs and any
@@ -564,19 +677,21 @@ class GlobalVae(nn.Module):
                 argument.
 
         Returns:
-            The subset of `batch` whose key names one of `self.encoders`.
+            The subset of `batch` whose key is one of `self.input_modalities`.
 
         Raises:
-            ValueError: If no key of `batch` names one of this model's
-                encoders, i.e. there would be nothing left to encode.
+            ValueError: If no key of `batch` is an input modality of this
+                model, i.e. there would be nothing left to encode.
         """
-        encoder_inputs = {name: tensor for name, tensor in batch.items() if name in self.encoders}
+        encoder_inputs = {
+            name: tensor for name, tensor in batch.items() if name in self._modality_owner
+        }
         if not encoder_inputs:
             raise ValueError(
-                f"None of this batch's keys ({sorted(batch)}) match any of this model's "
-                f"encoders ({sorted(self.encoders)}). At least one encoder input is required; "
-                f"a decoder-only target with no matching encoder (ADR 0019) is fine as long as "
-                f"at least one other key names a real encoder."
+                f"None of this batch's keys ({sorted(batch)}) match any of the input modalities "
+                f"of this model's encoders ({sorted(self.input_modalities)}). At least one "
+                f"encoder input is required; a decoder-only target with no matching encoder "
+                f"(ADR 0019) is fine as long as at least one other key is an input modality."
             )
         return encoder_inputs
 
@@ -589,8 +704,9 @@ class GlobalVae(nn.Module):
             inputs: Modality name -> raw input tensor. Any non-empty
                 subset of the configured modalities is accepted; actual
                 missing-modality robustness depends on the fusion
-                strategy in use for each latent space (spec §5). Every
-                key must name a registered encoder (see
+                strategy in use for each latent space, and for a shared
+                encoder on the module itself (spec §5, ADR 0027). Every
+                key must be one of `input_modalities` (see
                 `selectEncoderInputs` for restricting a raw batch that
                 may also carry decoder-only target keys, ADR 0019).
             use_mean: If `False` (default, unchanged from every prior
@@ -608,35 +724,51 @@ class GlobalVae(nn.Module):
                 which sampling deliberately keeps during training.
 
         Returns:
-            A dict with keys `"reconstructions"` (decoder name ->
-            reconstruction tensor), `"latent_params"` (latent space
-            name -> `(mu, logvar)`), and `"latent_samples"` (latent
-            space name -> sampled, or `mu` if `use_mean=True`, `z`). A
-            latent space or decoder with no available input this pass
-            is simply absent from the corresponding dict, not raised
-            as an error.
+            A dict with keys `"reconstructions"` (modality name ->
+            reconstruction tensor: the decoder name for a one-modality
+            decoder, each of its `output_modalities` for a shared one),
+            `"latent_params"` (latent space name -> `(mu, logvar)`), and
+            `"latent_samples"` (latent space name -> sampled, or `mu` if
+            `use_mean=True`, `z`). A latent space or decoder with no
+            available input this pass is simply absent from the
+            corresponding dict, not raised as an error.
 
         Raises:
-            ValueError: If `inputs` is empty.
-            KeyError: If some key of `inputs` names no registered
-                encoder (see `selectEncoderInputs`).
+            ValueError: If `inputs` is empty, or a shared decoder returns
+                other modalities than the ones it declares.
+            KeyError: If some key of `inputs` is not an input modality of
+                any encoder (see `selectEncoderInputs`).
         """
         if not inputs:
             raise ValueError("GlobalVae.forward() requires at least one modality in `inputs`.")
 
-        unknown_keys = sorted(set(inputs) - set(self.encoders))
+        unknown_keys = sorted(set(inputs) - set(self._modality_owner))
         if unknown_keys:
             raise KeyError(
                 f"GlobalVae.forward() received input key(s) {unknown_keys} with no matching "
-                f"encoder (available: {sorted(self.encoders)}). If these are decoder-only "
-                f"reconstruction targets rather than genuine encoder inputs (e.g. a "
+                f"encoder (input modalities: {sorted(self.input_modalities)}). If these are "
+                f"decoder-only reconstruction targets rather than genuine encoder inputs (e.g. a "
                 f"translation-style 'image_in -> image_out' model, ADR 0019), restrict "
                 f"`inputs` first: model.selectEncoderInputs(batch)."
             )
 
-        encoder_outputs = {
-            encoder_name: self.encoders[encoder_name](x) for encoder_name, x in inputs.items()
-        }
+        # Group the modalities by the encoder that owns them, in the order of `inputs`, so an
+        # encoder with no modality present does not run and a one-modality encoder sees its tensor.
+        inputs_by_encoder: dict[str, dict[str, torch.Tensor]] = {}
+        for modality, x in inputs.items():
+            inputs_by_encoder.setdefault(self._modality_owner[modality], {})[modality] = x
+        encoder_outputs: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        for encoder_name, modality_inputs in inputs_by_encoder.items():
+            encoder = self.encoders[encoder_name]
+            if isinstance(encoder, AbstractSharedEncoder):
+                ordered = {
+                    modality: modality_inputs[modality]
+                    for modality in self._encoder_modalities[encoder_name]
+                    if modality in modality_inputs
+                }
+                encoder_outputs[encoder_name] = encoder(ordered)
+            else:
+                encoder_outputs[encoder_name] = encoder(modality_inputs[encoder_name])
 
         latent_params: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
         latent_samples: dict[str, torch.Tensor] = {}
@@ -681,7 +813,20 @@ class GlobalVae(nn.Module):
                     else [required.index(name) for name in consumed]
                 )
                 z_in = assembler([latent_samples[name] for name in consumed], present)
-            reconstructions[decoder_name] = decoder(z_in)
+            if isinstance(decoder, AbstractSharedDecoder):
+                produced = decoder(z_in)
+                declared = self._decoder_modalities[decoder_name]
+                if set(produced) != set(declared):
+                    raise ValueError(
+                        f"Shared decoder '{decoder_name}' returned the modalities "
+                        f"{sorted(produced)}, but declares {sorted(declared)} in "
+                        f"`output_modalities`. It must return exactly one tensor per declared "
+                        f"modality."
+                    )
+                for modality in declared:
+                    reconstructions[modality] = produced[modality]
+            else:
+                reconstructions[decoder_name] = decoder(z_in)
 
         return {
             "reconstructions": reconstructions,

@@ -135,6 +135,42 @@ versioning follows [Semantic Versioning](https://semver.org/).
   receives a gradient, the loss falls, a modality left out still decodes, the model written in YAML
   with its `kwargs`, a checkpoint round trip). `test_configuration_matrix.py` runs the `LN` rows once
   per registered assembler, five in all, and fails if one is missing.
+- Shared encoders and shared decoders, the `E1` and `D1` rows (roadmap P1-5, spec §2.1, ADR 0027).
+  `AbstractSharedEncoder` (`encoders/shared_base.py`) declares the modalities it ingests
+  (`input_modalities`) and its `latent_dim`, and its `forward` takes a `dict[str, Tensor]` with the
+  missing modalities omitted and returns `(mu, logvar)`. `AbstractSharedDecoder`
+  (`decoders/shared_base.py`) declares `output_modalities`, and its `forward` returns a
+  `dict[str, Tensor]`. Both are siblings of `AbstractEncoder` and `AbstractDecoder`, not subclasses
+  (their `forward` types differ), and register in the same registries (`registerEncoder` and
+  `registerDecoder`, whose `getEncoderClass` and `getDecoderClass` now return the union of the two
+  kinds). The tokenisation lives in the concrete module. `GlobalVae` tells the kinds apart with
+  `isinstance`: it groups the batch by owner encoder, calls a shared encoder with a dict in its
+  declared order, and flattens a shared decoder's dict into `"reconstructions"` by modality, so the
+  losses, `evaluate` and modality dropout are unchanged. The routing graph is unchanged too: a
+  shared module is one node named by its instance, so `E1-LN-*` is one encoder with several edges
+  and heads. The four rows build from `encoders` and `decoders` in YAML, in either `latent_mode`,
+  and one-modality and shared modules can be mixed. This is option A of roadmap decision D-2, taken
+  without an explicit answer, so it needs the owner's approval.
+- `GlobalVae.input_modalities` and `GlobalVae.output_modalities`: the batch keys the model ingests
+  and reconstructs. For a model with no shared module they equal `tuple(encoders)` and
+  `tuple(decoders)`. A shared module with an empty, repeated or non-string declaration is refused at
+  construction, as is a modality ingested by two encoders or reconstructed by two decoders, and a
+  shared decoder that returns other keys than it declares fails the forward pass with both sets in
+  the message.
+- `docs/adr/0027-shared-encoders-and-decoders.md`, which supersedes the rule of ADR 0019 that a
+  batch key names an encoder (ADR 0019 is left as written).
+- `tests/integration/_shared_modules.py`: dummy shared modules (`dummy_shared_encoder_v1` averages
+  one linear token per modality present, `dummy_shared_decoder_v1` has one linear layer per
+  modality) and two that break the contract on purpose. `test_configuration_matrix.py` runs its
+  stage 3: `E1-L1-DN`, `E1-L1-D1`, `E1-LN-DN` and `E1-LN-D1` (the `LN` rows once per assembler) check
+  the topology, one encoder call, shapes, a finite loss, a gradient on every parameter and a falling
+  loss, and the test fails if one of the eight rows is dropped.
+  `tests/integration/test_shared_encoder_decoder.py` covers YAML, mixed one-modality and shared
+  encoders under PoE, the construction guards, modality dropout with a shared encoder, the
+  cross-modal reports and figures, `evaluate` and a checkpoint round trip;
+  `tests/unit/test_shared_modules.py` covers the interfaces and registries.
+- `docs/how-to/add-a-modality.md` and `configure-latent-spaces.md` explain how to write and
+  configure a shared encoder or decoder.
 
 ### Changed
 
@@ -213,6 +249,23 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `ruff format` applies to three files that failed it: `scripts/visualize_latent.py` (a line over
   100 characters), `src/global_vae/config/model_schema.py` and
   `src/global_vae/training/callbacks/checkpoint.py` (no newline at the end of the file).
+- Batch keys are modalities (ADR 0027). `GlobalVae.selectEncoderInputs` keeps the keys that are an
+  input modality, which are the encoder names for any model without a shared encoder, so nothing
+  changes for those. `GlobalVae.forward` reports an unknown key against `input_modalities`.
+- `resolveDefaultInputSubsets` and `collectCrossModalReconstructions` (cross-modal reports),
+  `exportCrossModalFigures`, `exportEvaluationFigures` and `scripts/visualize_latent.py` walk
+  `input_modalities` and `output_modalities` instead of the encoder and decoder names. A shared
+  encoder is one encoder over several modalities, so the reports pair its modalities, and a model
+  with fewer than two input modalities still gets no cross-modal figure. The result is identical for
+  every model that has no shared module.
+- `registerEncoder`, `registerDecoder`, `getEncoderClass` and `getDecoderClass` are typed for the
+  union of the one-modality and shared classes, with a bound type variable on the decorators so a
+  decorated class keeps its own type. The base-class docstrings of `AbstractEncoder` and
+  `AbstractDecoder` say they are the one-modality interfaces.
+- Spec §2.1 (who builds the stream), §3 (shared encoder and decoder), §8 tree (`shared_base.py` in
+  `encoders/` and `decoders/`), §9 (the shared decoder of the independent-latents example), §10
+  (interfaces) and §12, the README and the roadmap (P1-5 done, P1-6 stage 3 delivered) describe the
+  `E1` and `D1` rows as built. The spec edits are for the owner to confirm.
 
 ### Removed
 

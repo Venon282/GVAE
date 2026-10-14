@@ -110,7 +110,7 @@ def _collectLatentParamsAndLabels(
             called once per latent space plotted, so a single-use iterator would
             silently only produce output for the first one.
         latent_name: Which latent space to collect (a key of `model.latent_spaces`).
-        label_key: Optional batch key, not one of `model.encoders`' modality names,
+        label_key: Optional batch key, not one of `model.input_modalities`,
             used purely to color the scatter plot (e.g. a class label your own
             dataloader includes alongside its modality tensors). `None` collects no
             labels.
@@ -139,7 +139,7 @@ def _collectLatentParamsAndLabels(
             model_inputs = {
                 name: tensor.to(device)
                 for name, tensor in raw_batch.items()
-                if name in model.encoders
+                if name in model.input_modalities
             }
             outputs = model(model_inputs)
             if latent_name not in outputs["latent_params"]:

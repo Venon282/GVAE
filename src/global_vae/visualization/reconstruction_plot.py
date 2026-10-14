@@ -259,14 +259,15 @@ def collectReconstructions(
             itself; the caller decides the mode.
         dataloader: Yields `dict[str, torch.Tensor]` batches (modality
             name -> raw tensor). Every key is available as a
-            reconstruction target, matched by decoder name; only the
-            keys naming one of `model`'s encoders are ever fed forward
-            (`GlobalVae.selectEncoderInputs`, ADR 0019), so a
+            reconstruction target, matched by modality name; only the
+            keys that are one of `model.input_modalities` are ever fed
+            forward (`GlobalVae.selectEncoderInputs`, ADR 0019), so a
             decoder-only target with no matching encoder (a
             translation-style `image_in -> image_out` model) is
             handled the same as any other batch.
-        modality_name: Which modality/decoder to collect (a key of
-            both the batch dicts and `model.decoders`).
+        modality_name: Which modality to collect (a key of both the
+            batch dicts and `model.output_modalities`, so the name of a
+            one-modality decoder or a modality of a shared decoder).
         device: Batches are moved here before the forward pass.
             Defaults to `model`'s own device.
         max_samples: Stop after collecting at least this many pairs.
@@ -313,11 +314,14 @@ def collectReconstructions(
 def resolveDefaultInputSubsets(model: GlobalVae) -> list[frozenset[str]]:
     """Default input-modality subsets for `collectCrossModalReconstructions`.
 
-    One singleton subset per encoder (spec §5: the model can be queried with
-    any non-empty subset of its configured modalities), plus the full set of
-    every encoder together, since that "everything present" case is the
-    normal operating condition every partial subset is naturally compared
-    against.
+    One singleton subset per input modality (spec §5: the model can be queried
+    with any non-empty subset of its configured modalities), plus the full set
+    of every input modality together, since that "everything present" case is
+    the normal operating condition every partial subset is naturally compared
+    against. The modalities are `model.input_modalities`: the encoder names
+    for one-modality encoders, and the modalities a shared encoder ingests
+    (ADR 0027), so a shared encoder is queried with each of its modalities
+    alone as well as with all of them.
 
     Beyond singles and "everything", the space of partial subsets grows
     combinatorially (`2**N - 1` non-empty subsets for `N` modalities)
@@ -326,18 +330,19 @@ def resolveDefaultInputSubsets(model: GlobalVae) -> list[frozenset[str]]:
     posterior only depends on *which* encoders are active, not on any
     further structure. A caller wanting a specific further combination
     passes an explicit `input_subsets` to `collectCrossModalReconstructions`
-    instead, e.g. `itertools.combinations(model.encoders, 2)` for every pair.
+    instead, e.g. `itertools.combinations(model.input_modalities, 2)` for every
+    pair.
 
     Args:
         model: A `GlobalVae` instance.
 
     Returns:
-        One `frozenset[str]` per encoder name, plus (only if there is more
-        than one encoder, since it would otherwise exactly duplicate the
-        one singleton) a further `frozenset` containing every encoder name.
-        Empty if `model` has no encoders at all.
+        One `frozenset[str]` per input modality, plus (only if there is more
+        than one, since it would otherwise exactly duplicate the one
+        singleton) a further `frozenset` containing every input modality.
+        Empty if `model` has no input modality at all.
     """
-    names = list(model.encoders)
+    names = list(model.input_modalities)
     subsets = [frozenset({name}) for name in names]
     if len(names) > 1:
         subsets.append(frozenset(names))
@@ -380,7 +385,7 @@ def collectCrossModalReconstructions(
             (which needs a `list`: it walks its dataloader once per
             modality/latent space).
         input_subsets: Which modality subsets to feed as `inputs`, each an
-            iterable of modality names (a key of `model.encoders`). `None`
+            iterable of modality names (one of `model.input_modalities`). `None`
             (default) resolves via `resolveDefaultInputSubsets`.
         device: Batches are moved here before the forward pass. Defaults to
             `model`'s own device.
@@ -409,7 +414,7 @@ def collectCrossModalReconstructions(
         ValueError: If `dataloader` yields no batches, if `input_subsets`
             (or its default) resolves to no subsets at all, or if any given
             subset is empty or references a name absent from
-            `model.encoders`.
+            `model.input_modalities`.
     """
     resolved_subsets = (
         [frozenset(subset) for subset in input_subsets]
@@ -420,9 +425,9 @@ def collectCrossModalReconstructions(
         raise ValueError(
             "collectCrossModalReconstructions requires at least one input subset, but "
             "none were given: input_subsets was empty, or resolveDefaultInputSubsets(model) "
-            "produced none (model has no encoders)."
+            "produced none (model has no input modality)."
         )
-    known_names = set(model.encoders)
+    known_names = set(model.input_modalities)
     for subset in resolved_subsets:
         if not subset:
             raise ValueError("collectCrossModalReconstructions received an empty subset.")

@@ -29,7 +29,7 @@ ever one possible input subset), so every existing `evaluate()`/
 `exportEvaluationFigures()` call site keeps its current behavior unchanged, and a
 single-modality caller never has to reason about a no-op branch inside its own
 evaluation pass. `exportCrossModalFigures` reflects this directly: it returns an
-empty list for a model with fewer than two encoders, rather than raising, matching
+empty list for a model with fewer than two input modalities, rather than raising, matching
 this framework's "absent, not an error" convention for a configuration that simply
 does not apply (see e.g. `GlobalVae.forward`'s own handling of a latent space with
 no active encoder this pass).
@@ -112,13 +112,14 @@ def exportCrossModalFigures(
     """Save a cross-modal reconstruction matrix figure if `model` has more than one modality.
 
     No-op (returns an empty list, writes nothing) for a model with fewer than two
-    encoders: there is only ever one possible input subset in that case, so there
-    is nothing cross-modal to report. This lets a caller call this function
-    unconditionally from a reporting pipeline (e.g. `scripts/evaluate.py`) without
-    special-casing single-modality models itself; a genuinely misused explicit
-    `input_subsets` (e.g. an empty one, or one naming an unknown modality) still
-    raises `ValueError` from `collectCrossModalReconstructions`, not silently
-    swallowed here.
+    input modalities (`model.input_modalities`, which counts the modalities of a
+    shared encoder one by one, ADR 0027): there is only ever one possible input
+    subset in that case, so there is nothing cross-modal to report. This lets a
+    caller call this function unconditionally from a reporting pipeline (e.g.
+    `scripts/evaluate.py`) without special-casing single-modality models
+    itself; a genuinely misused explicit `input_subsets` (e.g. an empty one, or
+    one naming an unknown modality) still raises `ValueError` from
+    `collectCrossModalReconstructions`, not silently swallowed here.
 
     Args:
         model: The model to report on.
@@ -140,9 +141,9 @@ def exportCrossModalFigures(
 
     Returns:
         `[output_dir / "cross_modal_reconstructions.png"]` if the figure was
-        written, or `[]` if `model` has fewer than two encoders.
+        written, or `[]` if `model` has fewer than two input modalities.
     """
-    if len(model.encoders) < 2:
+    if len(model.input_modalities) < 2:
         return []
 
     resolved_output_dir = Path(output_dir)

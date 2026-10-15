@@ -303,7 +303,7 @@ ADRs and changelogs finds nothing, and `mkdocs build --strict` lists no orphan c
 ---
 
 ## 5. Phase 1: complete the configuration space (targets 1.4.0 to 1.6.0)
-**Status:** todo
+**Status:** done
 
 Goal: all 8 configurations of spec §2.1 build from config and are covered by one test. Suggested
 releases: 1.4.0 for P1-1 and P1-2, 1.5.0 for P1-3 and P1-4, 1.6.0 for P1-5 and P1-6.
@@ -322,6 +322,7 @@ in `heads/__init__.py`, one class per file. Add the new registry to the contract
 **Depends on.** P0-4(c).
 
 ### P1-2. Encoder fan-out in `GlobalVae` (L)
+**Status:** done
 
 **Spec.** §2.2 and §12 ("encoder fan-out goes through a Latent Head, never by giving
 `AbstractEncoder` multiple output heads").
@@ -341,6 +342,7 @@ absent encoder's edges, and evaluation and cross-modal reports run unchanged.
 **Depends on.** P1-1, P0-4. Exposing it in YAML needs D-1 (P1-3); the Python API can land first.
 
 ### P1-3. Config schema for several latent spaces (L)
+**Status:** done
 
 **Spec.** §9 and §11 (first bullet).
 **Do.** After D-1, add dataclasses for latent spaces, per-edge heads and per-decoder consumption
@@ -398,6 +400,7 @@ encoder names as the modality names, and now use `GlobalVae.input_modalities` an
 shared backbone ships; P3-5 writes the first one.
 
 ### P1-6. Configuration matrix test (M, three stages)
+**Status:** done
 
 **Spec.** §10: an integration test that instantiates each of the 8 combinations end to end on dummy
 tensors, with shape and gradient checks.
@@ -407,6 +410,15 @@ loss, a gradient on every parameter, and that a few optimizer steps lower the lo
 four `EN-*` rows without fan-out) is delivered by P0-4(d). Stage 2 adds the shared plus private
 variants after P1-2. Stage 3 adds the four `E1-*` rows after P1-5 (delivered with P1-5).
 **Done when.** 8 of 8 rows pass, and the test fails if a row is dropped from the list.
+**Delivered.** All three stages are in `test_configuration_matrix.py`. `MATRIX` lists the eight row
+codes, and the two stage 2 variants, each with its builder. `TestEveryRow` is the one parametrized
+test over it, run once per registered assembler on an `LN` row: reconstruction shapes, the shape of
+every latent space, a finite loss, a gradient on every parameter, and a falling loss over a few
+optimizer steps, which stage 1 did not check before. `test_the_eight_rows_are_all_in_the_matrix`
+fails when a row, a variant or an assembler is dropped. Stage 2 is `EN-LN-DN` (the
+`buildSharedPrivateRoutingGraph` preset) and `EN-LN-D1` (an explicit graph, one decoder over the
+shared space and both private ones), each with `z_shared` fused by PoE and a private latent space
+behind a `linear` head; `test_encoder_fan_out.py` keeps the behaviour tests of that topology.
 
 ---
 

@@ -171,6 +171,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `tests/unit/test_shared_modules.py` covers the interfaces and registries.
 - `docs/how-to/add-a-modality.md` and `configure-latent-spaces.md` explain how to write and
   configure a shared encoder or decoder.
+- Configuration matrix test, stage 2 and the unified test (roadmap P1-6, spec §10).
+  `tests/integration/test_configuration_matrix.py` adds the two shared plus private variants of
+  the `EN-LN-*` rows, built with the real 1D and 2D modules and run once per registered assembler:
+  `EN-LN-DN+shared-private` (from `buildSharedPrivateRoutingGraph`) and `EN-LN-D1+shared-private`
+  (an explicit graph, one decoder over `z_shared` and both private spaces). In both, `z_shared` is
+  fused by PoE through an identity edge from each encoder and each private space sits behind a
+  `linear` head. `TestStage2Rows` checks the topology, the edges and heads, that a private
+  posterior differs from the shared one, and that each assembler receives its latent spaces in
+  graph order and combines them as specified.
+- `MATRIX`, the explicit table of the eight row codes (and the two variants) with a builder and the
+  expected reconstructions of each, and `TestEveryRow`, the one parametrized test over it. For
+  every row, and every assembler of an `LN` row, it checks the reconstruction shapes, the shape of
+  each latent space, a finite loss, a finite gradient on every parameter, and that 25 Adam steps on
+  a fixed batch lower the loss. `test_the_eight_rows_are_all_in_the_matrix` fails when a row, a
+  variant or an assembler is dropped, which was checked by removing each in turn.
 
 ### Changed
 
@@ -266,6 +281,12 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `encoders/` and `decoders/`), §9 (the shared decoder of the independent-latents example), §10
   (interfaces) and §12, the README and the roadmap (P1-5 done, P1-6 stage 3 delivered) describe the
   `E1` and `D1` rows as built. The spec edits are for the owner to confirm.
+- The per-stage classes of `test_configuration_matrix.py` keep the topology checks only
+  (no fan-out in stage 1, the edges and heads of stage 2, the single encoder call of stage 3, the
+  order of the latent spaces an assembler receives). The shape, loss and gradient tests they each
+  held moved to `TestEveryRow`, so stage 1, which never checked that the loss falls, now does.
+- The roadmap marks P1-6 and Phase 1 as done, and P1-2 and P1-3, which were implemented without a
+  status line, as done.
 
 ### Removed
 

@@ -17,6 +17,7 @@ import matplotlib
 matplotlib.use("Agg")
 import pytest
 
+from global_vae.training.callbacks.reduce_lr_on_plateau import ReduceLrOnPlateau
 from global_vae.training.checkpoint import saveCheckpoint
 from global_vae.training.trainer import Trainer
 from tests.integration._script_fixtures import (
@@ -57,6 +58,29 @@ def checkpoint_with_history(tmp_path: Path) -> Path:
     trainer.fit(buildDataloaderForScript(), num_epochs=2)
     path = tmp_path / "model_with_history.pt"
     trainer.saveCheckpoint(path)
+    return path
+
+
+LR_HISTORY: list[dict[str, float]] = [
+    {
+        "train/loss/total": 3.0 - epoch * 0.5,
+        "train/loss/reconstruction": 2.5 - epoch * 0.4,
+        "train/loss/regularization": 0.5 - epoch * 0.1,
+        "train/lr": lr,
+    }
+    for epoch, lr in enumerate([1e-3, 1e-3, 1e-4, 1e-5])
+]
+
+
+@pytest.fixture
+def checkpoint_with_lr_history(tmp_path: Path) -> Path:
+    """A checkpoint whose history records the learning rate, as a run with `ReduceLrOnPlateau`.
+
+    The history is written by hand so the plotted values are known; that `Trainer` itself writes
+    `"train/lr"` into it is covered by `test_learning_rate_logging.py`.
+    """
+    path = tmp_path / "model_with_lr_history.pt"
+    saveCheckpoint(path, model=buildModelForScript(), history=LR_HISTORY)
     return path
 
 
@@ -341,6 +365,120 @@ class TestMain:
     def test_missing_required_argument_raises_system_exit(self, script: ModuleType) -> None:
         with pytest.raises(SystemExit):
             script.main(["--checkpoint", "somewhere.pt"])
+
+
+class TestLearningRatePlot:
+    """The learning-rate plot, written when a callback acted on the rate during training."""
+
+    @staticmethod
+    def _run(script: ModuleType, checkpoint: Path, output_dir: Path, *extra: str) -> None:
+        script.main(
+            [
+                "--checkpoint",
+                str(checkpoint),
+                "--model-factory",
+                _MODEL_FACTORY,
+                "--dataloader-factory",
+                _DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(output_dir),
+                *extra,
+            ]
+        )
+
+    def test_it_is_saved_next_to_the_loss_curves(
+        self, script: ModuleType, checkpoint_with_lr_history: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "viz"
+        self._run(script, checkpoint_with_lr_history, output_dir)
+        assert (output_dir / "loss_curves.png").exists()
+        assert (output_dir / "lr_curve.png").exists()
+
+    def test_it_draws_the_rate_of_every_epoch(
+        self,
+        script: ModuleType,
+        checkpoint_with_lr_history: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        captured: dict[str, object] = {}
+        original = script.plotLearningRate
+
+        def _spy(*args: object, **kwargs: object) -> object:
+            fig = original(*args, **kwargs)
+            captured["labels"] = [line.get_label() for line in fig.axes[0].lines]
+            captured["ydata"] = list(fig.axes[0].lines[0].get_ydata())
+            captured["scale"] = fig.axes[0].get_yscale()
+            return fig
+
+        monkeypatch.setattr(script, "plotLearningRate", _spy)
+        self._run(script, checkpoint_with_lr_history, tmp_path / "viz")
+        assert captured["labels"] == ["train/lr"]
+        assert captured["ydata"] == [1e-3, 1e-3, 1e-4, 1e-5]
+        assert captured["scale"] == "log"
+
+    def test_the_loss_plot_leaves_the_rate_out(
+        self,
+        script: ModuleType,
+        checkpoint_with_lr_history: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A learning rate of `1e-3` next to a loss of `2.5` would flatten the loss curves."""
+        captured: dict[str, list[str]] = {}
+        original = script.plotLossCurves
+
+        def _spy(*args: object, **kwargs: object) -> object:
+            fig = original(*args, **kwargs)
+            captured["labels"] = [line.get_label() for axis in fig.axes for line in axis.lines]
+            return fig
+
+        monkeypatch.setattr(script, "plotLossCurves", _spy)
+        self._run(script, checkpoint_with_lr_history, tmp_path / "viz")
+        assert captured["labels"]
+        assert not any("lr" in label.split("/") for label in captured["labels"])
+
+    def test_it_is_not_saved_when_no_callback_acted_on_the_rate(
+        self, script: ModuleType, checkpoint_with_history: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "viz"
+        self._run(script, checkpoint_with_history, output_dir)
+        assert (output_dir / "loss_curves.png").exists()
+        assert not (output_dir / "lr_curve.png").exists()
+
+    def test_it_is_not_saved_when_the_checkpoint_has_no_history(
+        self, script: ModuleType, checkpoint_without_history: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "viz"
+        self._run(script, checkpoint_without_history, output_dir)
+        assert not (output_dir / "lr_curve.png").exists()
+
+    def test_skip_history_skips_it_too(
+        self, script: ModuleType, checkpoint_with_lr_history: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "viz"
+        self._run(script, checkpoint_with_lr_history, output_dir, "--skip-history")
+        assert not (output_dir / "loss_curves.png").exists()
+        assert not (output_dir / "lr_curve.png").exists()
+
+    def test_a_trainer_run_with_reduce_lr_on_plateau_gives_both_plots(
+        self, script: ModuleType, tmp_path: Path
+    ) -> None:
+        """From a real `Trainer.fit` with the callback to the figure, nothing written by hand."""
+        trainer = Trainer(
+            buildModelForScript(),
+            device="cpu",
+            callbacks=[ReduceLrOnPlateau(monitor="train/loss/total", patience=0)],
+        )
+        trainer.fit(buildDataloaderForScript(), num_epochs=3)
+        checkpoint = tmp_path / "model.pt"
+        trainer.saveCheckpoint(checkpoint)
+        output_dir = tmp_path / "viz"
+        self._run(script, checkpoint, output_dir)
+        assert (output_dir / "loss_curves.png").exists()
+        assert (output_dir / "lr_curve.png").exists()
 
 
 class TestLossCurveAxes:

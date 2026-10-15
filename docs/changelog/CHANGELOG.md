@@ -186,6 +186,33 @@ versioning follows [Semantic Versioning](https://semver.org/).
   each latent space, a finite loss, a finite gradient on every parameter, and that 25 Adam steps on
   a fixed batch lower the loss. `test_the_eight_rows_are_all_in_the_matrix` fails when a row, a
   variant or an assembler is dropped, which was checked by removing each in turn.
+- The learning rate in the metrics, the logs and a plot (ADR 0028). `TrainerCallback` gains the
+  class attribute `acts_on_learning_rate` (`False` by default), which `ReduceLrOnPlateau` sets to
+  `True`, and a callback of your own sets when it changes the optimizer's rate.
+  `Trainer.logs_learning_rate` is `True` when any callback of a run sets it, and `fitEpoch` then
+  adds the rate each step trained with to the step metrics (`lr`, or `lr/group<i>` with several
+  parameter groups). The epoch metrics carry its mean as `train/lr` (`train/lr/group<i>`), so it
+  shows in the epoch log line, `Trainer.history`, `CsvLogger`, TensorBoard and the checkpoint
+  history. The rate is read before the optimizer step, so a reduction made when epoch `n` ends
+  shows from epoch `n + 1`. A run with no such callback records nothing new.
+- `training/learning_rate.py`: `LEARNING_RATE_KEY`, `learningRateMetrics(optimizer)` and
+  `isLearningRateKey(key)`, which hold the key spelling for the trainer, the log formatting and
+  the plots.
+- `plotLearningRate(history, keys=None, log_scale=True, ...)` in `visualization/loss_curves.py`,
+  one figure with a log y-axis by default. It raises `ValueError` for a history with no rate key,
+  naming `acts_on_learning_rate`. `scripts/visualize_latent.py` writes it to `lr_curve.png` next
+  to `loss_curves.png` when the checkpoint history holds a rate, and `--skip-history` skips both.
+- `docs/adr/0028-learning-rate-in-the-metrics.md` (requested by the owner, not a roadmap item),
+  a "Watch the learning rate" section in `docs/how-to/train.md`, the flag in the callbacks note
+  of `docs/how-to/add-a-strategy.md`, and a line for `training/learning_rate.py` in the spec §8
+  tree (a one-line spec edit, to be confirmed by the owner).
+- `tests/unit/test_learning_rate.py` (the key helpers and the flag on the built-in callbacks),
+  `tests/integration/test_learning_rate_logging.py` (a `Trainer` run with `ReduceLrOnPlateau`: the
+  epoch history is `[1e-3, 1e-3, 1e-3, 1e-4, 1e-4, 1e-5]`, the step and epoch log lines, `CsvLogger`
+  rows, the checkpoint history, resuming, a custom callback, several parameter groups, a trainer
+  built from a config, and a run with no such callback unchanged), and tests of `plotLearningRate`
+  and of `lr_curve.png` in `tests/integration/test_loss_curves.py` and
+  `tests/integration/test_visualize_latent_script.py`.
 
 ### Changed
 
@@ -287,6 +314,10 @@ versioning follows [Semantic Versioning](https://semver.org/).
   held moved to `TestEveryRow`, so stage 1, which never checked that the loss falls, now does.
 - The roadmap marks P1-6 and Phase 1 as done, and P1-2 and P1-3, which were implemented without a
   status line, as done.
+- The training log lines (`epoch <n> complete` and the per-step line) write a learning rate with
+  six significant digits (`train/lr=1e-05`) where a loss keeps four decimals, which would have
+  printed `1e-05` as `0.0000`. The loss plot of `scripts/visualize_latent.py` leaves the learning
+  rate keys out, since they have their own figure.
 
 ### Removed
 

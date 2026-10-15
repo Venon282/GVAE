@@ -22,9 +22,16 @@ from global_vae.encoders.registry import registerEncoder
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.constant import ConstantBetaSchedule
 from global_vae.training.beta_schedules.linear_warmup import LinearWarmupBetaSchedule
+from global_vae.training.callbacks.base import TrainerCallback
+from global_vae.training.callbacks.reduce_lr_on_plateau import ReduceLrOnPlateau
 from global_vae.training.trainer import Trainer
 from global_vae.visualization.history_callback import HistoryCallback
-from global_vae.visualization.loss_curves import plotBetaSchedule, plotLossCurves, plotStepCurves
+from global_vae.visualization.loss_curves import (
+    plotBetaSchedule,
+    plotLearningRate,
+    plotLossCurves,
+    plotStepCurves,
+)
 
 INPUT_DIM = 16
 LATENT_DIM = 4
@@ -143,6 +150,95 @@ class TestPlotLossCurves:
         trainer.fit(_fixedDataset(2), num_epochs=3)
         fig = plotLossCurves(trainer.history)
         assert fig is not None
+        plt.close(fig)
+
+
+class TestPlotLearningRate:
+    """`plotLearningRate` draws the `train/lr` entries a run records when a callback acts on it."""
+
+    HISTORY = [
+        {"train/loss/total": 1.0, "train/lr": 1e-3},
+        {"train/loss/total": 0.9, "train/lr": 1e-3},
+        {"train/loss/total": 0.8, "train/lr": 1e-4},
+    ]
+
+    def test_plots_the_rate_of_every_epoch(self) -> None:
+        fig = plotLearningRate(self.HISTORY)
+        (line,) = fig.axes[0].lines
+        assert line.get_label() == "train/lr"
+        assert np.asarray(line.get_xdata()).tolist() == [0, 1, 2]
+        assert np.asarray(line.get_ydata()).tolist() == [1e-3, 1e-3, 1e-4]
+        assert fig.axes[0].get_xlabel() == "epoch"
+        assert fig.axes[0].get_ylabel() == "learning rate"
+        plt.close(fig)
+
+    def test_the_loss_keys_are_not_drawn(self) -> None:
+        fig = plotLearningRate(self.HISTORY)
+        assert [line.get_label() for line in fig.axes[0].lines] == ["train/lr"]
+        plt.close(fig)
+
+    def test_the_axis_is_logarithmic_by_default_and_can_be_linear(self) -> None:
+        log_fig = plotLearningRate(self.HISTORY)
+        linear_fig = plotLearningRate(self.HISTORY, log_scale=False)
+        assert log_fig.axes[0].get_yscale() == "log"
+        assert linear_fig.axes[0].get_yscale() == "linear"
+        plt.close(log_fig)
+        plt.close(linear_fig)
+
+    def test_every_parameter_group_gets_a_line(self) -> None:
+        history = [
+            {"train/lr/group1": 1e-3, "train/lr/group0": 1e-2},
+            {"train/lr/group1": 1e-4, "train/lr/group0": 1e-3},
+        ]
+        fig = plotLearningRate(history)
+        assert [line.get_label() for line in fig.axes[0].lines] == [
+            "train/lr/group0",
+            "train/lr/group1",
+        ]
+        plt.close(fig)
+
+    def test_explicit_keys_are_used(self) -> None:
+        history = [{"train/lr/group0": 1e-2, "train/lr/group1": 1e-3}]
+        fig = plotLearningRate(history, keys=["train/lr/group1"])
+        assert [line.get_label() for line in fig.axes[0].lines] == ["train/lr/group1"]
+        plt.close(fig)
+
+    def test_a_key_present_only_in_later_epochs_only_plots_those_points(self) -> None:
+        history = [{"train/loss/total": 1.0}, {"train/loss/total": 0.9, "train/lr": 1e-3}]
+        fig = plotLearningRate(history)
+        assert np.asarray(fig.axes[0].lines[0].get_xdata()).tolist() == [1]
+        plt.close(fig)
+
+    def test_empty_history_raises(self) -> None:
+        with pytest.raises(ValueError, match="empty"):
+            plotLearningRate([])
+
+    def test_a_history_without_a_learning_rate_says_why(self) -> None:
+        """A run with no callback acting on the rate records none, so there is nothing to draw."""
+        with pytest.raises(ValueError, match="acts_on_learning_rate"):
+            plotLearningRate([{"train/loss/total": 1.0}])
+
+    def test_the_loss_plot_does_not_draw_the_rate(self) -> None:
+        """The rate is on a scale of its own: `plotLossCurves` keeps to the loss keys."""
+        fig = plotLossCurves(self.HISTORY)
+        assert [line.get_label() for line in fig.axes[0].lines] == ["train/loss/total"]
+        plt.close(fig)
+
+    def test_end_to_end_with_a_run_that_reduces_the_rate(self) -> None:
+        class _Flat(TrainerCallback):
+            def onEpochEnd(self, trainer: Trainer, epoch: int, metrics: dict[str, float]) -> None:
+                metrics["val/loss/total"] = 1.0
+
+        trainer = Trainer(
+            _buildModel(),
+            device="cpu",
+            optimizer_kwargs={"lr": 1e-3},
+            callbacks=[_Flat(), ReduceLrOnPlateau(patience=1, factor=0.1)],
+        )
+        trainer.fit(_fixedDataset(2), num_epochs=4)
+        fig = plotLearningRate(trainer.history)
+        (line,) = fig.axes[0].lines
+        assert np.asarray(line.get_ydata()).tolist() == pytest.approx([1e-3, 1e-3, 1e-3, 1e-4])
         plt.close(fig)
 
 

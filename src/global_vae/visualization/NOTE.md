@@ -6,7 +6,8 @@ line overlay + grid + collection helper, plus cross-modal reconstruction
 reporting: `resolveDefaultInputSubsets`/`collectCrossModalReconstructions`/
 `plotCrossModalReconstructionMatrix`, spec §5,
 `docs/adr/0016-cross-modal-reconstruction-reporting.md`), `loss_curves.py`
-(epoch-level, step-level, and beta-schedule curves), `history_callback.py`
+(epoch-level, step-level, beta-schedule and learning-rate curves; `plotLearningRate` needs a
+history that carries `train/lr`, see `docs/adr/0028-learning-rate-in-the-metrics.md`), `history_callback.py`
 (in-memory step/epoch metric collection). See
 `docs/adr/0009-visualization.md`.
 

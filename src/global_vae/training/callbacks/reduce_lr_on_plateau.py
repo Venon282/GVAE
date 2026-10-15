@@ -17,7 +17,7 @@ selected from `TrainingConfig.callbacks` by name like any other callback.
 """
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from global_vae.training.callbacks._plateau import PlateauTracker
 from global_vae.training.callbacks.base import TrainerCallback
@@ -38,7 +38,15 @@ class ReduceLrOnPlateau(TrainerCallback):
     `torch.optim.lr_scheduler.ReduceLROnPlateau`'s own; only `monitor` is new,
     since this callback reads its metric from `Trainer.fit`'s epoch metrics
     dict instead of receiving it as a direct `.step(metric)` argument.
+
+    It acts on the learning rate (`acts_on_learning_rate`), so a run that
+    uses it records the learning rate in its metrics: `"train/lr"` in every
+    epoch's entry of `Trainer.history`, in the epoch log line and in the
+    loggers. The value of an epoch is the one that epoch trained with, so a
+    reduction decided at the end of epoch `n` first shows in epoch `n + 1`.
     """
+
+    acts_on_learning_rate: ClassVar[bool] = True
 
     def __init__(
         self,

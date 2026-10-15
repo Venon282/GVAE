@@ -97,3 +97,17 @@ same list, ahead of these). If your callback's constructor declares a
 automatically (checked via the parameter's presence, not by special-casing
 your class), matching what `CheckpointCallback`/`BestCheckpointCallback`
 already do (spec §10: "config snapshotted with every run").
+
+A callback that changes the optimizer's learning rate (a warmup, a cosine schedule, anything that
+writes `trainer.optimizer.param_groups[...]["lr"]`) declares it with a class attribute:
+
+```python
+@registerCallback("cosine_decay")
+class CosineDecay(TrainerCallback):
+    acts_on_learning_rate = True
+```
+
+`Trainer` then records the rate it trains with each epoch as `train/lr`, so it shows in the log
+line, the loggers and the checkpoint history, and `scripts/visualize_latent.py` plots it as
+`lr_curve.png` ([ADR 0028](../adr/0028-learning-rate-in-the-metrics.md)). Without the flag the
+callback still works, but nothing records the rate.

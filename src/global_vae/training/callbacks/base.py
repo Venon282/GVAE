@@ -24,7 +24,7 @@ names at once. This mirrors the callback pattern used by most training
 frameworks (Keras, PyTorch Lightning, Hugging Face `Trainer`).
 """
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from global_vae.training.trainer import Trainer
@@ -50,7 +50,21 @@ class TrainerCallback:
     rate) and `trainer.should_stop` (e.g. `EarlyStopping` sets it to
     `True`; `Trainer.fit` then ends the run after every callback has
     finished handling the current epoch).
+
+    Attributes:
+        acts_on_learning_rate: Class-level flag, `False` by default. A
+            callback that changes the learning rate of `trainer.optimizer`
+            (a plateau reduction, a warmup, a cosine schedule) sets it to
+            `True`. If any callback of a run does, `Trainer` records the
+            learning rate every step as `"lr"` and every epoch as
+            `"train/lr"` (`"lr/group<i>"` and `"train/lr/group<i>"` with
+            several parameter groups), so it shows in the epoch log line, in
+            `Trainer.history`, in every logger and in the checkpoint history
+            that `scripts/visualize_latent.py` plots (`training/learning_rate.py`,
+            ADR 0028). A run with no such callback records nothing new.
     """
+
+    acts_on_learning_rate: ClassVar[bool] = False
 
     def onTrainBegin(self, trainer: "Trainer") -> None:
         """Called once, before the first epoch of `Trainer.fit` starts.

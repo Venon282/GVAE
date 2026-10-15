@@ -296,6 +296,7 @@ global-vae/
 │       ├── training/
 │       │   ├── trainer.py       # raw PyTorch loop for now (see §10); Lightning/Fabric later
 │       │   ├── checkpoint.py    # checkpoint file format, save and load
+│       │   ├── learning_rate.py # metric keys of a learning rate a callback changed (ADR 0028)
 │       │   ├── beta_schedule_resolution.py
 │       │   ├── beta_schedules/  # AbstractBetaSchedule + registry: constant, linear_warmup, cyclical_annealing
 │       │   ├── callbacks/       # TrainerCallback + registry: checkpoint, best_checkpoint, early_stopping, reduce_lr_on_plateau

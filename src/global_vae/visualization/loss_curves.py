@@ -10,6 +10,8 @@ a `"step"` key since step numbers are not simply the list index (resuming a `Tra
 advances `global_step` without resetting it, spec §10, `docs/adr/0005-training-loop.md`).
 `plotBetaSchedule` plots a schedule's own `beta(step)` curve independent of any actual
 training run, for sanity-checking a chosen schedule before committing to a long run.
+`plotLearningRate` plots the learning rate a run trained with, from the `"train/lr"` entries
+that `Trainer.history` carries when a callback acts on the learning rate (ADR 0028).
 
 Both `plotLossCurves` and `plotStepCurves` accept an optional `twin_metrics`: a second
 group of metric keys plotted on a secondary (right-hand) y-axis instead of the primary
@@ -30,6 +32,7 @@ from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
 
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
+from global_vae.training.learning_rate import isLearningRateKey
 
 
 def _collectSeries(
@@ -280,6 +283,60 @@ def plotStepCurves(
         twin_log_scale=twin_log_scale,
         twin_ylabel=twin_ylabel,
     )
+
+
+def plotLearningRate(
+    history: Sequence[Mapping[str, float]],
+    keys: Sequence[str] | None = None,
+    log_scale: bool = True,
+    title: str = "Learning rate",
+    figsize: tuple[float, float] = (8.0, 4.0),
+) -> Figure:
+    """Plot the learning rate over epochs from `Trainer.history`.
+
+    A run records its learning rate when a callback acts on it
+    (`TrainerCallback.acts_on_learning_rate`, ADR 0028): the history then has a
+    `"train/lr"` entry per epoch (`"train/lr/group<i>"` with several parameter groups).
+    The value of an epoch is the mean of the rate its steps trained with, so a reduction
+    decided at the end of epoch `n` first shows at epoch `n + 1`.
+
+    Args:
+        history: `Trainer.history` (or any list shaped the same way): one dict per epoch,
+            in epoch order (the list index is the epoch number).
+        keys: Which learning-rate keys to plot, one line each. `None` (default) plots every
+            key of `history` that is a learning rate (`training.learning_rate.isLearningRateKey`).
+        log_scale: If `True` (default), use a logarithmic y-axis: a plateau reduction
+            divides the rate by a constant factor, which is a straight step on a log axis
+            and invisible after the first one on a linear axis.
+        title: Plot title.
+        figsize: Matplotlib figure size.
+
+    Returns:
+        The matplotlib `Figure`.
+
+    Raises:
+        ValueError: If `history` is empty, or if no learning-rate key appears in any epoch
+            (no callback acted on the learning rate, so the run did not record it).
+    """
+    if not history:
+        raise ValueError("plotLearningRate received an empty history.")
+
+    if keys is None:
+        resolved_keys = sorted(
+            {key for entry in history for key in entry if isLearningRateKey(key)}
+        )
+    else:
+        resolved_keys = list(keys)
+
+    series = _collectSeries(history, resolved_keys, x_key=None)
+    if not series:
+        raise ValueError(
+            "No learning rate appears in `history` (looked for "
+            f"{resolved_keys or 'keys named lr, such as train/lr'}). A run records it only when "
+            "a callback acts on the learning rate (TrainerCallback.acts_on_learning_rate)."
+        )
+
+    return _plotSeries(series, log_scale, title, "epoch", "learning rate", figsize)
 
 
 def plotBetaSchedule(

@@ -56,6 +56,14 @@ kind of callback:
   plain `torch` ships no early-stopping class of its own. See
   `docs/adr/0022-callback-registry.md`.
 
+`learning_rate.py` (ADR 0028) holds the keys under which a learning rate is recorded
+(`learningRateMetrics`, `isLearningRateKey`: `lr` per step, `train/lr` per epoch, `lr/group<i>`
+with several parameter groups). A callback that changes the rate sets the class attribute
+`TrainerCallback.acts_on_learning_rate` (`ReduceLrOnPlateau` does), and `Trainer.logs_learning_rate`
+is then `True`: `fitEpoch` adds the rate each step trained with to the metrics, so it shows in the
+epoch log line, `Trainer.history`, every logger and the checkpoint history. Without such a
+callback nothing is added.
+
 `loggers/` (`AbstractExperimentLogger`, `CsvLogger`, `TensorBoardLogger`)
 is implemented, covering spec §10's "Experiment tracking" bullet, and is
 a separate subsystem from `callbacks/` above: it keeps its own

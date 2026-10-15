@@ -49,9 +49,26 @@ from global_vae.training.beta_schedules.base import AbstractBetaSchedule
 from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.checkpoint import loadCheckpoint as loadCheckpointFile
 from global_vae.training.checkpoint import saveCheckpoint as saveCheckpointFile
+from global_vae.training.learning_rate import isLearningRateKey, learningRateMetrics
 from global_vae.utils.autograd import backward
 
 logger = logging.getLogger(__name__)
+
+
+def _formatMetrics(metrics: dict[str, float]) -> str:
+    """Join `key=value` pairs for a log line.
+
+    Args:
+        metrics: Metric key -> value.
+
+    Returns:
+        The pairs separated by `", "`: four decimals for a loss, and the shortest general form
+        for a learning rate (`1e-05`, not `0.0000`), which four decimals would round away.
+    """
+    return ", ".join(
+        f"{key}={value:.6g}" if isLearningRateKey(key) else f"{key}={value:.4f}"
+        for key, value in metrics.items()
+    )
 
 
 @dataclass
@@ -242,6 +259,16 @@ class Trainer:
 
         logger.info("Trainer initialized on device '%s'.", self.device)
 
+    @property
+    def logs_learning_rate(self) -> bool:
+        """Whether this run records the learning rate in its metrics.
+
+        `True` when at least one callback sets `TrainerCallback.acts_on_learning_rate`
+        (ADR 0028). `fitEpoch` then adds `"lr"` to every step's metrics, and the epoch metrics
+        carry `"train/lr"`.
+        """
+        return any(callback.acts_on_learning_rate for callback in self.callbacks)
+
     def computeLosses(
         self, batch: dict[str, torch.Tensor], step: int, apply_dropout: bool = True
     ) -> StepLosses:
@@ -328,7 +355,10 @@ class Trainer:
 
         Returns:
             This epoch's metrics, averaged over every step, keys
-            prefixed `"train/"` (e.g. `"train/loss/total"`).
+            prefixed `"train/"` (e.g. `"train/loss/total"`). When a
+            callback acts on the learning rate (`logs_learning_rate`),
+            also `"train/lr"`: the mean of the rate each step trained with
+            (`"train/lr/group<i>"` with several parameter groups).
 
         Raises:
             ValueError: If `dataloader` yields no batches.
@@ -336,6 +366,7 @@ class Trainer:
         self.model.train()
         running_totals: dict[str, float] = {}
         num_batches = 0
+        record_learning_rate = self.logs_learning_rate
 
         for callback in self.callbacks:
             callback.onEpochBegin(self, epoch)
@@ -347,9 +378,13 @@ class Trainer:
             backward(losses.total)
             if self.grad_clip_norm is not None:
                 nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+            step_metrics = losses.asMetrics()
+            if record_learning_rate:
+                # Read just before the step: this is the rate the step trains with, so a rate a
+                # callback changes in `onStepEnd` or `onEpochEnd` shows from the next step on.
+                step_metrics.update(learningRateMetrics(self.optimizer))
             self.optimizer.step()
 
-            step_metrics = losses.asMetrics()
             for key, value in step_metrics.items():
                 running_totals[key] = running_totals.get(key, 0.0) + value
             num_batches += 1
@@ -359,7 +394,7 @@ class Trainer:
                     "epoch %d step %d: %s",
                     epoch,
                     self.global_step,
-                    ", ".join(f"{key}={value:.4f}" for key, value in step_metrics.items()),
+                    _formatMetrics(step_metrics),
                 )
             for callback in self.callbacks:
                 callback.onStepEnd(self, self.global_step, step_metrics)
@@ -467,7 +502,7 @@ class Trainer:
                 logger.info(
                     "epoch %d complete: %s",
                     epoch,
-                    ", ".join(f"{key}={value:.4f}" for key, value in epoch_metrics.items()),
+                    _formatMetrics(epoch_metrics),
                 )
                 self.start_epoch = epoch + 1
                 for callback in self.callbacks:

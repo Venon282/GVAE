@@ -26,3 +26,4 @@
 - [0025: Config schema for several latent spaces](0025-config-schema-for-several-latent-spaces.md)
 - [0026: Assembler constructor contract and learned assemblers](0026-assembler-constructor-contract-and-learned-assemblers.md)
 - [0027: Shared encoders and shared decoders](0027-shared-encoders-and-decoders.md)
+- [0028: The learning rate in the metrics](0028-learning-rate-in-the-metrics.md)

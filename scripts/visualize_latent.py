@@ -41,6 +41,12 @@ two-axis capability by default (`--history-no-twin-axis` to disable it, and
 loss is frequently orders of magnitude smaller than reconstruction/total loss (spec
 §2.3) and gets visually crushed onto a thin band near a shared axis's edge otherwise.
 
+When a callback acted on the learning rate during training (`ReduceLrOnPlateau`, or any
+callback with `acts_on_learning_rate`, ADR 0028), the checkpoint history carries the rate
+the run trained with at each epoch, and the script also writes `lr_curve.png`
+(`visualization.loss_curves.plotLearningRate`, log-scaled). The rate is left off the loss
+plot, where it would share an axis with losses it has nothing in common with.
+
 Model construction and data loading stay the caller's own responsibility everywhere
 else in this framework (data pipeline concerns are explicitly out of scope; no config
 schema exists for it, spec §11), so this script does not hardcode either: both are
@@ -81,9 +87,10 @@ import torch
 
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
+from global_vae.training.learning_rate import isLearningRateKey
 from global_vae.utils.imports import importCallable as _importCallable
 from global_vae.visualization.latent_plot import plotLatentSpace, plotPerDimensionKl
-from global_vae.visualization.loss_curves import plotLossCurves
+from global_vae.visualization.loss_curves import plotLearningRate, plotLossCurves
 
 logger = logging.getLogger("global_vae.scripts.visualize_latent")
 
@@ -258,7 +265,8 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-history",
         action="store_true",
-        help="Skip the training-curve plot even if the checkpoint carries a non-empty history.",
+        help="Skip the training-curve plots (the loss, and the learning rate when the run "
+        "recorded it) even if the checkpoint carries a non-empty history.",
     )
     parser.add_argument(
         "--history-no-twin-axis",
@@ -391,7 +399,9 @@ def main(argv: list[str] | None = None) -> None:
         metrics = [
             key
             for key in metadata.history[0]
-            if "total" not in key and (twin_metrics is None or key not in twin_metrics)
+            if "total" not in key
+            and not isLearningRateKey(key)
+            and (twin_metrics is None or key not in twin_metrics)
         ]
         history_fig = plotLossCurves(
             metadata.history,
@@ -406,6 +416,16 @@ def main(argv: list[str] | None = None) -> None:
         plt.close(history_fig)
         saved_paths.append(history_path)
         logger.info("Saved '%s'.", history_path)
+
+        # The learning rate is in the history only if a callback acted on it
+        # (`TrainerCallback.acts_on_learning_rate`): no key, no plot.
+        if any(isLearningRateKey(key) for entry in metadata.history for key in entry):
+            lr_fig = plotLearningRate(metadata.history)
+            lr_path = output_dir / "lr_curve.png"
+            lr_fig.savefig(lr_path)
+            plt.close(lr_fig)
+            saved_paths.append(lr_path)
+            logger.info("Saved '%s'.", lr_path)
     else:
         logger.info("Checkpoint has no training history; skipping the loss-curve plot.")
 

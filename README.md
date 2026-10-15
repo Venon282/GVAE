@@ -49,6 +49,11 @@ python scripts/evaluate.py \
     --output-dir results/
 ```
 
+`visualize_latent.py` writes `loss_curves.png`, and also `lr_curve.png` when a callback acted on
+the learning rate during the run (for example `reduce_lr_on_plateau`). That callback also adds
+`train/lr` to the per-epoch metrics shown in the training logs, the loggers and the checkpoint
+history (`docs/how-to/train.md`, `docs/adr/0028-learning-rate-in-the-metrics.md`).
+
 ## Running checks
 
 ```bash

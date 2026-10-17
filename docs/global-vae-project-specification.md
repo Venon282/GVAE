@@ -82,7 +82,7 @@ The weight applied to a latent space's regularization term (`beta`) is likewise 
 - a per-latent-space value or schedule, letting different latent spaces (e.g. a shared vs. a private code) be regularized differently.
 `losses/regularizers/` holds the registry of regularization strategies; the schedule (constant, or a function of training step) is a separate, orthogonal config concern from *which* regularizer is used for a given latent space.
 
-**Scale of the objective** (ADR 0029). A latent space's regularization term is a sum over its dimensions, averaged over the batch. A modality's reconstruction term is its loss function's value scaled by a per-modality **reduction**: `mean` (the default: the per-element mean `torch.nn.functional` returns) or `sum` (the per-sample sum, averaged over the batch). Under `mean`, `beta = 1` weights the KL `N / 2` times more than the usual ELBO does (`N` is the number of values a sample reconstructs), so the useful `beta` depends on the data shape; under `sum` it does not. The reduction is `training.reconstruction_reduction`, one name or a decoder -> name mapping, and the evaluation report carries latent diagnostics (the KL of each latent dimension and the active units) to show what a `beta` did to the latent space.
+**Scale of the objective** (ADR 0029). A latent space's regularization term is a sum over its dimensions, averaged over the batch. A modality's reconstruction term is its loss function's value scaled by a per-modality **reduction**: `mean` (the default: the per-element mean `torch.nn.functional` returns) or `sum` (the per-sample sum, averaged over the batch). Under `mean`, `beta = 1` weights the KL `N / 2` times more than the usual ELBO does (`N` is the number of values a sample reconstructs), so the useful `beta` depends on the data shape; under `sum` it does not. The reduction is `training.reconstruction_reduction`, one name or a decoder -> name mapping, and the evaluation report carries latent diagnostics (the KL of each latent dimension and the active units) to show what a `beta` did to the latent space. The loss function and the weight of a modality are chosen the same way: `training.reconstruction_loss` and `training.reconstruction_weight` take one value for every modality or a decoder -> value mapping, and a decoder left out keeps `mse` and `1.0` (ADR 0030). A modality's term is its loss function, then its reduction, then its weight.
 
 ---
 
@@ -423,6 +423,8 @@ model:
 ```yaml
 training:
   modality_dropout_p: 0.15        # trains robustness to missing modalities
+  reconstruction_loss: mse        # or l1, bce, smooth_l1, or {signal: mse, mask: bce} (ADR 0030)
+  reconstruction_weight: 1.0      # or {signal: 0.5, image: 2.0}; a decoder left out keeps 1.0
   reconstruction_reduction: mean  # or sum, or {signal: sum, image: mean} (ADR 0029); mean is the default
   beta_schedules:                 # latent space name -> schedule; absent spaces use `beta`
     z_shared:
@@ -506,7 +508,7 @@ Every model example above builds, and trains through `scripts/train.py` (`tests/
 
 **Also resolved:** the loss scale convention (§2.3, ADR 0029). The reconstruction term is a per-element mean by default and a per-sample sum on request, per modality (`training.reconstruction_reduction`), so `beta` reads as the weight of an ELBO only under `sum` (with a reconstruction weight that matches the loss, 0.5 for `mse`); the default stays `mean`, and a different default needs its own ADR and a minor release. What stays open is the numbers (above).
 
-**Also resolved:** the YAML schema for the routing graph, the Latent Head assignments and the regularizer/beta configuration (§9, ADR 0025). Heads sit on the encoder -> latent edge (`fed_by`), decoder instances are named independently of modalities (`encoders`, `decoders`), the regularizer is a field of each latent space, and beta stays per latent space in `TrainingConfig.beta_schedules`. `validateRoutingGraph` and `validateModelConfig` check the result, and an error starts with the dotted path of the field. Per-modality `reconstruction_loss` and `reconstruction_weight` are not part of this schema and stay a Python-only option of `Trainer`.
+**Also resolved:** the YAML schema for the routing graph, the Latent Head assignments and the regularizer/beta configuration (§9, ADR 0025). Heads sit on the encoder -> latent edge (`fed_by`), decoder instances are named independently of modalities (`encoders`, `decoders`), the regularizer is a field of each latent space, and beta stays per latent space in `TrainingConfig.beta_schedules`. `validateRoutingGraph` and `validateModelConfig` check the result, and an error starts with the dotted path of the field. Per-modality `reconstruction_loss` and `reconstruction_weight` are not part of this routing schema: they are `training` fields, a single value or a decoder -> value mapping validated against the model's decoders (ADR 0030).
 
 ---
 

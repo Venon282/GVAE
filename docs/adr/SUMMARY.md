@@ -28,3 +28,4 @@
 - [0027: Shared encoders and shared decoders](0027-shared-encoders-and-decoders.md)
 - [0028: The learning rate in the metrics](0028-learning-rate-in-the-metrics.md)
 - [0029: Loss scale convention](0029-loss-scale-convention.md)
+- [0030: A reconstruction loss and weight per modality](0030-per-modality-reconstruction-loss-and-weight.md)

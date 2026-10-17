@@ -38,7 +38,9 @@ With several modalities the two reductions differ in one more way. `mean` gives 
 term of the same size whatever its `N`, which keeps a 256-point signal and a 1024-pixel image on
 the same footing, but then the ELBO-equivalent weight of one KL differs per modality (`N_m / 2`).
 `sum` gives each modality its own negative log-likelihood, so one `beta` has one meaning, and a
-modality with more values weighs more. `reconstruction_weight` is how you rebalance them.
+modality with more values weighs more. `reconstruction_weight` is how you rebalance them: one number
+for every modality, or one per decoder (see
+[set the loss and weight per modality](train.md#set-the-loss-and-weight-per-modality)).
 
 ## Choose a reduction
 
@@ -84,6 +86,7 @@ python scripts/evaluate.py \
     --model-factory mypackage.models:build_model \
     --dataloader-factory mypackage.data:build_test_dataloader \
     --reconstruction-reduction sum \
+    --reconstruction-weight 0.5 \
     --output-dir results/
 ```
 
@@ -96,9 +99,11 @@ The summary gains a block, and `results.json` the full lists under `latent_diagn
 ```
 
 A latent space wider than 16 dimensions prints the minimum, median and maximum KL in the summary;
-the JSON always has every value. Pass the reduction the model was trained with, as above, so that
-`total reconstruction loss` is on the scale of the training curves. The reconstruction metrics
-(`mse`, `r2`, ...) do not depend on it.
+the JSON always has every value. Pass the reduction, the weight and the loss the model was trained
+with (`--reconstruction-reduction`, `--reconstruction-weight`, `--reconstruction-loss`, each a bare
+value or `modality=value` pairs), as above, so that `total reconstruction loss` is on the scale of
+the training curves. With the defaults (`mse`, weight `1`) only the reduction matters. The
+reconstruction metrics (`mse`, `r2`, ...) do not depend on any of them.
 
 | What the report shows | What it says |
 |---|---|
@@ -142,7 +147,8 @@ from it.
     done
     ```
 
-4. **Evaluate every run on the same held-out set,** with the reduction it was trained with.
+4. **Evaluate every run on the same held-out set,** with the reduction and weight it was trained
+   with.
    `best.pt` is chosen by the validation loss of that run, which depends on its `beta`; use a
    fixed epoch's checkpoint instead if you want the runs treated identically.
 
@@ -153,6 +159,7 @@ from it.
             --model-factory mypackage.models:build_model \
             --dataloader-factory mypackage.data:build_test_dataloader \
             --reconstruction-reduction sum \
+            --reconstruction-weight 0.5 \
             --output-dir "results/beta_$beta"
     done
     ```

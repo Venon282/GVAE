@@ -59,7 +59,10 @@ active units. The reconstruction term is a per-element mean by default while the
 the latent dimensions, so `beta = 1` is not the usual ELBO; `training.reconstruction_reduction`
 (`mean`, the default, or `sum`, per modality) chooses the scale, and `--reconstruction-reduction`
 passes the same choice to the report (`docs/how-to/choose-beta.md`,
-`docs/adr/0029-loss-scale-convention.md`).
+`docs/adr/0029-loss-scale-convention.md`). `training.reconstruction_loss` and
+`training.reconstruction_weight` take one value or a decoder -> value mapping, and
+`--reconstruction-loss` and `--reconstruction-weight` do the same for the report
+(`docs/adr/0030-per-modality-reconstruction-loss-and-weight.md`).
 
 ## Running checks
 

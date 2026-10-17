@@ -54,6 +54,15 @@ from pathlib import Path
 
 import torch
 
+from global_vae.config.training import (
+    DEFAULT_RECONSTRUCTION_LOSS,
+    DEFAULT_RECONSTRUCTION_WEIGHT,
+    resolveReconstructionLoss,
+    resolveReconstructionReduction,
+    resolveReconstructionWeight,
+    validateReconstructionLoss,
+    validateReconstructionWeight,
+)
 from global_vae.evaluation.cross_modal import exportCrossModalFigures
 from global_vae.evaluation.evaluate import evaluate
 from global_vae.evaluation.latent_diagnostics import DEFAULT_ACTIVE_UNIT_THRESHOLD
@@ -64,6 +73,33 @@ from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.utils.imports import importCallable as _importCallable
 
 logger = logging.getLogger("global_vae.scripts.evaluate")
+
+
+def _splitPairs(text: str, kind: str) -> str | dict[str, str]:
+    """Split the value of a per-modality flag into a bare value or `modality -> value` text.
+
+    Args:
+        text: A bare value (`"sum"`, `"0.5"`), or a comma-separated list of `modality=value`
+            pairs (for example `"signal=sum,image=mean"`).
+        kind: What the value is called in the error message (`"name"`, `"number"`).
+
+    Returns:
+        The stripped text, or a modality -> text dict.
+
+    Raises:
+        argparse.ArgumentTypeError: If a pair has no `=`, or no modality before it.
+    """
+    if "=" not in text:
+        return text.strip()
+    pairs: dict[str, str] = {}
+    for pair in text.split(","):
+        modality, separator, value = pair.partition("=")
+        if not separator or not modality.strip():
+            raise argparse.ArgumentTypeError(
+                f"expected 'modality={kind}' pairs separated by commas, got '{pair}'."
+            )
+        pairs[modality.strip()] = value.strip()
+    return pairs
 
 
 def _parseReduction(text: str) -> str | dict[str, str]:
@@ -79,23 +115,64 @@ def _parseReduction(text: str) -> str | dict[str, str]:
     Raises:
         argparse.ArgumentTypeError: If a pair has no `=`, or a name is not supported.
     """
-    reduction: str | dict[str, str]
-    if "=" not in text:
-        reduction = text.strip()
-    else:
-        reduction = {}
-        for pair in text.split(","):
-            modality, separator, name = pair.partition("=")
-            if not separator or not modality.strip():
-                raise argparse.ArgumentTypeError(
-                    f"expected 'modality=name' pairs separated by commas, got '{pair}'."
-                )
-            reduction[modality.strip()] = name.strip()
+    reduction = _splitPairs(text, "name")
     try:
         validateReduction(reduction, "--reconstruction-reduction")
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from error
     return reduction
+
+
+def _parseLoss(text: str) -> str | dict[str, str]:
+    """Parse the value of `--reconstruction-loss`.
+
+    Args:
+        text: A loss name (`"mse"`, `"bce"`, ...), or a comma-separated list of `modality=name`
+            pairs (for example `"signal=mse,mask=bce"`).
+
+    Returns:
+        The name, or a modality -> name dict.
+
+    Raises:
+        argparse.ArgumentTypeError: If a pair has no `=`, or a name is not supported.
+    """
+    loss = _splitPairs(text, "name")
+    try:
+        validateReconstructionLoss(loss, "--reconstruction-loss")
+    except (KeyError, ValueError) as error:
+        raise argparse.ArgumentTypeError(str(error.args[0])) from error
+    return loss
+
+
+def _parseWeight(text: str) -> float | dict[str, float]:
+    """Parse the value of `--reconstruction-weight`.
+
+    Args:
+        text: A number, or a comma-separated list of `modality=number` pairs (for example
+            `"signal=0.5,image=2"`).
+
+    Returns:
+        The number, or a modality -> number dict.
+
+    Raises:
+        argparse.ArgumentTypeError: If a pair has no `=`, a value is not a number, or a number
+            is negative or not finite.
+    """
+    flag = "--reconstruction-weight"
+    raw = _splitPairs(text, "number")
+    weight: float | dict[str, float]
+    try:
+        if isinstance(raw, dict):
+            weight = {modality: float(value) for modality, value in raw.items()}
+        else:
+            weight = float(raw)
+        validateReconstructionWeight(weight, flag)
+    except ValueError as error:
+        message = str(error)
+        raise argparse.ArgumentTypeError(
+            message if message.startswith(flag) else f"{flag}: {message}"
+        ) from error
+    return weight
 
 
 def _buildArgumentParser() -> argparse.ArgumentParser:
@@ -143,6 +220,27 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         "by commas, e.g. 'signal=sum,image=mean'. It sets the scale of the total "
         "reconstruction loss in the report, so that it matches the training curves "
         "(docs/adr/0029-loss-scale-convention.md); the per-modality metrics do not depend on it.",
+    )
+    parser.add_argument(
+        "--reconstruction-loss",
+        type=_parseLoss,
+        default=DEFAULT_RECONSTRUCTION_LOSS,
+        help="The loss the model was trained with (training.reconstruction_loss): 'mse' "
+        "(default), 'l1', 'bce' or 'smooth_l1' for every modality, or 'modality=name' pairs "
+        "separated by commas, e.g. 'signal=mse,mask=bce'; a modality left out keeps 'mse'. "
+        "It only affects the total reconstruction loss of the report "
+        "(docs/adr/0030-per-modality-reconstruction-loss-and-weight.md).",
+    )
+    parser.add_argument(
+        "--reconstruction-weight",
+        type=_parseWeight,
+        default=DEFAULT_RECONSTRUCTION_WEIGHT,
+        help="The weight the model was trained with (training.reconstruction_weight): a "
+        "number for every modality (default: %(default)s), or 'modality=number' pairs "
+        "separated by commas, e.g. 'signal=0.5,image=2'; a modality left out keeps 1.0. "
+        "It only affects the total reconstruction loss of the report, which together with "
+        "--reconstruction-loss and --reconstruction-reduction puts it on the scale of the "
+        "training curves.",
     )
     parser.add_argument(
         "--active-unit-threshold",
@@ -200,7 +298,8 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    args = _buildArgumentParser().parse_args(argv)
+    parser = _buildArgumentParser()
+    args = parser.parse_args(argv)
 
     model_factory = _importCallable(args.model_factory)
     dataloader_factory = _importCallable(args.dataloader_factory)
@@ -223,12 +322,29 @@ def main(argv: list[str] | None = None) -> None:
         inverse_transform_factory = _importCallable(args.inverse_transform_factory)
         inverse_transforms = inverse_transform_factory()  # type: ignore[operator]
 
+    # The same resolvers as `buildTrainerFromConfig`, so that a setting that names a decoder the
+    # model does not have is refused here too, instead of silently keeping its default.
+    try:
+        reconstruction_loss_fn = resolveReconstructionLoss(
+            args.reconstruction_loss, model, "--reconstruction-loss"
+        )
+        reconstruction_weights = resolveReconstructionWeight(
+            args.reconstruction_weight, model, "--reconstruction-weight"
+        )
+        reconstruction_reduction = resolveReconstructionReduction(
+            args.reconstruction_reduction, model, "--reconstruction-reduction"
+        )
+    except (KeyError, ValueError) as error:
+        parser.error(str(error.args[0]))
+
     results = evaluate(
         model,
         dataloader,
+        reconstruction_weights=reconstruction_weights,
+        reconstruction_loss_fn=reconstruction_loss_fn,
         device=resolved_device,
         max_samples=args.max_samples,
-        reconstruction_reduction=args.reconstruction_reduction,
+        reconstruction_reduction=reconstruction_reduction,
         active_unit_threshold=args.active_unit_threshold,
     )
     print(results.summary())

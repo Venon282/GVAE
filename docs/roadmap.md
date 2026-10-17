@@ -452,13 +452,25 @@ per-dimension KL) in the evaluation summary. The numbers themselves (D-6) need P
 `Trainer(reconstruction_reduction=...)` (`mean` by default, so nothing changed), the latent
 diagnostics of `evaluate()` and the `how-to/choose-beta.md` sweep recipe. The item listed P2-2 as a
 dependency; the reduction is per modality by itself (a decoder -> name mapping), so it did not need
-a per-modality loss and weight in config, which stay P2-2.
+a per-modality loss and weight in config, which were P2-2 (below).
 
 **P2-2. Per-modality loss and weight.** `TrainingConfig.reconstruction_loss` and
 `reconstruction_weight` are single values shared by every modality, while
 `computeTotalReconstructionLoss` and `Trainer` already accept per-modality dictionaries. Accept
 `str | dict[str, str]` and `float | dict[str, float]`, validate the keys against the modalities,
 test, and update `how-to/train.md`.
+
+**P2-2 status.** Done: [ADR 0030](adr/0030-per-modality-reconstruction-loss-and-weight.md).
+`reconstruction_loss` and `reconstruction_weight` take one value or a decoder -> value mapping (a
+decoder left out keeps `mse` and `1.0`; the defaults are unchanged, so nothing changed for a run
+that sets neither). `buildTrainerFromConfig` validates them and refuses an unknown loss name, a
+negative or non-finite weight and a key that is not a decoder of the model, with the field's path
+at the start of the message. `how-to/train.md` has a "Set the loss and weight per modality"
+section. One addition beyond the item: `scripts/evaluate.py` gained `--reconstruction-loss` and
+`--reconstruction-weight`, because the report's total reconstruction loss is on the training scale
+(P2-1) only if all three settings are the training ones, and it also checks the decoder names of
+`--reconstruction-reduction` now. Not done: recording the loss and the weights in the report, as the
+reduction is recorded.
 
 **P2-3. Trainer capabilities.** Each one opt-in and off by default, each covered by a smoke test in
 the style of `test_trainer_smoke.py`:

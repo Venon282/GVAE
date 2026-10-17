@@ -33,12 +33,16 @@ above 0.01; `--active-unit-threshold` changes it). A latent space with few
 active units and a KL near zero on the rest has collapsed on those
 dimensions. [Choose beta](choose-beta.md) says how to read them.
 
-Pass `--reconstruction-reduction` the reduction the model was trained with
-(`training.reconstruction_reduction`: `mean`, the default, `sum`, or
-`modality=name` pairs such as `signal=sum,image=mean`), so that the total
-reconstruction loss of the report is on the scale of the training curves
-([ADR 0029](../adr/0029-loss-scale-convention.md)). The per-modality metrics
-do not depend on it.
+Pass the reduction, the loss and the weight the model was trained with, so that
+the total reconstruction loss of the report is on the scale of the training
+curves: `--reconstruction-reduction` (`training.reconstruction_reduction`:
+`mean`, the default, `sum`, or `modality=name` pairs such as
+`signal=sum,image=mean`, [ADR 0029](../adr/0029-loss-scale-convention.md)),
+`--reconstruction-loss` (`mse`, the default, `l1`, `bce`, `smooth_l1`, or pairs
+such as `signal=mse,mask=bce`) and `--reconstruction-weight` (a number, default
+`1`, or pairs such as `signal=0.5,mask=0.2`,
+[ADR 0030](../adr/0030-per-modality-reconstruction-loss-and-weight.md)). A modality name that the model does not have is a usage
+error. The per-modality metrics do not depend on any of them.
 
 If your own data pipeline applied a `data.transforms` step (`log` /
 `standardize` / `resample`, spec §6.2) before training, reconstruction

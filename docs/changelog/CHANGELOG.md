@@ -251,6 +251,32 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `tests/unit/test_latent_diagnostics.py` (the KL and active-unit maths against hand-computed
   values) and `tests/integration/test_loss_scale_convention.py` (YAML and Hydra overrides to
   `Trainer`, training with `sum`, `evaluate()`, the summary and JSON, and `scripts/evaluate.py`).
+- A reconstruction loss and weight per modality, from config (roadmap P2-2, ADR 0030).
+  `TrainingConfig.reconstruction_loss` (`str | dict[str, str]`) and `reconstruction_weight`
+  (`float | dict[str, float]`) take one value for every modality or a decoder -> value mapping, as
+  `Any` in the structured config, validated by `buildTrainerFromConfig`. A decoder left out of a
+  mapping keeps `"mse"` and `1.0`; the defaults are unchanged, so a run that sets neither computes
+  the same loss bit for bit. An unknown loss name (`KeyError`), a loss that is not a name or a
+  mapping, a weight that is not a number, negative, `nan`, infinite or a `bool`, and a key that is
+  not a decoder of the model (`ValueError`, listing the decoders and what the decoder would have
+  kept) all stop the run with a message that starts with the field's path.
+  `validateReconstructionLoss`, `validateReconstructionWeight`, `resolveReconstructionLoss`,
+  `resolveReconstructionWeight` and `DEFAULT_RECONSTRUCTION_LOSS` / `DEFAULT_RECONSTRUCTION_WEIGHT`
+  are in `config/training.py`, and `resolveReconstructionReduction` takes an optional `field_name`.
+- `scripts/evaluate.py` takes `--reconstruction-loss` and `--reconstruction-weight` (a bare value or
+  `modality=value` pairs), so that the report's total reconstruction loss can be on the training
+  scale for any run and not only for `mse` with weight `1`, and it checks the decoder names of all
+  three flags, `--reconstruction-reduction` included. A modality that the model does not have is a
+  usage error (exit code 2).
+- `docs/adr/0030-per-modality-reconstruction-loss-and-weight.md`, a "Set the loss and weight per
+  modality" section in `docs/how-to/train.md`, and the flags in `docs/how-to/choose-beta.md`,
+  `docs/how-to/evaluate.md` and `README.md`. The spec §2.3, §9 and §11 say the same in a few lines
+  each (spec edits, to be confirmed by the owner): the §11 sentence that kept per-modality loss and
+  weight a Python-only option of `Trainer` is replaced.
+- `tests/unit/test_reconstruction_config_validation.py` (the validators) and
+  `tests/integration/test_per_modality_loss_and_weight.py` (Hydra overrides to `Trainer`, the
+  resolvers, the loss values by linearity against one modality weighted at a time, the composition
+  with the reduction, gradients, training, and the `scripts/evaluate.py` flags).
 
 ### Changed
 

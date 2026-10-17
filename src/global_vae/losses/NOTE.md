@@ -27,9 +27,13 @@ changes) or `"sum"` (the per-sample sum, averaged over the batch), as one name o
 modality -> name mapping; `TrainingConfig.reconstruction_reduction` selects it from config.
 See `docs/adr/0029-loss-scale-convention.md` and `docs/how-to/choose-beta.md`.
 
+The loss function and the weight of a modality are chosen from config the same way
+(`TrainingConfig.reconstruction_loss`, `reconstruction_weight`: one value or a decoder ->
+value mapping, validated against the model's decoders, `docs/adr/0030-per-modality-reconstruction-loss-and-weight.md`).
+A modality's term is its loss function, then its reduction, then its weight.
+
 # Deferred
 
 The values of `beta`, of the warm-up and of the other schedule hyperparameters (roadmap
-D-6) are empirical and wait for the first real run (P3-1). A learned decoder variance, and
-per-modality `reconstruction_loss` and `reconstruction_weight` in config (roadmap P2-2),
-are not part of this.
+D-6) are empirical and wait for the first real run (P3-1). A learned decoder variance is
+not part of this.

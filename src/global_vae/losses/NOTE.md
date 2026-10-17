@@ -17,11 +17,19 @@ Beta weighting lives outside this package, in `training/beta_schedules/` (`const
 `Trainer` resolves the schedules each step and passes the result to
 `computeRegularizationLoss(..., beta=...)`, so nothing in `losses/` knows a schedule exists.
 
+# Scale convention
+
+The reconstruction term is a per-element mean by default while the regularizer is a
+per-sample sum over latent dimensions, so under the default `beta = 1` weights the KL
+`N / 2` times more than the usual ELBO does (`N`: values per sample of the modality).
+`computeTotalReconstructionLoss(..., reduction=...)` takes `"mean"` (the default, nothing
+changes) or `"sum"` (the per-sample sum, averaged over the batch), as one name or a
+modality -> name mapping; `TrainingConfig.reconstruction_reduction` selects it from config.
+See `docs/adr/0029-loss-scale-convention.md` and `docs/how-to/choose-beta.md`.
+
 # Deferred
 
-The loss scale convention is still open (spec §11, "Precise loss weighting / β-VAE
-annealing schedule"; roadmap P2-1). The reconstruction term is a per-element mean while the
-regularizer is a per-sample sum over latent dimensions, so `beta = 1` is not the usual
-ELBO and a useful `beta` depends on how many values a modality reconstructs. A
-config-selectable reduction per modality and a how-to on choosing `beta` are planned;
-nothing here changes silently until that decision is made.
+The values of `beta`, of the warm-up and of the other schedule hyperparameters (roadmap
+D-6) are empirical and wait for the first real run (P3-1). A learned decoder variance, and
+per-modality `reconstruction_loss` and `reconstruction_weight` in config (roadmap P2-2),
+are not part of this.

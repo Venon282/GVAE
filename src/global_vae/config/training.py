@@ -34,6 +34,7 @@ config entirely) for an optimizer or loss this lookup does not cover.
 
 import inspect
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -42,7 +43,7 @@ import torch.nn.functional as F  # noqa: N812 (torch convention)
 from omegaconf import MISSING
 from torch.optim import Optimizer
 
-from global_vae.losses.reconstruction import LossFn
+from global_vae.losses.reconstruction import DEFAULT_REDUCTION, LossFn, validateReduction
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
 from global_vae.training.beta_schedules.registry import getBetaScheduleClass
@@ -132,6 +133,18 @@ class TrainingConfig:
         reconstruction_weight: Forwarded to `Trainer`'s
             `reconstruction_weights`, shared across every modality (see
             `reconstruction_loss`'s own note on per-modality config).
+        reconstruction_reduction: How each modality's reconstruction
+            loss is scaled (roadmap P2-1, ADR 0029): `"mean"` (default,
+            the per-element mean, which is what every config did before
+            this field existed) or `"sum"` (the per-sample sum averaged
+            over the batch, the scale of the KL term). Either one name
+            for every modality or a mapping from a decoder name to a
+            name, for example `{signal: sum, image: mean}`; a decoder
+            left out of the mapping keeps `"mean"`. Typed `Any` because
+            a structured config cannot express `str | dict[str, str]`;
+            `buildTrainerFromConfig` validates it and names this field
+            in the error. Forwarded to `Trainer`'s
+            `reconstruction_reduction`.
         beta: Base regularization weight (spec §2.3), shared across
             every latent space that has no entry in `beta_schedules`.
         beta_schedules: Latent space name -> `BetaScheduleConfig`.
@@ -200,6 +213,7 @@ class TrainingConfig:
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
     reconstruction_loss: str = "mse"
     reconstruction_weight: float = 1.0
+    reconstruction_reduction: Any = DEFAULT_REDUCTION
     beta: float = 1.0
     beta_schedules: dict[str, BetaScheduleConfig] = field(default_factory=dict)
     modality_dropout_p: float = 0.0
@@ -262,6 +276,35 @@ def resolveReconstructionLossFn(name: str) -> LossFn:
         available = ", ".join(listSupportedReconstructionLossNames())
         raise KeyError(f"Unknown reconstruction_loss '{name}'. Available: {available}")
     return _RECONSTRUCTION_LOSS_FNS[name]
+
+
+def resolveReconstructionReduction(value: Any, model: GlobalVae) -> str | dict[str, str]:
+    """Validate `TrainingConfig.reconstruction_reduction` against a model's decoders.
+
+    Args:
+        value: The configured value: a reduction name, or a mapping decoder name -> name.
+        model: The model the trainer is built for. Its `decoders` give the valid keys.
+
+    Returns:
+        The name, or a plain `dict` copy of the mapping (never an `omegaconf` container),
+        ready to pass as `Trainer(reconstruction_reduction=...)`.
+
+    Raises:
+        ValueError: If `value` is not a supported reduction or a mapping of them (the message
+            starts with `training.reconstruction_reduction`), or if the mapping has a key
+            that is not a decoder of `model`.
+    """
+    validateReduction(value, "training.reconstruction_reduction")
+    if isinstance(value, Mapping):
+        unknown = sorted(set(value) - set(model.decoders))
+        if unknown:
+            raise ValueError(
+                f"training.reconstruction_reduction names decoder(s) {unknown} that the model "
+                f"does not have (decoders: {sorted(model.decoders)}). A decoder left out of the "
+                f"mapping keeps 'mean', so a mistyped name would change nothing and say nothing."
+            )
+        return {str(name): str(reduction) for name, reduction in value.items()}
+    return str(value)
 
 
 def buildBetaSchedules(config: TrainingConfig) -> dict[str, AbstractBetaSchedule]:
@@ -377,9 +420,17 @@ def buildTrainerFromConfig(
         KeyError: If `config.optimizer.name`, `config.reconstruction_loss`,
             any `beta_schedules[...].strategy`, any `loggers[...].name`, or
             any key of `config.callbacks` is not a supported/registered name.
+        ValueError: If `config.reconstruction_reduction` is not a supported
+            reduction (or a mapping of them), or names a decoder that
+            `model` does not have. A mistyped decoder name is an error and
+            not a warning: it would leave that decoder on `"mean"`, a
+            silent change of loss scale (ADR 0029).
     """
     optimizer_cls = resolveOptimizerClass(config.optimizer.name)
     reconstruction_loss_fn = resolveReconstructionLossFn(config.reconstruction_loss)
+    reconstruction_reduction = resolveReconstructionReduction(
+        config.reconstruction_reduction, model
+    )
     beta_schedules = buildBetaSchedules(config)
     unmatched = sorted(set(beta_schedules) - set(model.latent_spaces))
     if unmatched:
@@ -405,4 +456,5 @@ def buildTrainerFromConfig(
         grad_clip_norm=config.grad_clip_norm,
         callbacks=callbacks,
         log_every_n_steps=config.log_every_n_steps,
+        reconstruction_reduction=reconstruction_reduction,
     )

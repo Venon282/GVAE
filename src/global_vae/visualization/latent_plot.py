@@ -26,6 +26,7 @@ import numpy as np
 import torch
 from matplotlib.figure import Figure
 
+from global_vae.losses.regularizers.kl_standard_normal import computeKlPerDimension
 from global_vae.models.global_vae import GlobalVae
 
 _VALID_METHODS = ("auto", "pca", "tsne", "umap", "none")
@@ -409,7 +410,7 @@ def plotPerDimensionKl(
     if mu.numel() == 0:
         raise ValueError("plotPerDimensionKl received empty mu/logvar.")
 
-    kl_per_dim = (-0.5 * (1 + logvar - mu.pow(2) - logvar.exp())).mean(dim=0)
+    kl_per_dim = computeKlPerDimension(mu, logvar).mean(dim=0)
     kl_values = kl_per_dim.detach().cpu().numpy()
     colors = ["tab:red" if value < collapse_threshold else "tab:blue" for value in kl_values]
 

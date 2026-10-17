@@ -56,12 +56,46 @@ import torch
 
 from global_vae.evaluation.cross_modal import exportCrossModalFigures
 from global_vae.evaluation.evaluate import evaluate
+from global_vae.evaluation.latent_diagnostics import DEFAULT_ACTIVE_UNIT_THRESHOLD
 from global_vae.evaluation.visual_export import exportEvaluationFigures
+from global_vae.losses.reconstruction import DEFAULT_REDUCTION, validateReduction
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.utils.imports import importCallable as _importCallable
 
 logger = logging.getLogger("global_vae.scripts.evaluate")
+
+
+def _parseReduction(text: str) -> str | dict[str, str]:
+    """Parse the value of `--reconstruction-reduction`.
+
+    Args:
+        text: A reduction name (`"mean"`, `"sum"`), or a comma-separated list of
+            `modality=name` pairs (for example `"signal=sum,image=mean"`).
+
+    Returns:
+        The name, or a modality -> name dict.
+
+    Raises:
+        argparse.ArgumentTypeError: If a pair has no `=`, or a name is not supported.
+    """
+    reduction: str | dict[str, str]
+    if "=" not in text:
+        reduction = text.strip()
+    else:
+        reduction = {}
+        for pair in text.split(","):
+            modality, separator, name = pair.partition("=")
+            if not separator or not modality.strip():
+                raise argparse.ArgumentTypeError(
+                    f"expected 'modality=name' pairs separated by commas, got '{pair}'."
+                )
+            reduction[modality.strip()] = name.strip()
+    try:
+        validateReduction(reduction, "--reconstruction-reduction")
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    return reduction
 
 
 def _buildArgumentParser() -> argparse.ArgumentParser:
@@ -99,6 +133,23 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Bound memory for a very large test set; see evaluation.evaluate's own docstring.",
+    )
+    parser.add_argument(
+        "--reconstruction-reduction",
+        type=_parseReduction,
+        default=DEFAULT_REDUCTION,
+        help="The reduction the model was trained with (training.reconstruction_reduction): "
+        "'mean' (default) or 'sum' for every modality, or 'modality=name' pairs separated "
+        "by commas, e.g. 'signal=sum,image=mean'. It sets the scale of the total "
+        "reconstruction loss in the report, so that it matches the training curves "
+        "(docs/adr/0029-loss-scale-convention.md); the per-modality metrics do not depend on it.",
+    )
+    parser.add_argument(
+        "--active-unit-threshold",
+        type=float,
+        default=DEFAULT_ACTIVE_UNIT_THRESHOLD,
+        help="A latent dimension counts as an active unit when the variance of its posterior "
+        "mean over the evaluation set is above this value (default: %(default)s).",
     )
     parser.add_argument(
         "--output-dir",
@@ -172,7 +223,14 @@ def main(argv: list[str] | None = None) -> None:
         inverse_transform_factory = _importCallable(args.inverse_transform_factory)
         inverse_transforms = inverse_transform_factory()  # type: ignore[operator]
 
-    results = evaluate(model, dataloader, device=resolved_device, max_samples=args.max_samples)
+    results = evaluate(
+        model,
+        dataloader,
+        device=resolved_device,
+        max_samples=args.max_samples,
+        reconstruction_reduction=args.reconstruction_reduction,
+        active_unit_threshold=args.active_unit_threshold,
+    )
     print(results.summary())
 
     if args.output_dir is not None:

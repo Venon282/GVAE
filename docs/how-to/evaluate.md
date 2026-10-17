@@ -22,9 +22,23 @@ python scripts/evaluate.py \
 references to your own code, the same convention as `data.loader_factory` in
 the training config: the framework never guesses your architecture or data
 format. This prints reconstruction metrics (mse / rmse / mae / r2 /
-pearson_r) and per-latent-space regularization values to the console, and
-(with `--output-dir`) saves a JSON report plus reconstruction / latent-space
-figures.
+pearson_r), per-latent-space regularization values and latent diagnostics to
+the console, and (with `--output-dir`) saves a JSON report plus
+reconstruction / latent-space figures.
+
+The latent diagnostics are, for each latent space, the KL of every latent
+dimension and the number of **active units**: dimensions whose posterior mean
+varies over the evaluation set by more than a threshold (the variance of `mu`
+above 0.01; `--active-unit-threshold` changes it). A latent space with few
+active units and a KL near zero on the rest has collapsed on those
+dimensions. [Choose beta](choose-beta.md) says how to read them.
+
+Pass `--reconstruction-reduction` the reduction the model was trained with
+(`training.reconstruction_reduction`: `mean`, the default, `sum`, or
+`modality=name` pairs such as `signal=sum,image=mean`), so that the total
+reconstruction loss of the report is on the scale of the training curves
+([ADR 0029](../adr/0029-loss-scale-convention.md)). The per-modality metrics
+do not depend on it.
 
 If your own data pipeline applied a `data.transforms` step (`log` /
 `standardize` / `resample`, spec §6.2) before training, reconstruction

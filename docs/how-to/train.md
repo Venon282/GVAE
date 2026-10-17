@@ -72,6 +72,29 @@ A run with no such callback records no rate, so its logs and files are unchanged
 your own that changes the rate must declare it (`acts_on_learning_rate = True`, see
 [add a strategy](add-a-strategy.md#a-note-specific-to-training-callbacks)).
 
+## Choose the reconstruction reduction
+
+The reconstruction term is a per-element mean by default, while the KL is a sum over the latent
+dimensions, so `beta = 1` is not the usual ELBO and the useful `beta` depends on the data shape
+([ADR 0029](../adr/0029-loss-scale-convention.md)). `training.reconstruction_reduction` chooses the
+scale, for every modality or per decoder:
+
+```yaml
+training:
+  reconstruction_reduction: mean              # the default: nothing changes
+  # reconstruction_reduction: sum             # the per-sample sum, the scale of the KL
+  # reconstruction_reduction: {signal: sum, image: mean}   # a decoder left out keeps mean
+```
+
+```bash
+python scripts/train.py 'training.reconstruction_reduction={signal:sum,image:mean}'
+```
+
+An unsupported name, or a decoder the model does not have, stops the run with an error that starts
+with `training.reconstruction_reduction`. The validation loss uses the same reduction as the
+training loss. Pass the same one to `scripts/evaluate.py --reconstruction-reduction`. How to pick a
+`beta` for it, and a sweep recipe, are in [choose beta](choose-beta.md).
+
 ## Loading a config programmatically
 
 Outside the `scripts/train.py` CLI entry point (e.g. from a notebook or your

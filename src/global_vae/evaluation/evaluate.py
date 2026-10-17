@@ -20,18 +20,65 @@ correctness; `max_samples` bounds it for a very large test set.
 """
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 import torch
 import torch.nn.functional as F  # noqa: N812 (torch convention)
 
+from global_vae.evaluation.latent_diagnostics import (
+    DEFAULT_ACTIVE_UNIT_THRESHOLD,
+    LatentDiagnostics,
+    computeLatentDiagnostics,
+    validateActiveUnitThreshold,
+)
 from global_vae.evaluation.metrics import DEFAULT_RECONSTRUCTION_METRICS, MetricFn
-from global_vae.losses.reconstruction import LossFn, computeTotalReconstructionLoss
+from global_vae.losses.reconstruction import (
+    DEFAULT_REDUCTION,
+    LossFn,
+    computeTotalReconstructionLoss,
+    validateReduction,
+)
 from global_vae.losses.regularizers.kl_standard_normal import KlStandardNormalRegularizer
 from global_vae.models.global_vae import GlobalVae
+
+_MAX_LISTED_DIMENSIONS = 16
+"""A latent space up to this wide has every KL value in the summary, a wider one only a digest."""
+
+
+def _formatReduction(reduction: str | Mapping[str, str]) -> str:
+    """Write a reconstruction reduction (a name or a modality -> name mapping) on one line."""
+    if isinstance(reduction, str):
+        return reduction
+    return ", ".join(f"{name}={value}" for name, value in reduction.items())
+
+
+def _formatLatentDiagnostics(name: str, diagnostics: LatentDiagnostics) -> list[str]:
+    """Write the summary lines of one latent space's diagnostics.
+
+    Args:
+        name: The latent space name.
+        diagnostics: Its diagnostics.
+
+    Returns:
+        Two lines: the active units, then the KL per dimension (every value up to
+        `_MAX_LISTED_DIMENSIONS` dimensions, otherwise the minimum, the median and the maximum).
+    """
+    kl_values = diagnostics.kl_per_dimension
+    if len(kl_values) <= _MAX_LISTED_DIMENSIONS:
+        kl_text = ", ".join(f"{value:.4f}" for value in kl_values)
+    else:
+        kl_text = (
+            f"min={min(kl_values):.4f}, median={median(kl_values):.4f}, max={max(kl_values):.4f}"
+        )
+    return [
+        f"    [{name}] active units: {diagnostics.active_units}/{diagnostics.num_dimensions} "
+        f"(variance of mu > {diagnostics.active_threshold:g})",
+        f"      kl per dimension: {kl_text}",
+    ]
 
 
 @dataclass
@@ -62,6 +109,17 @@ class EvaluationResults:
             runs trained with different regularizers (e.g. one with
             `mmd`, one with `free_bits_kl`) still have one directly
             comparable number.
+        latent_diagnostics: Latent space name -> `LatentDiagnostics`: the
+            KL of each latent dimension and the number of active units
+            (`evaluation.latent_diagnostics`, roadmap P2-1), computed over
+            the full pooled dataset like the metrics above. Empty by
+            default, so a result built by hand without it stays valid.
+        reconstruction_reduction: The reduction that
+            `total_reconstruction_loss` was computed with (`"mean"`, `"sum"`
+            or a modality -> name mapping, see
+            `losses.reconstruction.computeTotalReconstructionLoss`), kept in
+            the report because the value of that loss cannot be read
+            without it (`docs/adr/0029-loss-scale-convention.md`).
     """
 
     num_samples: int
@@ -69,6 +127,8 @@ class EvaluationResults:
     total_regularization_loss: float
     reconstruction_metrics: dict[str, dict[str, float]] = field(default_factory=dict)
     regularization_metrics: dict[str, dict[str, float]] = field(default_factory=dict)
+    latent_diagnostics: dict[str, LatentDiagnostics] = field(default_factory=dict)
+    reconstruction_reduction: str | dict[str, str] = DEFAULT_REDUCTION
 
     def toDict(self) -> dict[str, Any]:
         """Return a plain, JSON-serializable dict.
@@ -102,6 +162,10 @@ class EvaluationResults:
             f"  total reconstruction loss: {self.total_reconstruction_loss:.6f}",
             f"  total regularization loss: {self.total_regularization_loss:.6f}",
         ]
+        if self.reconstruction_reduction != DEFAULT_REDUCTION:
+            lines.append(
+                f"  reconstruction reduction: {_formatReduction(self.reconstruction_reduction)}"
+            )
         if self.reconstruction_metrics:
             lines.append("  reconstruction metrics:")
             for name, metrics in self.reconstruction_metrics.items():
@@ -112,6 +176,10 @@ class EvaluationResults:
             for name, metrics in self.regularization_metrics.items():
                 formatted = ", ".join(f"{key}={value:.6f}" for key, value in metrics.items())
                 lines.append(f"    [{name}] {formatted}")
+        if self.latent_diagnostics:
+            lines.append("  latent diagnostics:")
+            for name, diagnostics in self.latent_diagnostics.items():
+                lines.extend(_formatLatentDiagnostics(name, diagnostics))
         return "\n".join(lines)
 
 
@@ -125,10 +193,14 @@ def evaluate(
     use_mean: bool = True,
     device: str | torch.device | None = None,
     max_samples: int | None = None,
+    reconstruction_reduction: str | Mapping[str, str] = DEFAULT_REDUCTION,
+    active_unit_threshold: float = DEFAULT_ACTIVE_UNIT_THRESHOLD,
 ) -> EvaluationResults:
     """Run a full evaluation pass over `dataloader` and report reconstruction metrics.
 
-    Regularization (KL) values are reported alongside the reconstruction metrics.
+    Regularization (KL) values and the latent diagnostics (the KL of each latent dimension and
+    the number of active units, `evaluation.latent_diagnostics`) are reported alongside the
+    reconstruction metrics.
 
     Calls `model.eval()` (unlike the collection helpers in
     `visualization/`, which leave the mode to the caller: a standalone
@@ -174,17 +246,31 @@ def evaluate(
             `dataloader`. Bounds memory for a very large test set; the
             aggregate `total_*_loss` values are unaffected either way
             (accumulated as running batch averages, not pooled).
+        reconstruction_reduction: Forwarded to
+            `computeTotalReconstructionLoss` as `reduction`, for
+            `total_reconstruction_loss` only. Pass the reduction the model
+            was trained with so that this number is on the scale of the
+            training and validation curves; the per-modality
+            `reconstruction_metrics` do not depend on it. Defaults to
+            `"mean"`. Recorded in `EvaluationResults`.
+        active_unit_threshold: A latent dimension is an active unit when
+            the variance of its posterior mean over the pooled samples is
+            above this value (`LatentDiagnostics`). Defaults to 0.01.
 
     Returns:
         `EvaluationResults`.
 
     Raises:
-        ValueError: If `dataloader` yields no batches, if (via
+        ValueError: If `reconstruction_reduction` is not a supported
+            reduction, if `active_unit_threshold` is negative or not
+            finite, if `dataloader` yields no batches, if (via
             `GlobalVae.selectEncoderInputs`) some batch has no key
             naming any of `model`'s encoders, or if (via
             `computeTotalReconstructionLoss`) a reconstruction and its
             target in some batch differ in shape.
     """
+    validateReduction(reconstruction_reduction, "reconstruction_reduction")
+    validateActiveUnitThreshold(active_unit_threshold)
     resolved_device = device if device is not None else next(model.parameters()).device
     resolved_metrics = reconstruction_metrics or DEFAULT_RECONSTRUCTION_METRICS
     kl_regularizer = KlStandardNormalRegularizer()
@@ -210,6 +296,7 @@ def evaluate(
                 batch,
                 weights=reconstruction_weights,
                 loss_fn=reconstruction_loss_fn,
+                reduction=reconstruction_reduction,
             ).item()
             total_regularization_loss_sum += model.computeRegularizationLoss(
                 outputs["latent_params"], beta=beta
@@ -240,6 +327,7 @@ def evaluate(
         }
 
     regularization_metric_results: dict[str, dict[str, float]] = {}
+    latent_diagnostic_results: dict[str, LatentDiagnostics] = {}
     for name, mu_chunks in collected_mu.items():
         mu = torch.cat(mu_chunks, dim=0)
         logvar = torch.cat(collected_logvar[name], dim=0)
@@ -249,6 +337,9 @@ def evaluate(
             "configured": model.regularizers[name](mu, logvar).mean().item(),
             "kl_standard_normal": kl_regularizer(mu, logvar).mean().item(),
         }
+        latent_diagnostic_results[name] = computeLatentDiagnostics(
+            mu, logvar, active_threshold=active_unit_threshold
+        )
 
     return EvaluationResults(
         num_samples=min(num_samples, max_samples) if max_samples is not None else num_samples,
@@ -256,4 +347,10 @@ def evaluate(
         total_regularization_loss=total_regularization_loss_sum / num_batches,
         reconstruction_metrics=reconstruction_metric_results,
         regularization_metrics=regularization_metric_results,
+        latent_diagnostics=latent_diagnostic_results,
+        reconstruction_reduction=(
+            dict(reconstruction_reduction)
+            if isinstance(reconstruction_reduction, Mapping)
+            else reconstruction_reduction
+        ),
     )

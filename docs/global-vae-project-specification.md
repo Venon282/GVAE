@@ -82,6 +82,8 @@ The weight applied to a latent space's regularization term (`beta`) is likewise 
 - a per-latent-space value or schedule, letting different latent spaces (e.g. a shared vs. a private code) be regularized differently.
 `losses/regularizers/` holds the registry of regularization strategies; the schedule (constant, or a function of training step) is a separate, orthogonal config concern from *which* regularizer is used for a given latent space.
 
+**Scale of the objective** (ADR 0029). A latent space's regularization term is a sum over its dimensions, averaged over the batch. A modality's reconstruction term is its loss function's value scaled by a per-modality **reduction**: `mean` (the default: the per-element mean `torch.nn.functional` returns) or `sum` (the per-sample sum, averaged over the batch). Under `mean`, `beta = 1` weights the KL `N / 2` times more than the usual ELBO does (`N` is the number of values a sample reconstructs), so the useful `beta` depends on the data shape; under `sum` it does not. The reduction is `training.reconstruction_reduction`, one name or a decoder -> name mapping, and the evaluation report carries latent diagnostics (the KL of each latent dimension and the active units) to show what a `beta` did to the latent space.
+
 ---
 
 ## 3. Glossary (keep consistent everywhere)
@@ -282,7 +284,7 @@ global-vae/
 │       ├── models/
 │       │   └── global_vae.py    # assembles encoders + latent heads + fusion + latent + decoders from a routing graph
 │       ├── losses/
-│       │   ├── reconstruction.py     # computeTotalReconstructionLoss
+│       │   ├── reconstruction.py     # computeTotalReconstructionLoss, with a `mean` or `sum` reduction per modality (ADR 0029)
 │       │   ├── regularization.py     # computeTotalRegularizationLoss
 │       │   └── regularizers/
 │       │       ├── base.py      # AbstractLatentRegularizer interface
@@ -302,7 +304,7 @@ global-vae/
 │       │   ├── callbacks/       # TrainerCallback + registry: checkpoint, best_checkpoint, early_stopping, reduce_lr_on_plateau
 │       │   └── loggers/         # experiment logger interface + registry: csv, tensorboard
 │       ├── config/              # structured dataclass schema + builders (data, model, training, experiment); the model schema, its validation and its builder are three modules
-│       ├── evaluation/          # metrics, evaluate(), cross-modal reports, figure export
+│       ├── evaluation/          # metrics, evaluate(), latent diagnostics (per-dimension KL, active units), cross-modal reports, figure export
 │       ├── visualization/       # latent, reconstruction and loss-curve plots (optional `visualization` extra)
 │       └── utils/               # seed, convolution arithmetic and blocks, shared builders
 ├── tests/
@@ -421,6 +423,7 @@ model:
 ```yaml
 training:
   modality_dropout_p: 0.15        # trains robustness to missing modalities
+  reconstruction_reduction: mean  # or sum, or {signal: sum, image: mean} (ADR 0029); mean is the default
   beta_schedules:                 # latent space name -> schedule; absent spaces use `beta`
     z_shared:
       strategy: linear_warmup
@@ -494,12 +497,14 @@ Every model example above builds, and trains through `scripts/train.py` (`tests/
 
 - Which regularizer strategies to implement beyond the default `kl_standard_normal` (§2.3) . MMD and free-bits KL are candidates; not needed immediately, but the registry should stay open.
 - Exact pairing mechanism for the first paired signal+image dataset (§6.1) . matching by filename/sample-ID convention is the likely approach, but the concrete scheme isn't decided yet. (Note: this is a *pairing* question, i.e. a `loader_factory` concern, distinct from and not blocking §6.2's generic transforms, which are already implemented and do not depend on how pairing is eventually done.)
-- Precise β schedule hyperparameters (warm-up length, cyclical period, per-space values) . the mechanism supports all of this (§2.3); only the actual numbers are still to be tuned empirically once training starts.
+- Precise β schedule hyperparameters (warm-up length, cyclical period, per-space values) . the mechanism supports all of this (§2.3); only the actual numbers are still to be tuned empirically once training starts. The scale `beta` acts on is no longer open (see below), and `docs/how-to/choose-beta.md` gives the sweep to tune it with.
 - Concrete production/serving target (API serving, batch inference, edge deployment, ...) . in scope longer-term (§1), but sequenced after the model is functionally complete; specific requirements aren't known yet.
 
 **Resolved, no longer open:** whether any part of the data pipeline belongs inside the framework (§6.2). Generic, invertible preprocessing (`data/transforms/`) does; dataset loading, pairing, and splitting (`datamodule.py`) permanently does not, for the reasons given in §6.2. This was previously bundled as one deferred item; it is now a settled design decision, not an open question.
 
 **Also resolved:** which assembler operators to implement and in what order. All five of §2.2 exist: `concat`, `sum` and `average`, then `weighted_sum` and `attention`. An assembler is built from the widths of the latent spaces it merges (`input_dims`), announces its `output_dim`, which is checked against (or fills in) its decoder's `latent_dim` at model construction, and declares whether it needs matching widths with the class-level flag `requires_matching_dims` (ADR 0026).
+
+**Also resolved:** the loss scale convention (§2.3, ADR 0029). The reconstruction term is a per-element mean by default and a per-sample sum on request, per modality (`training.reconstruction_reduction`), so `beta` reads as the weight of an ELBO only under `sum` (with a reconstruction weight that matches the loss, 0.5 for `mse`); the default stays `mean`, and a different default needs its own ADR and a minor release. What stays open is the numbers (above).
 
 **Also resolved:** the YAML schema for the routing graph, the Latent Head assignments and the regularizer/beta configuration (§9, ADR 0025). Heads sit on the encoder -> latent edge (`fed_by`), decoder instances are named independently of modalities (`encoders`, `decoders`), the regularizer is a field of each latent space, and beta stays per latent space in `TrainingConfig.beta_schedules`. `validateRoutingGraph` and `validateModelConfig` check the result, and an error starts with the dotted path of the field. Per-modality `reconstruction_loss` and `reconstruction_weight` are not part of this schema and stay a Python-only option of `Trainer`.
 

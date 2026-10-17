@@ -14,6 +14,23 @@ from global_vae.losses.regularizers.base import AbstractLatentRegularizer
 from global_vae.losses.regularizers.registry import registerRegularizer
 
 
+def computeKlPerDimension(mu: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
+    """Element-wise KL divergence of `N(mu, exp(logvar))` to `N(0, 1)`, in nats.
+
+    The one formula behind `KlStandardNormalRegularizer` (which sums it over the latent
+    dimensions), `visualization.latent_plot.plotPerDimensionKl` and the latent diagnostics of
+    the evaluation report (`evaluation.latent_diagnostics`), so the three always agree.
+
+    Args:
+        mu: Posterior mean, shape `(batch, dim)`.
+        logvar: Posterior log-variance, shape `(batch, dim)`.
+
+    Returns:
+        The KL of every latent dimension of every sample, same shape as `mu`.
+    """
+    return -0.5 * (1 + logvar - mu.pow(2) - logvar.exp())
+
+
 @registerRegularizer("kl_standard_normal")
 class KlStandardNormalRegularizer(AbstractLatentRegularizer):
     """KL divergence of `N(mu, exp(logvar))` to `N(0, I)`.
@@ -33,4 +50,4 @@ class KlStandardNormalRegularizer(AbstractLatentRegularizer):
         Returns:
             Per-sample KL divergence, shape `(batch,)`.
         """
-        return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp(), dim=-1)
+        return torch.sum(computeKlPerDimension(mu, logvar), dim=-1)

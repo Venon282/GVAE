@@ -213,6 +213,44 @@ versioning follows [Semantic Versioning](https://semver.org/).
   built from a config, and a run with no such callback unchanged), and tests of `plotLearningRate`
   and of `lr_curve.png` in `tests/integration/test_loss_curves.py` and
   `tests/integration/test_visualize_latent_script.py`.
+- Loss scale convention and a reconstruction reduction per modality (roadmap P2-1, ADR 0029). The
+  reconstruction term is a per-element mean while the KL is a per-sample sum over the latent
+  dimensions, so `beta = 1` weights the KL `N / 2` times more than the usual ELBO (`N` is the
+  number of values a sample reconstructs: 128 times for a 256-point signal, 512 for a 32 by 32
+  image). `computeTotalReconstructionLoss` gains `reduction` (a name, or a modality -> name
+  mapping; a modality left out keeps `"mean"`): `"mean"` is the default and leaves the loss exactly
+  as it was, `"sum"` multiplies the loss function's value by `N` (the per-sample sum, averaged over
+  the batch). `SUPPORTED_REDUCTIONS`, `DEFAULT_REDUCTION`, `listSupportedReductions`,
+  `validateReduction` and `resolveReduction` are in `losses/reconstruction.py`.
+- `Trainer(reconstruction_reduction=...)`, the last argument so positional callers are unaffected,
+  and `TrainingConfig.reconstruction_reduction` (`str | dict[str, str]`, typed `Any` in the
+  structured config and validated by `buildTrainerFromConfig`, default `"mean"`, written in
+  `configs/training/default.yaml` and `several_latents.yaml`). An unsupported name or a decoder the
+  model does not have is a `ValueError` that starts with `training.reconstruction_reduction`: a
+  mistyped decoder would otherwise stay on `mean` without a word. `resolveReconstructionReduction`
+  does the check. The validation loss of `Trainer.evaluate` uses the same reduction.
+- Latent diagnostics in the evaluation report. `evaluation/latent_diagnostics.py` has
+  `LatentDiagnostics` (the KL of every latent dimension, the variance of its posterior mean, the
+  number of active units and the threshold used), `computeLatentDiagnostics` and
+  `DEFAULT_ACTIVE_UNIT_THRESHOLD` (0.01, Burda et al. 2016). `EvaluationResults` gains
+  `latent_diagnostics` (latent space name -> `LatentDiagnostics`) and `reconstruction_reduction`,
+  both with defaults so a result built by hand still works; they are in `toDict`, the JSON file and
+  `summary()`. `evaluate()` takes `reconstruction_reduction` and `active_unit_threshold`, and
+  `scripts/evaluate.py` has `--reconstruction-reduction` (a name or `modality=name` pairs) and
+  `--active-unit-threshold`. The pooled `(mu, logvar)` are the input, so `max_samples` applies.
+- `computeKlPerDimension` in `losses/regularizers/kl_standard_normal.py`, the one KL formula behind
+  the regularizer, `plotPerDimensionKl` and the diagnostics.
+- `docs/adr/0029-loss-scale-convention.md`, `docs/how-to/choose-beta.md` (what `beta` multiplies
+  under each reduction, how to read the diagnostics, a sweep recipe) and a "Choose the reconstruction
+  reduction" section in `docs/how-to/train.md`, a paragraph in `README.md` and the diagnostics in
+  `docs/how-to/evaluate.md`. No value of `beta` is given: the numbers are roadmap decision D-6 and
+  wait for P3-1. The spec §2.3, §8, §9 and §11 say the same in a few lines each (spec edits, to be
+  confirmed by the owner).
+- `tests/unit/test_reconstruction_reduction.py` (values for both reductions, per-modality mixes,
+  the default bit for bit equal to the old loss, validation errors, gradients),
+  `tests/unit/test_latent_diagnostics.py` (the KL and active-unit maths against hand-computed
+  values) and `tests/integration/test_loss_scale_convention.py` (YAML and Hydra overrides to
+  `Trainer`, training with `sum`, `evaluate()`, the summary and JSON, and `scripts/evaluate.py`).
 
 ### Changed
 
@@ -318,6 +356,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
   six significant digits (`train/lr=1e-05`) where a loss keeps four decimals, which would have
   printed `1e-05` as `0.0000`. The loss plot of `scripts/visualize_latent.py` leaves the learning
   rate keys out, since they have their own figure.
+- `KlStandardNormalRegularizer.forward` and `plotPerDimensionKl` call `computeKlPerDimension`
+  instead of writing the formula each. Their results are unchanged.
 
 ### Removed
 

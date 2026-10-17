@@ -447,6 +447,13 @@ default, so nothing changes silently; a new default needs a minor release and a 
 add a how-to on choosing `beta` with a sweep recipe, and report latent diagnostics (active units,
 per-dimension KL) in the evaluation summary. The numbers themselves (D-6) need P3-1.
 
+**P2-1 status.** Done, except for the numbers (D-6), which wait for P3-1:
+[ADR 0029](adr/0029-loss-scale-convention.md), `training.reconstruction_reduction` and
+`Trainer(reconstruction_reduction=...)` (`mean` by default, so nothing changed), the latent
+diagnostics of `evaluate()` and the `how-to/choose-beta.md` sweep recipe. The item listed P2-2 as a
+dependency; the reduction is per modality by itself (a decoder -> name mapping), so it did not need
+a per-modality loss and weight in config, which stay P2-2.
+
 **P2-2. Per-modality loss and weight.** `TrainingConfig.reconstruction_loss` and
 `reconstruction_weight` are single values shared by every modality, while
 `computeTotalReconstructionLoss` and `Trainer` already accept per-modality dictionaries. Accept

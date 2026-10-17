@@ -16,6 +16,11 @@ optimizer:
 
 reconstruction_loss: mse
 reconstruction_weight: 1.0
+# How each modality's reconstruction loss is scaled: `mean` (the per-element mean, the default) or
+# `sum` (the per-sample sum, which is the scale of the KL term), for every modality or per decoder,
+# for example `{signal: sum, image: mean}`. Changing it changes what `beta` means: see
+# docs/adr/0029-loss-scale-convention.md and docs/how-to/choose-beta.md.
+reconstruction_reduction: mean
 
 beta: 1.0
 beta_schedules: {}

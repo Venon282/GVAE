@@ -32,7 +32,7 @@ own decoder target.
 """
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,7 +42,12 @@ import torch.nn.functional as F  # noqa: N812 (torch convention)
 from torch import nn
 from torch.optim import Optimizer
 
-from global_vae.losses.reconstruction import LossFn, computeTotalReconstructionLoss
+from global_vae.losses.reconstruction import (
+    DEFAULT_REDUCTION,
+    LossFn,
+    computeTotalReconstructionLoss,
+    validateReduction,
+)
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedule_resolution import resolveBetaSchedules
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
@@ -148,6 +153,7 @@ class Trainer:
         grad_clip_norm: float | None = None,
         callbacks: list[TrainerCallback] | None = None,
         log_every_n_steps: int = 50,
+        reconstruction_reduction: str | Mapping[str, str] = DEFAULT_REDUCTION,
     ) -> None:
         """Build a `Trainer` around an already-constructed `GlobalVae`.
 
@@ -218,11 +224,21 @@ class Trainer:
                 logs step-level progress via the standard `logging`
                 module (never `print`, spec §10). Every epoch boundary
                 is always logged regardless of this value.
+            reconstruction_reduction: Forwarded to
+                `computeTotalReconstructionLoss` as `reduction`: `"mean"`
+                (default, the per-element mean, as before this argument
+                existed) or `"sum"` (the per-sample sum, averaged over the
+                batch), as one name for every modality or a per-modality
+                mapping. It applies to the training loss and to the
+                validation loss of `evaluate`, so both curves keep one scale.
+                See `docs/adr/0029-loss-scale-convention.md`.
 
         Raises:
             ValueError: If `modality_dropout_p` is not in `[0, 1]`, if
-                `grad_clip_norm` is given and not positive, or if
-                `log_every_n_steps` is not positive.
+                `grad_clip_norm` is given and not positive, if
+                `log_every_n_steps` is not positive, or if
+                `reconstruction_reduction` is not a supported reduction
+                (`global_vae.losses.reconstruction.validateReduction`).
         """
         if not (0.0 <= modality_dropout_p <= 1.0):
             raise ValueError(f"modality_dropout_p must be in [0, 1], got {modality_dropout_p}.")
@@ -230,6 +246,7 @@ class Trainer:
             raise ValueError(f"grad_clip_norm must be positive when given, got {grad_clip_norm}.")
         if log_every_n_steps <= 0:
             raise ValueError(f"log_every_n_steps must be positive, got {log_every_n_steps}.")
+        validateReduction(reconstruction_reduction, "reconstruction_reduction")
 
         self.device = (
             torch.device(device)
@@ -245,6 +262,7 @@ class Trainer:
 
         self.reconstruction_weights = reconstruction_weights
         self.reconstruction_loss_fn = reconstruction_loss_fn
+        self.reconstruction_reduction = reconstruction_reduction
         self.beta = beta
         self.beta_schedules = beta_schedules or {}
         self.modality_dropout_p = modality_dropout_p
@@ -329,6 +347,7 @@ class Trainer:
             batch,
             weights=self.reconstruction_weights,
             loss_fn=self.reconstruction_loss_fn,
+            reduction=self.reconstruction_reduction,
         )
         resolved_beta = self._computeBeta(step)
         regularization_loss = self.model.computeRegularizationLoss(

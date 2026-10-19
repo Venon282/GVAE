@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
@@ -284,3 +285,102 @@ def test_a_broken_model_section_fails_before_training_with_the_field_path(
     assert completed.returncode != 0
     assert "model.latent.spaces.z_shared.fed_by: unknown encoder 'audio'" in completed.stderr
     assert not (output_dir / "metrics.csv").exists()
+
+
+def _epochMetrics(metrics_path: Path) -> dict[tuple[str, str], float]:
+    """`(x, metric) -> value` of the `epoch` rows of a metrics CSV, the last row winning."""
+    rows = csv.DictReader(metrics_path.open())
+    return {(row["x"], row["metric"]): float(row["value"]) for row in rows if row["tag"] == "epoch"}
+
+
+class TestResumeFromTheTrainScript:
+    """`training.resume_from` and `training.num_epochs` as the total of the run (ADR 0032)."""
+
+    _EVERY_EPOCH = "training.callbacks.checkpoint.every_n_epochs=1"
+
+    def _interruptedRun(self, tmp_path: Path) -> Path:
+        completed, output_dir = _runTrainScript(
+            tmp_path, extra_overrides=["training.num_epochs=2", self._EVERY_EPOCH]
+        )
+        assert completed.returncode == 0, completed.stderr
+        checkpoint = output_dir / "checkpoints" / "checkpoint_epoch_0001.pt"
+        assert checkpoint.is_file()
+        return checkpoint
+
+    def test_a_resumed_run_completes_the_total_and_matches_the_uninterrupted_curve(
+        self, tmp_path: Path
+    ) -> None:
+        uninterrupted, uninterrupted_dir = _runTrainScript(
+            tmp_path / "uninterrupted", extra_overrides=["training.num_epochs=4", self._EVERY_EPOCH]
+        )
+        assert uninterrupted.returncode == 0, uninterrupted.stderr
+
+        checkpoint = self._interruptedRun(tmp_path / "interrupted")
+        resumed, resumed_dir = _runTrainScript(
+            tmp_path / "interrupted",
+            extra_overrides=[
+                "training.num_epochs=4",
+                self._EVERY_EPOCH,
+                f"training.resume_from={checkpoint}",
+            ],
+        )
+        assert resumed.returncode == 0, resumed.stderr
+        output = resumed.stdout + resumed.stderr
+        assert "2 of 4 epoch(s) left" in output
+        assert "Starting training for 2 epoch(s)" in output
+
+        expected = _epochMetrics(uninterrupted_dir / "metrics.csv")
+        observed = _epochMetrics(resumed_dir / "metrics.csv")
+        assert set(observed) == set(expected)
+        assert len({x for x, _ in observed}) == 4
+        for key, value in expected.items():
+            assert observed[key] == pytest.approx(value, rel=1e-6, abs=1e-9), key
+
+        final = loadCheckpointRaw(resumed_dir / "checkpoints" / "checkpoint_epoch_0003.pt")
+        assert final["start_epoch"] == 4
+        assert len(final["history"]) == 4
+
+    def test_the_metrics_file_of_the_first_part_is_continued_not_replaced(
+        self, tmp_path: Path
+    ) -> None:
+        checkpoint = self._interruptedRun(tmp_path)
+        metrics = tmp_path / "run" / "metrics.csv"
+        first_part = metrics.read_text()
+
+        completed, _ = _runTrainScript(
+            tmp_path,
+            extra_overrides=[
+                "training.num_epochs=3",
+                self._EVERY_EPOCH,
+                f"training.resume_from={checkpoint}",
+            ],
+        )
+        assert completed.returncode == 0, completed.stderr
+        text = metrics.read_text()
+        assert text.startswith(first_part)
+        assert text.count("x,tag,metric,value") == 1
+
+    def test_nothing_is_left_to_train_when_the_checkpoint_holds_every_epoch(
+        self, tmp_path: Path
+    ) -> None:
+        checkpoint = self._interruptedRun(tmp_path)
+        completed, output_dir = _runTrainScript(
+            tmp_path,
+            extra_overrides=["training.num_epochs=2", f"training.resume_from={checkpoint}"],
+        )
+        assert completed.returncode == 0, completed.stderr
+        assert "Nothing to train" in completed.stdout + completed.stderr
+        assert not (output_dir / "checkpoints" / "checkpoint_epoch_0002.pt").exists()
+
+    def test_a_missing_checkpoint_fails_with_the_field_path(self, tmp_path: Path) -> None:
+        completed, _ = _runTrainScript(
+            tmp_path, extra_overrides=[f"training.resume_from={tmp_path / 'nope.pt'}"]
+        )
+        assert completed.returncode != 0
+        assert "training.resume_from: no checkpoint at" in completed.stderr
+
+
+def loadCheckpointRaw(path: Path) -> dict[str, Any]:
+    """Read a checkpoint with the restricted unpickler, as `loadCheckpoint` does by default."""
+    checkpoint: dict[str, Any] = torch.load(path, map_location="cpu", weights_only=True)
+    return checkpoint

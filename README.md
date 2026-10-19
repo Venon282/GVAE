@@ -64,6 +64,17 @@ passes the same choice to the report (`docs/how-to/choose-beta.md`,
 `--reconstruction-loss` and `--reconstruction-weight` do the same for the report
 (`docs/adr/0030-per-modality-reconstruction-loss-and-weight.md`).
 
+The trainer has opt-in capabilities, all off by default: `training.mixed_precision` (`bf16` or
+`fp16`), `training.accumulate_grad_batches` and `training.compile_model`
+(`docs/adr/0031-mixed-precision-gradient-accumulation-and-compile.md`); `training.resume_from`, where
+`training.num_epochs` is the total of the run, so that an interrupted run continues and a resumed
+deterministic run reproduces the uninterrupted loss curve
+(`docs/adr/0032-resume-from-the-training-script.md`); the callbacks `top_k_checkpoint`,
+`linear_warmup_lr` and `cosine_lr`
+(`docs/adr/0033-top-k-checkpoints-and-learning-rate-schedules.md`). Checkpoints are read with
+`torch.load(weights_only=True)` by default; a file from an earlier version needs
+`upgradeCheckpoint` or `--trust-checkpoint` (`docs/adr/0034-safe-checkpoint-loading-by-default.md`).
+
 ## Running checks
 
 ```bash

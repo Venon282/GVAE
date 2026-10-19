@@ -85,6 +85,15 @@ class BestCheckpointCallback(TrainerCallback):
         self.config = config
         self.best_value: float | None = None
 
+    def stateDict(self) -> dict[str, Any]:
+        """Return the best value so far, so a resumed run does not overwrite a better file."""
+        return {"best_value": self.best_value}
+
+    def loadStateDict(self, state: dict[str, Any]) -> None:
+        """Restore the best value. See `stateDict`."""
+        best_value = state["best_value"]
+        self.best_value = None if best_value is None else float(best_value)
+
     def onEpochEnd(self, trainer: "Trainer", epoch: int, metrics: dict[str, float]) -> None:
         """Save a checkpoint if `self.monitor` improved this epoch.
 

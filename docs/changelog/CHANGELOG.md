@@ -277,6 +277,44 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `tests/integration/test_per_modality_loss_and_weight.py` (Hydra overrides to `Trainer`, the
   resolvers, the loss values by linearity against one modality weighted at a time, the composition
   with the reduction, gradients, training, and the `scripts/evaluate.py` flags).
+- Trainer capabilities (roadmap P2-3, ADRs 0031 to 0034), each opt-in and off by default.
+  Mixed precision, gradient accumulation and `torch.compile` (ADR 0031): `Trainer(mixed_precision=
+  None | "bf16" | "fp16", accumulate_grad_batches=1, compile_model=False, compile_kwargs=None)` and
+  the `TrainingConfig` fields of the same names. The forward pass runs under autocast with the
+  losses computed in `float32`; `fp16` adds a `torch.amp.GradScaler` (`Trainer.scaler`) whose state
+  is saved and restored with the checkpoint. With `accumulate_grad_batches = N` a step is an optimizer
+  update of `N` batches, so `global_step`, the beta schedules, `onStepEnd` and `log_every_n_steps`
+  count updates, and the partial last group of an epoch is rescaled to a mean. `compile_model` wraps
+  the forward pass in `torch.compile` and leaves `Trainer.model` and the `state_dict` keys alone.
+- Resume from the training script (ADR 0032). `training.resume_from` and
+  `resumeTrainerFromConfig(trainer, config) -> int`, which `scripts/train.py` calls: **`num_epochs`
+  is the total of the run**, so it trains `num_epochs - start_epoch` epochs, or none (the script logs
+  it and exits) when the checkpoint already holds them; a missing file is a `FileNotFoundError`
+  that starts with `training.resume_from`. `TrainerCallback.stateDict()` and `loadStateDict()`
+  (no-ops by default) are implemented by `EarlyStopping`, `ReduceLrOnPlateau`,
+  `BestCheckpointCallback`, `CheckpointCallback` and the new `top_k_checkpoint`, stored in the
+  checkpoint as `callbacks_state` and given back to the callback of the same class. `CsvLogger`
+  gains `append=False`, which `buildCallbacksFromConfig` sets to `True` for a resumed run. **A
+  resumed deterministic run reproduces the uninterrupted loss curve to a relative `1e-6` (absolute
+  `1e-9`) and the weights to `1e-6`.**
+- Callbacks `top_k_checkpoint` (`TopKCheckpointCallback`: the `k` best epochs, one full
+  checkpoint each, the worst deleted, ties keep the earlier epoch, a non-finite value is never kept),
+  `linear_warmup_lr` and `cosine_lr` (ADR 0033). The two schedules set the rate of every parameter
+  group to `initial_lr * factor(step)` at each optimizer step, with `initial_lr` kept in the
+  optimizer's parameter groups, so a resume needs no schedule state, and they act on the learning
+  rate (ADR 0028), so `train/lr` is recorded. `cosine_lr` warns when another callback that changes
+  the rate is present. They are in `training/callbacks/` with the private base `_lr_schedule.py`.
+- `upgradeCheckpoint(path, output_path=None)` in `training/checkpoint.py`, which rewrites a
+  checkpoint from an earlier version so that the safe mode reads it, and `--trust-checkpoint` on
+  `scripts/evaluate.py` and `scripts/visualize_latent.py` (ADR 0034).
+- `docs/adr/0031-*.md` to `docs/adr/0034-*.md`, sections of `docs/how-to/train.md` (learning-rate
+  schedules, mixed precision, accumulation and compile, top-K checkpoints, resuming, loading
+  checkpoints safely) and a note in `docs/how-to/evaluate.md`; the spec §9, §10 and §11 say the same
+  in a line each (spec edits, to be confirmed by the owner).
+- Tests: `tests/integration/test_trainer_capabilities.py`, `test_resume.py` (six scenarios
+  interrupted and resumed, the callback states, the CSV append), `test_top_k_checkpoint.py`,
+  `test_lr_schedules.py`, `test_safe_checkpoint_loading.py` and a resume class in
+  `test_train_script.py` that runs `scripts/train.py` in subprocesses.
 
 ### Changed
 
@@ -384,6 +422,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
   rate keys out, since they have their own figure.
 - `KlStandardNormalRegularizer.forward` and `plotPerDimensionKl` call `computeKlPerDimension`
   instead of writing the formula each. Their results are unchanged.
+- **Checkpoints are loaded with `weights_only=True` by default** (ADR 0034).
+  `training.checkpoint.loadCheckpoint` and `Trainer.loadCheckpoint` take `weights_only: bool = True`,
+  and a file the restricted unpickler refuses raises a `pickle.UnpicklingError` that names
+  `upgradeCheckpoint`, `weights_only=False` and `--trust-checkpoint`. Checkpoints written now hold
+  only plain values: the NumPy RNG state is a list (`_restoreRngState` still accepts an array), and a
+  dataclass passed as `config` is stored as a dict by `dataclasses.asdict`, so `loadCheckpoint`
+  returns a dict where it used to return the dataclass. **A checkpoint saved by an earlier version
+  holds the RNG state as an array, so it needs `upgradeCheckpoint`, `weights_only=False` or
+  `--trust-checkpoint`.**
+- A step of `Trainer` is an optimizer update (ADR 0031). Nothing changes while
+  `accumulate_grad_batches` is `1`.
+- `configs/training/default.yaml` and `several_latents.yaml` list `best_checkpoint` before
+  `checkpoint`, and spell out the new fields (`mixed_precision`, `accumulate_grad_batches`,
+  `compile_model`, `compile_kwargs`, `resume_from`) at their defaults, so a Hydra override such as
+  `training.resume_from=...` finds the key.
 
 ### Removed
 

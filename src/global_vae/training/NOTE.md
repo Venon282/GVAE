@@ -79,15 +79,34 @@ just works). See `docs/adr/0008-experiment-loggers.md` and
 `docs/adr/0022-callback-registry.md`'s own note on why the two stay
 apart.
 
+`trainer.py` has three opt-in capabilities, all off by default (ADR 0031): `mixed_precision`
+(`"bf16"` or `"fp16"`; autocast around the forward pass, the losses computed in `float32`, a
+`torch.amp.GradScaler` for `fp16`, kept in `Trainer.scaler` and saved in the checkpoint),
+`accumulate_grad_batches` (the gradients of `N` batches added before one optimizer step; a *step*
+is an update, so `global_step`, beta schedules and `onStepEnd` count updates, and the partial last
+group of an epoch is rescaled to a mean) and `compile_model` (the forward pass goes through
+`torch.compile`, `self.model` is untouched so checkpoint keys stay the same).
+
+Resuming (ADR 0032): `TrainerCallback.stateDict()`/`loadStateDict()` (no-ops by default) let a
+callback keep what decides the future of a run. `Trainer.saveCheckpoint` writes them under
+`callbacks_state` (`{"class", "state"}` per callback, in order) and `Trainer.loadCheckpoint` hands
+each to the callback of the same class. `config/training.py` has `resumeTrainerFromConfig`, which
+`scripts/train.py` calls for `training.resume_from`: `num_epochs` is the total of the run there,
+while `Trainer.fit(num_epochs)` stays an increment. A resumed deterministic run reproduces the
+uninterrupted loss curve to a relative `1e-6` (`tests/integration/test_resume.py`).
+
+`callbacks/` also holds `top_k_checkpoint.py` (`TopKCheckpointCallback`, the `k` best epochs, the
+extension ADR 0007 listed), and `linear_warmup_lr.py` and `cosine_lr.py`, built on the private
+`_lr_schedule.py` (`AbstractLrSchedule`: the rate is `initial_lr * factor(step)`, `initial_lr`
+kept in the optimizer's parameter groups, so a schedule has no state of its own). See ADR 0033.
+
+`checkpoint.py` reads a file with `weights_only=True` by default and writes only plain values
+(NumPy RNG state as a list, a dataclass `config` as a dict); `upgradeCheckpoint` rewrites a file
+from an earlier version (ADR 0034).
+
 # Nothing currently deferred under spec §10 for this subpackage.
 
-`trainer.py` itself may still grow (e.g. mixed precision, multi-GPU,
-gradient accumulation) as real training needs surface, and migrating
-to PyTorch Lightning remains the eventual plan once the architecture
-stabilizes (spec §10), but every item spec §10 explicitly lists for
-the training loop (raw loop, reconstruction + regularization loss,
-optimizer, device placement, logging, reproducibility, experiment
-tracking, checkpointing) is now built. Keeping the top-`K` best
-checkpoints (`K > 1`, rather than only the single best
-`BestCheckpointCallback` keeps) is a natural, not-yet-built extension,
-noted in `docs/adr/0007-best-checkpoint-callback.md`.
+Every item spec §10 explicitly lists for the training loop (raw loop, reconstruction +
+regularization loss, optimizer, device placement, logging, reproducibility, experiment tracking,
+checkpointing) is built. Multi-GPU and migrating to PyTorch Lightning remain the eventual plan once
+the architecture stabilizes (spec §10).

@@ -38,6 +38,22 @@ grad_clip_norm: null
 device: null # null auto-detects cuda, falling back to cpu
 log_every_n_steps: 50
 
+# Trainer options, each off by default; see
+# docs/adr/0031-mixed-precision-gradient-accumulation-and-compile.md.
+# `mixed_precision`: null (full precision), bf16 or fp16. `accumulate_grad_batches`: batches added
+# together before one optimizer step; a step is then an update, which is what `log_every_n_steps`,
+# a beta warm-up and a learning-rate schedule count. `compile_model` runs the forward pass through
+# torch.compile, with `compile_kwargs` passed to it.
+mixed_precision: null
+accumulate_grad_batches: 1
+compile_model: false
+compile_kwargs: {}
+# Continue a run from one of its checkpoints, for example
+# `training.resume_from=runs/signal_vae/checkpoints/checkpoint_epoch_0039.pt`. `num_epochs` is the
+# total of the run, so only the epochs after the checkpoint's are trained
+# (docs/adr/0032-resume-from-the-training-script.md).
+resume_from: null
+
 loggers:
   - name: csv
     kwargs:
@@ -51,11 +67,14 @@ loggers:
 # be listed, in any order, including none at all. Instantiated, and called by Trainer,
 # in this mapping's own order, after every logger above.
 callbacks:
-  checkpoint:
-    directory: ${output_dir}/checkpoints
-    every_n_epochs: 10
-    keep_last_n: 3
   best_checkpoint:
     path: ${output_dir}/checkpoints/best.pt
     monitor: val/loss/total
     mode: min
+  # Last, so that the periodic checkpoints, the ones a run is resumed from, hold the state of
+  # the callbacks above it as of the epoch they were written; see
+  # docs/adr/0032-resume-from-the-training-script.md.
+  checkpoint:
+    directory: ${output_dir}/checkpoints
+    every_n_epochs: 10
+    keep_last_n: 3

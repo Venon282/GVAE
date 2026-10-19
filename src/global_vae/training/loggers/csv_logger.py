@@ -29,13 +29,13 @@ class CsvLogger(AbstractExperimentLogger):
     visual content.
     """
 
-    def __init__(self, path: str | Path, flush_every_n_rows: int = 1) -> None:
+    def __init__(self, path: str | Path, flush_every_n_rows: int = 1, append: bool = False) -> None:
         """Open `path` for writing and write the header row.
 
         Args:
             path: Destination CSV file path. Parent directories are
                 created if they do not already exist. Opened in write
-                mode (`"w"`): an existing file at this path is
+                mode (`"w"`) by default: an existing file at this path is
                 overwritten, matching `TensorBoardLogger`'s own
                 start-a-fresh-run behavior for a given `log_dir`.
             flush_every_n_rows: Flush to disk every `N` rows (`1`, the
@@ -44,6 +44,12 @@ class CsvLogger(AbstractExperimentLogger):
                 step-level logging). Raise this if step-level logging
                 volume makes flushing every row a measurable
                 bottleneck.
+            append: If `True` and a non-empty file is already at `path`, add rows to it,
+                with no second header, instead of replacing it. This is how a resumed run
+                (`training.resume_from`, ADR 0032) continues the file of the first part:
+                `buildTrainerFromConfig` passes it for you. Rows the interrupted run wrote
+                after its last checkpoint stay in the file, so a step can appear twice; the
+                later row is the one of the resumed run.
 
         Raises:
             ValueError: If `flush_every_n_rows` is not positive.
@@ -53,9 +59,11 @@ class CsvLogger(AbstractExperimentLogger):
 
         resolved_path = Path(path)
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
-        self._file = resolved_path.open("w", newline="", encoding="utf-8")
+        continuing = append and resolved_path.is_file() and resolved_path.stat().st_size > 0
+        self._file = resolved_path.open("a" if continuing else "w", newline="", encoding="utf-8")
         self._writer = csv.writer(self._file)
-        self._writer.writerow(["x", "tag", "metric", "value"])
+        if not continuing:
+            self._writer.writerow(["x", "tag", "metric", "value"])
         self._flush_every_n_rows = flush_every_n_rows
         self._rows_since_flush = 0
 

@@ -9,9 +9,9 @@ picks any number of them by name, and adding a new one (built-in or the
 caller's own) never requires touching `Trainer` or the config layer.
 
 Importing this package registers every built-in registry-driven callback
-(`"checkpoint"`, `"best_checkpoint"`, `"early_stopping"`,
-`"reduce_lr_on_plateau"`) via each module's own `@registerCallback`
-decorator. A `@registerX(...)` decorator only runs once its module is
+(`"checkpoint"`, `"best_checkpoint"`, `"top_k_checkpoint"`, `"early_stopping"`,
+`"reduce_lr_on_plateau"`, `"linear_warmup_lr"`, `"cosine_lr"`) via each module's own
+`@registerCallback` decorator. A `@registerX(...)` decorator only runs once its module is
 imported; without these imports, `getCallbackClass("checkpoint")` would raise
 `KeyError` even though `checkpoint.py` exists on disk.
 
@@ -34,5 +34,8 @@ for why the two stay apart.
 
 import global_vae.training.callbacks.best_checkpoint  # noqa: F401
 import global_vae.training.callbacks.checkpoint  # noqa: F401
+import global_vae.training.callbacks.cosine_lr  # noqa: F401
 import global_vae.training.callbacks.early_stopping  # noqa: F401
+import global_vae.training.callbacks.linear_warmup_lr  # noqa: F401
 import global_vae.training.callbacks.reduce_lr_on_plateau  # noqa: F401
+import global_vae.training.callbacks.top_k_checkpoint  # noqa: F401

@@ -486,6 +486,38 @@ the style of `test_trainer_smoke.py`:
 
 A resumed deterministic run must reproduce the uninterrupted loss curve within a stated tolerance.
 
+**P2-3 status.** Done, each as an opt-in that is off by default
+([ADR 0031](adr/0031-mixed-precision-gradient-accumulation-and-compile.md),
+[0032](adr/0032-resume-from-the-training-script.md),
+[0033](adr/0033-top-k-checkpoints-and-learning-rate-schedules.md),
+[0034](adr/0034-safe-checkpoint-loading-by-default.md)), with a smoke test each
+(`tests/integration/test_trainer_capabilities.py`, `test_resume.py`, `test_top_k_checkpoint.py`,
+`test_lr_schedules.py`, `test_safe_checkpoint_loading.py`, and a subprocess run of
+`scripts/train.py` in `test_train_script.py`):
+- mixed precision: `training.mixed_precision` (`bf16`, or `fp16` with a gradient scaler saved in the
+  checkpoint), losses computed in `float32`;
+- gradient accumulation: `training.accumulate_grad_batches`; a step is an optimizer update, the last
+  partial group of an epoch is rescaled to a mean;
+- resume: `training.resume_from`, handled by `resumeTrainerFromConfig` in `scripts/train.py`.
+  **`num_epochs` is the total of the run** (a checkpoint that holds it already leaves nothing to
+  train); `Trainer.fit(num_epochs)` stays an increment. The callbacks keep their state
+  (`stateDict`/`loadStateDict`) and the CSV logger continues its file. **The stated tolerance: a
+  resumed deterministic run reproduces the uninterrupted loss curve to a relative `1e-6` (absolute
+  `1e-9`), and the weights to `1e-6`**, for six configurations (modality dropout, accumulation with
+  `bf16`, beta and learning-rate schedules, plateau reduction among them) and in a subprocess run
+  of the script;
+- top-K checkpoints: the `top_k_checkpoint` callback;
+- LR schedules: `linear_warmup_lr` and `cosine_lr` callbacks, functions of the optimizer step;
+- `torch.compile`: `training.compile_model` and `compile_kwargs`;
+- checkpoint loading: `weights_only=True` by default, which required a checkpoint of plain values
+  (the NumPy RNG state is a list, a dataclass `config` is stored as a dict). **This is a change of
+  behavior**: files from an earlier version need `upgradeCheckpoint` or `--trust-checkpoint`.
+
+Not done: `resume_from: auto`, saving the state of the dataloader, a distributed strategy and other
+schedule shapes (restarts, one-cycle). The shipped `configs/training/*.yaml` now list
+`best_checkpoint` before `checkpoint` so that the periodic checkpoints, the ones a run is resumed
+from, hold the state of the callbacks above them.
+
 **P2-4. Experiment tracking backend.** Spec §10 names Weights & Biases or MLflow. Depending on D-8,
 either amend the spec or add one adapter as an optional extra: an `AbstractExperimentLogger`
 subclass registered by name, with the import deferred as for TensorBoard, logging losses, latent

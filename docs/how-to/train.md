@@ -72,6 +72,147 @@ A run with no such callback records no rate, so its logs and files are unchanged
 your own that changes the rate must declare it (`acts_on_learning_rate = True`, see
 [add a strategy](add-a-strategy.md#a-note-specific-to-training-callbacks)).
 
+## Learning-rate schedules
+
+`linear_warmup_lr` and `cosine_lr` are callbacks, chosen by name like `reduce_lr_on_plateau`
+([ADR 0033](../adr/0033-top-k-checkpoints-and-learning-rate-schedules.md)):
+
+```yaml
+training:
+  callbacks:
+    cosine_lr:
+      total_steps: 2000     # optimizer steps until the rate reaches its floor
+      warmup_steps: 100     # linear warm-up from 1/100 of the rate to the full rate; 0 for none
+      min_lr_ratio: 0.01    # the floor, as a fraction of the starting rate; 0.0 decays to zero
+```
+
+```yaml
+training:
+  callbacks:
+    linear_warmup_lr:
+      warmup_steps: 500     # the rate of step s is lr * (s + 1) / 500, then it is left alone
+```
+
+- **Steps, not epochs.** The rate is a function of the optimizer step. For `E` epochs of `B`
+  batches, with `accumulate_grad_batches: N`, a schedule that should end with the run has
+  `total_steps = E * ceil(B / N)`.
+- **The starting rate is the optimizer's.** Set it with `training.optimizer.kwargs.lr` as before.
+  Each parameter group is scaled from its own starting rate.
+- **Combining.** `linear_warmup_lr` stops touching the rate when it ends, so it combines with
+  `reduce_lr_on_plateau`. `cosine_lr` owns the rate for the whole run: with another callback that
+  changes it, the run logs a warning that those changes are overwritten.
+- **Resume.** Nothing to save: the rate of the step a run resumes at is computed from the step.
+- **Watching it.** Both are recorded as `train/lr` like any rate change (above).
+
+## Mixed precision, gradient accumulation and `torch.compile`
+
+Each is off by default, and a run that sets none of them is unchanged
+([ADR 0031](../adr/0031-mixed-precision-gradient-accumulation-and-compile.md)):
+
+```yaml
+training:
+  mixed_precision: bf16         # null (default), bf16 or fp16
+  accumulate_grad_batches: 4    # batches per optimizer step; 1 (default) is a step per batch
+  compile_model: true           # run the forward pass through torch.compile
+  compile_kwargs:               # passed to torch.compile
+    mode: reduce-overhead
+```
+
+- **`mixed_precision`.** The forward pass runs under autocast on the trainer's device. `bf16` needs
+  nothing else; `fp16` adds a gradient scaler, whose state is kept in the checkpoint. The losses are
+  computed in `float32` from the model's outputs, and the parameters stay `float32`, so a checkpoint
+  loads into a run with or without it. Expect the loss to agree with `float32` to a few percent, not
+  to the last digit. Validation runs under the same autocast.
+- **`accumulate_grad_batches`.** The gradients of `N` batches are added (each loss divided by `N`)
+  before one optimizer step, for an effective batch `N` times larger. A **step is then an update**:
+  `log_every_n_steps`, the warm-up of a `beta_schedules` entry, `warmup_steps` and `total_steps` of a
+  learning-rate schedule and the `step` a callback receives all count updates, so scale them by
+  `1 / N` from what you used per batch. If an epoch's batches are not a multiple of `N`, the last,
+  smaller group is a step of its own, averaged over the batches it has. Clipping applies to the
+  accumulated gradient.
+- **`compile_model`.** The model is not replaced, so checkpoints keep their keys and load with or
+  without it. The first steps are slow while it compiles, and with `modality_dropout_p > 0` each
+  new set of kept modalities compiles again. `{backend: eager}` in `compile_kwargs` checks the
+  wiring without a compiler.
+
+## Keep the best K checkpoints
+
+`best_checkpoint` keeps one file, the best epoch, at a fixed path. `top_k_checkpoint` keeps the `k`
+best, one file each, and deletes the worst when a better epoch comes
+([ADR 0033](../adr/0033-top-k-checkpoints-and-learning-rate-schedules.md)):
+
+```yaml
+training:
+  callbacks:
+    top_k_checkpoint:
+      directory: ${output_dir}/top_k
+      k: 3                              # default 3
+      monitor: val/loss/total           # the default; needs a validation set
+      mode: min                         # or max
+      filename_pattern: top_k_epoch_{epoch:04d}.pt   # must contain {epoch}
+```
+
+Each file is a complete training checkpoint, with the optimizer, so it costs as much disk as the
+checkpoint of any other callback, `k` times. On a tie the earlier epoch ranks first, and a `nan` is
+never kept. The kept list is saved with the checkpoints, so a resumed run goes on ranking against
+the same files.
+
+## Resume an interrupted run
+
+Give the same command line plus `training.resume_from`
+([ADR 0032](../adr/0032-resume-from-the-training-script.md)):
+
+```bash
+python scripts/train.py training.num_epochs=200 \
+    training.resume_from=runs/signal_vae/checkpoints/checkpoint_epoch_0099.pt
+```
+
+- **`num_epochs` is the total of the run.** The checkpoint above holds 100 epochs, so 100 more are
+  trained. A checkpoint that already holds `num_epochs` epochs or more leaves nothing to do: the
+  script says so and exits. (`Trainer.fit(num_epochs)` in Python is still an increment.)
+- **What comes back.** The model, the optimizer, the step and epoch counters, the history, the
+  Python, NumPy and PyTorch random states, the gradient scaler and the state of the callbacks
+  (the patience counters of `early_stopping` and `reduce_lr_on_plateau`, the best value of
+  `best_checkpoint`, the files of `top_k_checkpoint` and `checkpoint`). The model must be the same:
+  the weights are loaded strictly.
+- **Files.** A `csv` logger continues its file without a second header. Rows written after the
+  checkpoint you resume from stay, so a step can appear twice, and the later row is the resumed
+  one. TensorBoard adds an events file.
+- **Which checkpoint.** Resume from a file written by the last callback of the list: a
+  checkpoint written while the callbacks run holds the callbacks after it as they were one epoch
+  earlier. The shipped configs list `checkpoint` last for that reason.
+- **The guarantee.** A resumed deterministic run reproduces the loss curve of the uninterrupted
+  run: every metric of every epoch to a relative `1e-6` (absolute `1e-9` near zero), and the final
+  weights to `1e-6`. Deterministic means the same config and seed, the same data order, and the CPU
+  or `deterministic: true`. A `DataLoader` that shuffles with the global PyTorch random state is
+  reproduced, since that state is restored; one with its own `generator`, or one that reads
+  workers' seeds from elsewhere, is not, and you save its state yourself. A different PyTorch,
+  hardware or thread count is outside the guarantee.
+
+## Checkpoint files and loading them safely
+
+A checkpoint is a pickle file, and loading one can run code. `loadCheckpoint` and
+`Trainer.loadCheckpoint` therefore read it with PyTorch's restricted unpickler
+(`weights_only=True`) by default, which a file written by this version allows
+([ADR 0034](../adr/0034-safe-checkpoint-loading-by-default.md)). Only load files whose origin you
+know either way.
+
+A file written by an earlier version, or one whose `config` holds an object that is not plain data,
+is refused with a message that names these three ways out, for a file you trust:
+
+```python
+from global_vae.training.checkpoint import loadCheckpoint, upgradeCheckpoint
+
+upgradeCheckpoint("runs/old/best.pt")  # rewrite it once; then it loads as usual
+upgradeCheckpoint("runs/old/best.pt", "runs/old/best_safe.pt")  # or keep the original
+
+loadCheckpoint("runs/old/best.pt", model=model, weights_only=False)  # or read it as it is
+```
+
+`scripts/evaluate.py` and `scripts/visualize_latent.py` take `--trust-checkpoint` for the last one.
+A `config` passed to `saveCheckpoint` should be plain data (a dict of numbers, strings and lists);
+a dataclass instance is stored as a dict.
+
 ## Choose the reconstruction reduction
 
 The reconstruction term is a per-element mean by default, while the KL is a sum over the latent

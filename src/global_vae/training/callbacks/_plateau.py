@@ -21,6 +21,7 @@ same convention already used for private test helpers in this codebase, e.g.
 
 import math
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -108,6 +109,29 @@ class PlateauTracker:
         if self.threshold_mode == "rel":
             return value > self.best * (1.0 + self.threshold)
         return value > self.best + self.threshold
+
+    def stateDict(self) -> dict[str, Any]:
+        """Return the three values that change as epochs go by.
+
+        Returns:
+            `{"best", "num_bad_epochs", "cooldown_counter"}`, plain numbers (`best` may be
+            `inf` before the first epoch, which a float carries).
+        """
+        return {
+            "best": self.best,
+            "num_bad_epochs": self.num_bad_epochs,
+            "cooldown_counter": self.cooldown_counter,
+        }
+
+    def loadStateDict(self, state: dict[str, Any]) -> None:
+        """Restore what `stateDict` returned.
+
+        Args:
+            state: The dict `stateDict` returned.
+        """
+        self.best = float(state["best"])
+        self.num_bad_epochs = int(state["num_bad_epochs"])
+        self.cooldown_counter = int(state["cooldown_counter"])
 
     def step(self, value: float) -> bool:
         """Update the tracker with this epoch's value.

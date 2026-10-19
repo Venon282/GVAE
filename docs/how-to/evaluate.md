@@ -26,6 +26,13 @@ pearson_r), per-latent-space regularization values and latent diagnostics to
 the console, and (with `--output-dir`) saves a JSON report plus
 reconstruction / latent-space figures.
 
+The checkpoint is read in the safe mode (`weights_only=True`,
+[ADR 0034](../adr/0034-safe-checkpoint-loading-by-default.md)). A file saved by an
+earlier version of the framework is refused with a message that says so; if you trust it,
+either rewrite it once with `upgradeCheckpoint` (from `global_vae.training.checkpoint`) or pass
+`--trust-checkpoint`, which reads it as it is and runs pickle code. The same flag exists on
+`scripts/visualize_latent.py`.
+
 The latent diagnostics are, for each latent space, the KL of every latent
 dimension and the number of **active units**: dimensions whose posterior mean
 varies over the evaluation set by more than a threshold (the variance of `mu`

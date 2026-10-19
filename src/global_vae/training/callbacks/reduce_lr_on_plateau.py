@@ -17,7 +17,7 @@ selected from `TrainingConfig.callbacks` by name like any other callback.
 """
 
 import logging
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from global_vae.training.callbacks._plateau import PlateauTracker
 from global_vae.training.callbacks.base import TrainerCallback
@@ -110,6 +110,17 @@ class ReduceLrOnPlateau(TrainerCallback):
             patience=patience,
             cooldown=cooldown,
         )
+
+    def stateDict(self) -> dict[str, Any]:
+        """Return the plateau tracker's state, so a resumed run keeps its patience count.
+
+        The learning rate itself is restored with the optimizer.
+        """
+        return self._tracker.stateDict()
+
+    def loadStateDict(self, state: dict[str, Any]) -> None:
+        """Restore the plateau tracker's state. See `stateDict`."""
+        self._tracker.loadStateDict(state)
 
     def onEpochEnd(self, trainer: "Trainer", epoch: int, metrics: dict[str, float]) -> None:
         """Update the plateau tracker and reduce the learning rate if it has just plateaued.

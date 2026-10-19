@@ -17,7 +17,7 @@ from `TrainingConfig.callbacks` by name like any other callback.
 """
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from global_vae.training.callbacks._plateau import PlateauTracker
 from global_vae.training.callbacks.base import TrainerCallback
@@ -93,6 +93,14 @@ class EarlyStopping(TrainerCallback):
             patience=patience,
             cooldown=cooldown,
         )
+
+    def stateDict(self) -> dict[str, Any]:
+        """Return the plateau tracker's state, so a resumed run keeps its patience count."""
+        return self._tracker.stateDict()
+
+    def loadStateDict(self, state: dict[str, Any]) -> None:
+        """Restore the plateau tracker's state. See `stateDict`."""
+        self._tracker.loadStateDict(state)
 
     def onEpochEnd(self, trainer: "Trainer", epoch: int, metrics: dict[str, float]) -> None:
         """Update the plateau tracker and request a stop if it has just plateaued.

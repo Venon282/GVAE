@@ -31,8 +31,10 @@ never selected as encoder input, only ever matched as `image_out`'s
 own decoder target.
 """
 
+import contextlib
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -58,6 +60,37 @@ from global_vae.training.learning_rate import isLearningRateKey, learningRateMet
 from global_vae.utils.autograd import backward
 
 logger = logging.getLogger(__name__)
+
+SUPPORTED_MIXED_PRECISIONS = ("bf16", "fp16")
+"""The values of `Trainer`'s `mixed_precision` besides `None` (full precision)."""
+
+_AUTOCAST_DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16}
+
+
+def _castOutputsToFloat32(outputs: dict[str, Any]) -> dict[str, Any]:
+    """Cast the parts of a forward pass that feed the losses back to `float32`.
+
+    Under autocast the model returns reduced-precision tensors. The reconstruction loss and
+    the regularizer (an exponential of a log-variance, a sum over dimensions) are computed
+    from them, and they are the terms that lose accuracy in `bf16` or `fp16`, so the losses
+    are computed in `float32` from the model's outputs.
+
+    Args:
+        outputs: What `GlobalVae.forward` returned.
+
+    Returns:
+        `outputs` with `"reconstructions"` and `"latent_params"` cast to `float32`.
+    """
+    return {
+        **outputs,
+        "reconstructions": {
+            name: tensor.float() for name, tensor in outputs["reconstructions"].items()
+        },
+        "latent_params": {
+            name: (mu.float(), logvar.float())
+            for name, (mu, logvar) in outputs["latent_params"].items()
+        },
+    }
 
 
 def _formatMetrics(metrics: dict[str, float]) -> str:
@@ -130,6 +163,11 @@ class Trainer:
     from `TrainingConfig.callbacks` (`config/training.py`) or by
     constructing them directly and passing `callbacks=[...]` here.
 
+    A *step* is one optimizer update. With `accumulate_grad_batches=1` (the default) that is
+    one batch; with `N > 1` it is `N` batches, and `global_step`, the beta schedules, the
+    callbacks' `step` argument, the step metrics and `log_every_n_steps` all count updates
+    (roadmap P2-3, `docs/adr/0031-mixed-precision-gradient-accumulation-and-compile.md`).
+
     Attributes:
         should_stop: `False` by default (and reset to `False` at the
             start of every `fit()` call); a callback's `onEpochEnd`
@@ -137,6 +175,8 @@ class Trainer:
             sets this to `True` to end the run after the current
             epoch's callbacks have all finished, rather than raising
             or returning a sentinel `fit()` would have to interpret.
+        scaler: The `torch.amp.GradScaler` of a run with `mixed_precision="fp16"`, else
+            `None` (`bf16` has the range of `float32` and needs none).
     """
 
     def __init__(
@@ -154,6 +194,10 @@ class Trainer:
         callbacks: list[TrainerCallback] | None = None,
         log_every_n_steps: int = 50,
         reconstruction_reduction: str | Mapping[str, str] = DEFAULT_REDUCTION,
+        mixed_precision: str | None = None,
+        accumulate_grad_batches: int = 1,
+        compile_model: bool = False,
+        compile_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Build a `Trainer` around an already-constructed `GlobalVae`.
 
@@ -232,13 +276,35 @@ class Trainer:
                 mapping. It applies to the training loss and to the
                 validation loss of `evaluate`, so both curves keep one scale.
                 See `docs/adr/0029-loss-scale-convention.md`.
+            mixed_precision: `None` (default, full `float32`: nothing changes), `"bf16"` or
+                `"fp16"`. The forward pass of the model runs under `torch.autocast` on
+                `device` in that dtype, and the losses are computed in `float32` from its
+                outputs (`_castOutputsToFloat32`). `"fp16"` also uses a `GradScaler`
+                (`self.scaler`), whose state is saved in the checkpoint. Applies to the
+                validation pass too, so both curves keep one scale.
+            accumulate_grad_batches: Number of batches whose gradients are added before one
+                optimizer step (default `1`: a step per batch, as before). Each batch's loss
+                is divided by this number, so the step uses the mean gradient, which is the
+                gradient of a batch `N` times larger when the loss is a mean over samples.
+                A last group shorter than `N` at the end of an epoch is rescaled to the mean
+                of its own batches and stepped. Gradient clipping applies to the accumulated
+                gradient.
+            compile_model: If `True`, the forward pass goes through `torch.compile(model)`.
+                The module in `self.model` is the original one, so `state_dict` keys and
+                checkpoints are the same with and without it. A modality-dropout pass with
+                another set of keys compiles another graph.
+            compile_kwargs: Keyword arguments for `torch.compile` (for example
+                `{"mode": "reduce-overhead"}`, or `{"backend": "eager"}` to trace without a
+                C++ compiler). Ignored when `compile_model` is `False`.
 
         Raises:
             ValueError: If `modality_dropout_p` is not in `[0, 1]`, if
                 `grad_clip_norm` is given and not positive, if
-                `log_every_n_steps` is not positive, or if
+                `log_every_n_steps` is not positive, if
                 `reconstruction_reduction` is not a supported reduction
-                (`global_vae.losses.reconstruction.validateReduction`).
+                (`global_vae.losses.reconstruction.validateReduction`), if
+                `mixed_precision` is not `None`, `"bf16"` or `"fp16"`, or if
+                `accumulate_grad_batches` is below 1.
         """
         if not (0.0 <= modality_dropout_p <= 1.0):
             raise ValueError(f"modality_dropout_p must be in [0, 1], got {modality_dropout_p}.")
@@ -247,6 +313,15 @@ class Trainer:
         if log_every_n_steps <= 0:
             raise ValueError(f"log_every_n_steps must be positive, got {log_every_n_steps}.")
         validateReduction(reconstruction_reduction, "reconstruction_reduction")
+        if mixed_precision is not None and mixed_precision not in _AUTOCAST_DTYPES:
+            raise ValueError(
+                f"mixed_precision must be None or one of {list(SUPPORTED_MIXED_PRECISIONS)}, "
+                f"got {mixed_precision!r}."
+            )
+        if accumulate_grad_batches < 1:
+            raise ValueError(
+                f"accumulate_grad_batches must be at least 1, got {accumulate_grad_batches}."
+            )
 
         self.device = (
             torch.device(device)
@@ -269,6 +344,15 @@ class Trainer:
         self.grad_clip_norm = grad_clip_norm
         self.callbacks = list(callbacks) if callbacks else []
         self.log_every_n_steps = log_every_n_steps
+        self.mixed_precision = mixed_precision
+        self.accumulate_grad_batches = accumulate_grad_batches
+        self.compile_model = compile_model
+        self.scaler: torch.amp.GradScaler | None = (
+            torch.amp.GradScaler(self.device.type) if mixed_precision == "fp16" else None
+        )
+        self._forward: Callable[..., dict[str, Any]] = (
+            torch.compile(self.model, **(compile_kwargs or {})) if compile_model else self.model
+        )
 
         self.global_step = 0
         self.start_epoch = 0
@@ -340,7 +424,10 @@ class Trainer:
 
         encoder_inputs = self.model.selectEncoderInputs(batch)
         inputs = self._applyModalityDropout(encoder_inputs) if apply_dropout else encoder_inputs
-        outputs = self.model(inputs)
+        with self._autocast():
+            outputs = self._forward(inputs)
+        if self.mixed_precision is not None:
+            outputs = _castOutputsToFloat32(outputs)
 
         reconstruction_loss = computeTotalReconstructionLoss(
             outputs["reconstructions"],
@@ -373,7 +460,9 @@ class Trainer:
                 does).
 
         Returns:
-            This epoch's metrics, averaged over every step, keys
+            This epoch's metrics, averaged over every optimizer step
+            (each step's value being the mean over the batches it
+            accumulated), keys
             prefixed `"train/"` (e.g. `"train/loss/total"`). When a
             callback acts on the learning rate (`logs_learning_rate`),
             also `"train/lr"`: the mean of the rate each step trained with
@@ -384,48 +473,122 @@ class Trainer:
         """
         self.model.train()
         running_totals: dict[str, float] = {}
-        num_batches = 0
-        record_learning_rate = self.logs_learning_rate
+        num_steps = 0
+        accumulate = self.accumulate_grad_batches
+        pending = 0
+        group_totals: dict[str, float] = {}
 
         for callback in self.callbacks:
             callback.onEpochBegin(self, epoch)
 
         for raw_batch in dataloader:
             batch = self._moveBatchToDevice(raw_batch)
-            self.optimizer.zero_grad()
+            if pending == 0:
+                self.optimizer.zero_grad()
+                group_totals = {}
             losses = self.computeLosses(batch, self.global_step)
-            backward(losses.total)
-            if self.grad_clip_norm is not None:
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
-            step_metrics = losses.asMetrics()
-            if record_learning_rate:
-                # Read just before the step: this is the rate the step trains with, so a rate a
-                # callback changes in `onStepEnd` or `onEpochEnd` shows from the next step on.
-                step_metrics.update(learningRateMetrics(self.optimizer))
-            self.optimizer.step()
+            self._backward(losses.total / accumulate if accumulate > 1 else losses.total)
+            for key, value in losses.asMetrics().items():
+                group_totals[key] = group_totals.get(key, 0.0) + value
+            pending += 1
 
-            for key, value in step_metrics.items():
-                running_totals[key] = running_totals.get(key, 0.0) + value
-            num_batches += 1
+            if pending == accumulate:
+                self._finishStep(epoch, group_totals, pending, running_totals)
+                num_steps += 1
+                pending = 0
 
-            if self.global_step % self.log_every_n_steps == 0:
-                logger.info(
-                    "epoch %d step %d: %s",
-                    epoch,
-                    self.global_step,
-                    _formatMetrics(step_metrics),
-                )
-            for callback in self.callbacks:
-                callback.onStepEnd(self, self.global_step, step_metrics)
+        if pending > 0:
+            # The epoch ended inside a group: the gradient holds `pending / accumulate` of a
+            # mean, so scale it back up to the mean of the batches it does hold.
+            self._scaleGradients(accumulate / pending)
+            self._finishStep(epoch, group_totals, pending, running_totals)
+            num_steps += 1
 
-            self.global_step += 1
-
-        if num_batches == 0:
+        if num_steps == 0:
             raise ValueError(
                 "fitEpoch received an empty dataloader: at least one batch is required."
             )
 
-        return {f"train/{key}": value / num_batches for key, value in running_totals.items()}
+        return {f"train/{key}": value / num_steps for key, value in running_totals.items()}
+
+    def _autocast(self) -> AbstractContextManager[Any]:
+        """Return the context the model's forward pass runs in.
+
+        Returns:
+            `torch.autocast` on this trainer's device in `mixed_precision`'s dtype, or a
+            do-nothing context when `mixed_precision` is `None`.
+        """
+        if self.mixed_precision is None:
+            return contextlib.nullcontext()
+        return torch.autocast(
+            device_type=self.device.type, dtype=_AUTOCAST_DTYPES[self.mixed_precision]
+        )
+
+    def _backward(self, loss: torch.Tensor) -> None:
+        """Backpropagate `loss`, scaled first when a gradient scaler is in use.
+
+        Args:
+            loss: The scalar to differentiate (already divided by `accumulate_grad_batches`).
+        """
+        backward(self.scaler.scale(loss) if self.scaler is not None else loss)
+
+    def _scaleGradients(self, factor: float) -> None:
+        """Multiply every gradient of the optimizer's parameters by `factor`, in place.
+
+        Args:
+            factor: The multiplier.
+        """
+        for group in self.optimizer.param_groups:
+            for parameter in group["params"]:
+                if parameter.grad is not None:
+                    parameter.grad.mul_(factor)
+
+    def _finishStep(
+        self,
+        epoch: int,
+        group_totals: dict[str, float],
+        num_batches: int,
+        running_totals: dict[str, float],
+    ) -> None:
+        """Clip, take the optimizer step, record its metrics and notify the callbacks.
+
+        Args:
+            epoch: Index of the running epoch.
+            group_totals: Each loss summed over the `num_batches` batches of this step.
+            num_batches: How many batches this step accumulated.
+            running_totals: The epoch's running sums of step metrics, updated in place.
+        """
+        step_metrics = {key: value / num_batches for key, value in group_totals.items()}
+        if self.logs_learning_rate:
+            # Read just before the step: this is the rate the step trains with, so a rate a
+            # callback changes in `onStepEnd` or `onEpochEnd` shows from the next step on.
+            step_metrics.update(learningRateMetrics(self.optimizer))
+
+        if self.scaler is not None:
+            if self.grad_clip_norm is not None:
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            if self.grad_clip_norm is not None:
+                nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+            self.optimizer.step()
+
+        for key, value in step_metrics.items():
+            running_totals[key] = running_totals.get(key, 0.0) + value
+
+        if self.global_step % self.log_every_n_steps == 0:
+            logger.info(
+                "epoch %d step %d: %s",
+                epoch,
+                self.global_step,
+                _formatMetrics(step_metrics),
+            )
+        for callback in self.callbacks:
+            callback.onStepEnd(self, self.global_step, step_metrics)
+
+        self.global_step += 1
 
     def evaluate(self, dataloader: Iterable[dict[str, torch.Tensor]]) -> dict[str, float]:
         """Run one pass over `dataloader` without gradient updates.
@@ -561,10 +724,19 @@ class Trainer:
             start_epoch=self.start_epoch,
             history=self.history,
             config=config,
+            callbacks_state=[
+                {"class": type(callback).__name__, "state": callback.stateDict()}
+                for callback in self.callbacks
+            ],
+            scaler_state_dict=self.scaler.state_dict() if self.scaler is not None else None,
         )
 
     def loadCheckpoint(
-        self, path: str | Path, restore_optimizer: bool = True, strict: bool = True
+        self,
+        path: str | Path,
+        restore_optimizer: bool = True,
+        strict: bool = True,
+        weights_only: bool = True,
     ) -> Any:
         """Restore this trainer's state from a checkpoint saved by `saveCheckpoint`.
 
@@ -583,6 +755,14 @@ class Trainer:
                 this trainer's freshly-constructed optimizer state
                 (e.g. to resume with a different learning rate).
             strict: Forwarded to `model.load_state_dict`.
+            weights_only: Forwarded to `training.checkpoint.loadCheckpoint`: `True`
+                (default) reads the file with the restricted unpickler; pass `False` only
+                for a file you trust that it refuses (ADR 0034).
+
+        The state of the callbacks (`TrainerCallback.stateDict`) and of the gradient
+        scaler is restored too: each saved callback state goes to the callback of the
+        same class, in order, so a resumed run keeps its patience counters and best
+        values. A saved state with no matching callback is logged and dropped.
 
         Returns:
             The `config` snapshot stored in the checkpoint (whatever
@@ -595,11 +775,37 @@ class Trainer:
             optimizer=self.optimizer if restore_optimizer else None,
             map_location=self.device,
             strict=strict,
+            weights_only=weights_only,
         )
         self.global_step = metadata.global_step
         self.start_epoch = metadata.start_epoch
         self.history = metadata.history
+        if self.scaler is not None and metadata.scaler_state_dict is not None:
+            self.scaler.load_state_dict(metadata.scaler_state_dict)
+        self._restoreCallbacksState(metadata.callbacks_state)
         return metadata.config
+
+    def _restoreCallbacksState(self, saved: list[dict[str, Any]]) -> None:
+        """Hand each saved callback state to the callback of the same class.
+
+        Args:
+            saved: `CheckpointMetadata.callbacks_state`: `{"class": name, "state": dict}`
+                entries in the saving trainer's callback order.
+        """
+        by_class: dict[str, list[dict[str, Any]]] = {}
+        for entry in saved:
+            by_class.setdefault(entry["class"], []).append(entry["state"])
+        for callback in self.callbacks:
+            queue = by_class.get(type(callback).__name__)
+            if queue:
+                callback.loadStateDict(queue.pop(0))
+        dropped = sorted(name for name, queue in by_class.items() if any(queue))
+        if dropped:
+            logger.warning(
+                "The checkpoint holds callback state for %s, but this trainer has no such "
+                "callback (or fewer of them); that state is dropped.",
+                dropped,
+            )
 
     def _moveBatchToDevice(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Move every tensor in `batch` to `self.device`.

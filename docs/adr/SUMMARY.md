@@ -29,3 +29,7 @@
 - [0028: The learning rate in the metrics](0028-learning-rate-in-the-metrics.md)
 - [0029: Loss scale convention](0029-loss-scale-convention.md)
 - [0030: A reconstruction loss and weight per modality](0030-per-modality-reconstruction-loss-and-weight.md)
+- [0031: Mixed precision, gradient accumulation and `torch.compile`](0031-mixed-precision-gradient-accumulation-and-compile.md)
+- [0032: Resuming a run from the training script](0032-resume-from-the-training-script.md)
+- [0033: Top-K checkpoints and learning-rate schedules](0033-top-k-checkpoints-and-learning-rate-schedules.md)
+- [0034: Safe checkpoint loading by default](0034-safe-checkpoint-loading-by-default.md)

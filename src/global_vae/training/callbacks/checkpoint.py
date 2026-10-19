@@ -110,6 +110,14 @@ class CheckpointCallback(TrainerCallback):
         self.filename_pattern = filename_pattern
         self._saved_paths: list[Path] = []
 
+    def stateDict(self) -> dict[str, Any]:
+        """Return the files saved so far, so a resumed run still prunes them with `keep_last_n`."""
+        return {"saved_paths": [str(path) for path in self._saved_paths]}
+
+    def loadStateDict(self, state: dict[str, Any]) -> None:
+        """Restore the list of saved files. See `stateDict`."""
+        self._saved_paths = [Path(path) for path in state["saved_paths"]]
+
     def onEpochEnd(self, trainer: "Trainer", epoch: int, metrics: dict[str, float]) -> None:
         """Save a checkpoint if `epoch` lands on an `every_n_epochs` boundary.
 
@@ -123,8 +131,10 @@ class CheckpointCallback(TrainerCallback):
             return
 
         path = self.directory / self.filename_pattern.format(epoch=epoch)
-        trainer.saveCheckpoint(path, config=self.config)
+        # Listed before it is written, so that the state this very checkpoint carries
+        # (`stateDict`) already includes it and a resumed run prunes it in its turn.
         self._saved_paths.append(path)
+        trainer.saveCheckpoint(path, config=self.config)
 
         if self.keep_last_n is not None:
             while len(self._saved_paths) > self.keep_last_n:

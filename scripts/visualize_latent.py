@@ -213,6 +213,13 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         "--device", default=None, help="'cpu', 'cuda', 'cuda:0', ... Defaults to auto-detect."
     )
     parser.add_argument(
+        "--trust-checkpoint",
+        action="store_true",
+        help="Read the checkpoint with weights_only=False, which runs pickle code: use it only "
+        "for a file you trust and that the safe mode refuses (one saved before ADR 0034). "
+        "See upgradeCheckpoint in global_vae.training.checkpoint for the permanent fix.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
@@ -326,7 +333,12 @@ def main(argv: list[str] | None = None) -> None:
         else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     )
     model = model.to(resolved_device)
-    metadata = loadCheckpoint(args.checkpoint, model=model, map_location=resolved_device)
+    metadata = loadCheckpoint(
+        args.checkpoint,
+        model=model,
+        map_location=resolved_device,
+        weights_only=not args.trust_checkpoint,
+    )
     logger.info("Loaded checkpoint from '%s' onto device '%s'.", args.checkpoint, resolved_device)
 
     output_dir = (

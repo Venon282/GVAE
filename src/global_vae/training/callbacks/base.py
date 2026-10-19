@@ -24,7 +24,7 @@ names at once. This mirrors the callback pattern used by most training
 frameworks (Keras, PyTorch Lightning, Hugging Face `Trainer`).
 """
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
     from global_vae.training.trainer import Trainer
@@ -65,6 +65,35 @@ class TrainerCallback:
     """
 
     acts_on_learning_rate: ClassVar[bool] = False
+
+    def stateDict(self) -> dict[str, Any]:
+        """Return what this callback must remember to carry on after a resume.
+
+        `Trainer.saveCheckpoint` stores this next to the model and the optimizer, and
+        `Trainer.loadCheckpoint` hands it back to `loadStateDict`, so that a resumed run
+        continues a patience counter, a best value or a list of saved files where the
+        interrupted run left it (roadmap P2-3,
+        `docs/adr/0032-resume-from-the-training-script.md`).
+
+        Returns:
+            A dict of plain values only (numbers, strings, `None`, lists and dicts of
+            them, no tensor of the model and no object of this framework), because the
+            checkpoint is read with `torch.load(weights_only=True)`. `{}` (the default)
+            for a callback with nothing to remember, which is also the right answer for a
+            callback that is a function of `trainer.global_step`, since that is restored.
+        """
+        return {}
+
+    def loadStateDict(self, state: dict[str, Any]) -> None:
+        """Restore what `stateDict` returned in the run that wrote the checkpoint.
+
+        Called by `Trainer.loadCheckpoint`, before `fit`, only for a callback of the same
+        class as the one that saved the state (matched in order among the callbacks of that
+        class). Does nothing by default.
+
+        Args:
+            state: The dict `stateDict` returned at save time.
+        """
 
     def onTrainBegin(self, trainer: "Trainer") -> None:
         """Called once, before the first epoch of `Trainer.fit` starts.

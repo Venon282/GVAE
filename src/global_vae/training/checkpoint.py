@@ -27,10 +27,27 @@ without any training state at all:
   resumed from a checkpoint continues drawing from the same random
   sequence it would have without the interruption, rather than
   silently re-seeding from wherever the process's RNGs happen to be).
+- `callbacks_state` and `scaler_state_dict`: only present when a `Trainer` saved
+  the file and it had callbacks with state (`TrainerCallback.stateDict`) or a
+  gradient scaler (mixed precision with `fp16`), so a resumed run continues them too
+  (roadmap P2-3, `docs/adr/0032-resume-from-the-training-script.md`).
 
-Security note: like any `torch.save`/`torch.load` file, a checkpoint is
-a pickle under the hood. Only load checkpoints from sources you trust,
-the same caution PyTorch's own documentation gives for `torch.load`.
+Every entry is made of tensors, numbers, strings, `None` and plain containers
+(`dict`, `list`, `tuple`), never of an object of this framework or of NumPy. That is what
+lets `loadCheckpoint` read the file with `torch.load(weights_only=True)`, PyTorch's
+restricted unpickler, which is the default
+(`docs/adr/0034-safe-checkpoint-loading-by-default.md`). The one thing the framework does
+not control is the `config` snapshot a caller passes: a dict of plain values (what
+`OmegaConf.to_container` gives, which is what `scripts/train.py` saves) loads in the safe
+mode. A dataclass instance is turned into such a dict (`dataclasses.asdict`) when the file
+is written, so `config=experiment_config` works; the file then holds the dict, and
+`loadCheckpoint` hands back the dict, not the dataclass.
+
+Security note: like any `torch.save`/`torch.load` file, a checkpoint is a pickle under
+the hood. `loadCheckpoint` uses the restricted unpickler by default, which refuses to
+construct arbitrary objects. Pass `weights_only=False` only for a file you trust, for
+example one saved by an earlier version of this framework (whose RNG state holds a NumPy
+array), the same caution PyTorch's own documentation gives for `torch.load`.
 
 This module owns only the checkpoint *file format*. The two
 `TrainerCallback`s that call into it on a schedule (`CheckpointCallback`)
@@ -41,10 +58,11 @@ them from there, not from here.
 """
 
 import logging
+import pickle
 import random
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch import nn
@@ -79,6 +97,11 @@ class CheckpointMetadata:
             Python/NumPy/PyTorch RNG state (`True`), or whether the
             checkpoint had none to restore, or the caller asked not to
             (`False`).
+        callbacks_state: One `{"class": name, "state": dict}` entry per callback of the
+            `Trainer` that saved the file, in its order (`Trainer.saveCheckpoint`). `[]`
+            for a checkpoint saved without any, or before this field existed.
+        scaler_state_dict: The gradient scaler's state when the saving `Trainer` used
+            `fp16` mixed precision, otherwise `None`.
     """
 
     global_step: int = 0
@@ -87,6 +110,8 @@ class CheckpointMetadata:
     config: Any = None
     global_vae_version: str | None = None
     rng_state_restored: bool = False
+    callbacks_state: list[dict[str, Any]] = field(default_factory=list)
+    scaler_state_dict: dict[str, Any] | None = None
 
 
 def _captureRngState() -> dict[str, Any]:
@@ -98,7 +123,12 @@ def _captureRngState() -> dict[str, Any]:
     """
     state: dict[str, Any] = {"python": random.getstate(), "torch": torch.get_rng_state()}
     if np is not None:
-        state["numpy"] = np.random.get_state()
+        # NumPy hands back an array of 624 words; a plain list keeps the file readable by the
+        # restricted unpickler (`weights_only=True`), which refuses `numpy.ndarray`.
+        name, keys, position, has_gauss, cached_gaussian = cast(
+            "tuple[str, Any, int, int, float]", np.random.get_state(legacy=True)
+        )
+        state["numpy"] = (name, keys.tolist(), position, has_gauss, cached_gaussian)
     if torch.cuda.is_available():
         state["torch_cuda"] = torch.cuda.get_rng_state_all()
     return state
@@ -118,9 +148,27 @@ def _restoreRngState(state: dict[str, Any]) -> None:
     if "torch" in state:
         torch.set_rng_state(state["torch"])
     if np is not None and "numpy" in state:
-        np.random.set_state(state["numpy"])
+        name, keys, position, has_gauss, cached_gaussian = state["numpy"]
+        # `keys` is a list in a file written now, an array in one written by an earlier version.
+        np.random.set_state(
+            (name, np.asarray(keys, dtype=np.uint32), position, has_gauss, cached_gaussian)
+        )
     if torch.cuda.is_available() and "torch_cuda" in state:
         torch.cuda.set_rng_state_all(state["torch_cuda"])
+
+
+def _toPlainConfig(config: Any) -> Any:
+    """Turn a dataclass instance into a dict of plain values, leave anything else alone.
+
+    Args:
+        config: The `config` argument of `saveCheckpoint`.
+
+    Returns:
+        `dataclasses.asdict(config)` for a dataclass instance, `config` otherwise.
+    """
+    if is_dataclass(config) and not isinstance(config, type):
+        return asdict(config)
+    return config
 
 
 def saveCheckpoint(
@@ -132,6 +180,8 @@ def saveCheckpoint(
     history: list[dict[str, float]] | None = None,
     config: Any = None,
     include_rng_state: bool = True,
+    callbacks_state: list[dict[str, Any]] | None = None,
+    scaler_state_dict: dict[str, Any] | None = None,
 ) -> None:
     """Save model (+ optionally optimizer, step/epoch/history, config) to `path`.
 
@@ -149,14 +199,22 @@ def saveCheckpoint(
         global_step: `Trainer.global_step` at save time, if any.
         start_epoch: `Trainer.start_epoch` at save time, if any.
         history: `Trainer.history` at save time, if any.
-        config: Arbitrary, picklable snapshot of whatever configuration
-            produced this model (spec §10: "config snapshotted with
-            every run"). This framework does not dictate its shape:
-            pass a `dict`, a dataclass, a Pydantic model, whatever your
-            own setup uses. `None` (default) saves no config.
+        config: Snapshot of whatever configuration produced this model (spec §10: "config
+            snapshotted with every run"). This framework does not dictate its shape. For the
+            file to be readable in the safe mode (`weights_only=True`, ADR 0034) it must be
+            made of plain values: a `dict`, `list`, `tuple`, `str`, number, `bool` or `None`.
+            A dataclass instance is converted with `dataclasses.asdict` before it is written,
+            so it is stored, and loaded back, as a dict. Any other object is written as it
+            is, and the file then needs `weights_only=False` to be read. `None` (default)
+            saves no config.
         include_rng_state: If `True` (default), also save
             Python/NumPy/PyTorch RNG state, so a resumed run continues
             the same random sequence instead of silently re-seeding.
+        callbacks_state: The state of the callbacks of the saving `Trainer`
+            (`Trainer.saveCheckpoint` builds it). Plain values only, so that the file stays
+            readable in the safe mode. Omitted from the file when empty or `None`.
+        scaler_state_dict: `GradScaler.state_dict()` of the saving `Trainer`, when it used
+            `fp16`. Omitted from the file when `None`.
     """
     checkpoint: dict[str, Any] = {
         "global_vae_version": global_vae.__version__,
@@ -164,10 +222,14 @@ def saveCheckpoint(
         "global_step": global_step,
         "start_epoch": start_epoch,
         "history": history or [],
-        "config": config,
+        "config": _toPlainConfig(config),
     }
     if optimizer is not None:
         checkpoint["optimizer_state_dict"] = optimizer.state_dict()
+    if callbacks_state:
+        checkpoint["callbacks_state"] = callbacks_state
+    if scaler_state_dict is not None:
+        checkpoint["scaler_state_dict"] = scaler_state_dict
     if include_rng_state:
         checkpoint["rng_state"] = _captureRngState()
 
@@ -179,6 +241,52 @@ def saveCheckpoint(
     )
 
 
+def upgradeCheckpoint(path: str | Path, output_path: str | Path | None = None) -> Path:
+    """Rewrite a checkpoint from an earlier version so that the safe mode can read it.
+
+    Files saved before ADR 0034 hold the NumPy RNG state as an array, which
+    `torch.load(weights_only=True)` refuses. This reads `path` with `weights_only=False`,
+    which runs pickle code: **only call it on a file you trust**. It turns the array into a
+    list, as `saveCheckpoint` now writes it, and saves the result. Nothing else changes.
+
+    Args:
+        path: The old checkpoint.
+        output_path: Where to write the upgraded file. `None` (default) replaces `path`.
+
+    Returns:
+        The path written.
+
+    Raises:
+        FileNotFoundError: If `path` does not exist.
+    """
+    resolved_path = Path(path)
+    if not resolved_path.exists():
+        raise FileNotFoundError(f"No checkpoint found at '{resolved_path}'.")
+    checkpoint = torch.load(resolved_path, map_location="cpu", weights_only=False)
+    numpy_state = checkpoint.get("rng_state", {}).get("numpy")
+    if numpy_state is not None and not isinstance(numpy_state[1], list):
+        name, keys, position, has_gauss, cached_gaussian = numpy_state
+        checkpoint["rng_state"]["numpy"] = (
+            name,
+            keys.tolist(),
+            position,
+            has_gauss,
+            cached_gaussian,
+        )
+    destination = Path(output_path) if output_path is not None else resolved_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(checkpoint, destination)
+    try:
+        torch.load(destination, map_location="cpu", weights_only=True)
+    except pickle.UnpicklingError:
+        logger.warning(
+            "Upgraded checkpoint '%s' is still not readable in the safe mode: its `config` "
+            "snapshot is not made of plain values (dict, list, tuple, str, number, None).",
+            destination,
+        )
+    return destination
+
+
 def loadCheckpoint(
     path: str | Path,
     model: nn.Module,
@@ -186,6 +294,7 @@ def loadCheckpoint(
     map_location: str | torch.device | None = None,
     restore_rng_state: bool = True,
     strict: bool = True,
+    weights_only: bool = True,
 ) -> CheckpointMetadata:
     """Load a checkpoint saved by `saveCheckpoint` into `model` (and optionally `optimizer`).
 
@@ -211,6 +320,15 @@ def loadCheckpoint(
             or subset of the checkpoint's (e.g. after adding a new,
             optional submodule), at the cost of losing the safety net
             that catches an accidental architecture mismatch.
+        weights_only: If `True` (default), read the file with PyTorch's restricted
+            unpickler (`torch.load(weights_only=True)`), which only builds tensors, numbers,
+            strings and plain containers and refuses any other object, so that a file from
+            an untrusted source cannot run code on load. Every checkpoint this framework
+            writes now is readable that way. Pass `False` only for a file you trust and
+            that the safe mode refuses: one saved by an earlier version of this framework
+            (its RNG state holds a NumPy array), or one whose `config` snapshot is not made
+            of plain values (a dataclass, say). See
+            `docs/adr/0034-safe-checkpoint-loading-by-default.md`.
 
     Returns:
         `CheckpointMetadata` holding everything besides the tensors
@@ -218,6 +336,10 @@ def loadCheckpoint(
 
     Raises:
         FileNotFoundError: If `path` does not exist.
+        pickle.UnpicklingError: If `weights_only` is `True` and the file holds something the
+            restricted unpickler refuses. The message names the two usual causes and the
+            `upgradeCheckpoint` and `weights_only=False` remedies for a trusted
+            file.
         ValueError: If `optimizer` is given but the checkpoint has no
             `optimizer_state_dict` (it was saved without one).
     """
@@ -225,11 +347,20 @@ def loadCheckpoint(
     if not resolved_path.exists():
         raise FileNotFoundError(f"No checkpoint found at '{resolved_path}'.")
 
-    # weights_only=False: this checkpoint intentionally carries non-tensor
-    # metadata (config, RNG state) alongside the tensors, so the safer
-    # tensors-only loading mode does not apply here (see this module's
-    # docstring for the accompanying trust caveat).
-    checkpoint = torch.load(resolved_path, map_location=map_location, weights_only=False)
+    try:
+        checkpoint = torch.load(resolved_path, map_location=map_location, weights_only=weights_only)
+    except pickle.UnpicklingError as error:
+        if not weights_only:
+            raise
+        raise pickle.UnpicklingError(
+            f"Checkpoint '{resolved_path}' could not be read with the restricted unpickler "
+            f"(weights_only=True). Either it was saved by an earlier version of this framework "
+            f"(its RNG state holds a NumPy array), or its `config` snapshot is not made of plain "
+            f"values (dict, list, tuple, str, number, None). If you trust the file, rewrite it "
+            f"once with `upgradeCheckpoint` (global_vae.training.checkpoint), or read it as it "
+            f"is with weights_only=False (--trust-checkpoint for scripts/evaluate.py and "
+            f"scripts/visualize_latent.py). Original error: {error}"
+        ) from error
 
     model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
 
@@ -259,4 +390,6 @@ def loadCheckpoint(
         config=checkpoint.get("config"),
         global_vae_version=checkpoint.get("global_vae_version"),
         rng_state_restored=rng_state_restored,
+        callbacks_state=checkpoint.get("callbacks_state", []),
+        scaler_state_dict=checkpoint.get("scaler_state_dict"),
     )

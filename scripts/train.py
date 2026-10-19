@@ -30,6 +30,12 @@ Or run an entirely different experiment file:
 
     python scripts/train.py --config-name experiment/other_experiment
 
+Resume an interrupted run from one of its checkpoints. `training.num_epochs` is the total of
+the run, so give the same value as before and only the missing epochs are trained:
+
+    python scripts/train.py \
+        training.resume_from=runs/signal_vae/checkpoints/checkpoint_epoch_0039.pt
+
 Where, in your own code (anywhere importable on `PYTHONPATH`):
     def buildSignalDataloaders(config: DataConfig) -> DataloaderBundle:
         # your own dataset/transform/split logic (spec §6); config.train_path,
@@ -50,7 +56,7 @@ import global_vae.config  # noqa: F401  (registers structured configs with Hydra
 from global_vae.config.data import buildDataloadersFromConfig
 from global_vae.config.experiment import ExperimentConfig
 from global_vae.config.model import buildModelFromConfig
-from global_vae.config.training import buildTrainerFromConfig
+from global_vae.config.training import buildTrainerFromConfig, resumeTrainerFromConfig
 from global_vae.utils.seed import setGlobalSeed
 
 logger = logging.getLogger("global_vae.scripts.train")
@@ -89,16 +95,19 @@ def main(cfg: ExperimentConfig) -> None:
         model, resolved_config.training, config_snapshot=OmegaConf.to_container(cfg)
     )
 
-    logger.info(
-        "Starting training for %d epoch(s) on device '%s'.",
-        resolved_config.training.num_epochs,
-        trainer.device,
-    )
-    trainer.fit(
-        dataloaders.train,
-        num_epochs=resolved_config.training.num_epochs,
-        val_dataloader=dataloaders.val,
-    )
+    # `training.num_epochs` is the total of the run: with `training.resume_from` only the
+    # epochs after the checkpoint's are left (ADR 0032).
+    epochs_to_run = resumeTrainerFromConfig(trainer, resolved_config.training)
+    if epochs_to_run == 0:
+        logger.info(
+            "Nothing to train: the checkpoint holds %d epoch(s) and training.num_epochs is %d.",
+            trainer.start_epoch,
+            resolved_config.training.num_epochs,
+        )
+        return
+
+    logger.info("Starting training for %d epoch(s) on device '%s'.", epochs_to_run, trainer.device)
+    trainer.fit(dataloaders.train, num_epochs=epochs_to_run, val_dataloader=dataloaders.val)
     logger.info("Training complete. Final metrics: %s", trainer.history[-1])
 
 

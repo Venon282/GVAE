@@ -38,6 +38,7 @@ import logging
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -166,6 +167,25 @@ class TrainingConfig:
         grad_clip_norm: Forwarded to `Trainer`.
         device: Forwarded to `Trainer`. `None` (default) auto-detects.
         log_every_n_steps: Forwarded to `Trainer`.
+        mixed_precision: `None` (default, full `float32`), `"bf16"` or `"fp16"`, forwarded to
+            `Trainer` (roadmap P2-3, ADR 0031). `"fp16"` adds a gradient scaler. Needs a device
+            whose autocast supports the dtype; `bf16` runs on a CPU as well as on recent GPUs.
+        accumulate_grad_batches: Forwarded to `Trainer`: batches whose gradients are added
+            before one optimizer step (default `1`, a step per batch). A step is then an
+            optimizer update, which is also what `beta_schedules`, `loggers` and the schedule
+            callbacks count.
+        compile_model: Forwarded to `Trainer`: run the forward pass through `torch.compile`
+            (default `False`).
+        compile_kwargs: Forwarded to `torch.compile` when `compile_model` is `True`, for
+            example `{mode: reduce-overhead}` or `{backend: eager}`.
+        resume_from: Path of a checkpoint to continue from, or `None` (default) for a fresh
+            run (roadmap P2-3, ADR 0032). `scripts/train.py` calls `resumeTrainerFromConfig`,
+            which restores the model, the optimizer, the step and epoch counters, the history,
+            the RNG state and the callbacks' state. `num_epochs` is then the **total** number
+            of epochs of the run: a run saved after epoch 40 with `num_epochs: 100` trains 60
+            more. (`Trainer.fit(num_epochs)` is unchanged: it trains that many more.) Loggers
+            that accept `append` (`csv`) are opened in append mode, so the file of the first
+            part of the run is kept.
         loggers: Experiment loggers to attach (spec §10 "Experiment
             tracking"). Empty (default) means no logger; several may
             be listed at once (`docs/adr/0008-experiment-loggers.md`).
@@ -178,8 +198,9 @@ class TrainingConfig:
             default"; ADR 0022). Empty (default) means no such
             callback at all: nothing is enabled unless explicitly
             named here. Any combination of the built-ins
-            (`"checkpoint"`, `"best_checkpoint"`, `"early_stopping"`,
-            `"reduce_lr_on_plateau"`) or a caller's own
+            (`"checkpoint"`, `"best_checkpoint"`, `"top_k_checkpoint"`,
+            `"early_stopping"`, `"reduce_lr_on_plateau"`, `"linear_warmup_lr"`,
+            `"cosine_lr"`) or a caller's own
             `@registerCallback(...)`-decorated class may be listed, in
             any order; callbacks are instantiated, and `Trainer` calls
             them, in this mapping's own iteration order (a plain
@@ -234,6 +255,11 @@ class TrainingConfig:
     log_every_n_steps: int = 50
     loggers: list[LoggerEntryConfig] = field(default_factory=list)
     callbacks: dict[str, dict[str, Any] | None] = field(default_factory=dict)
+    mixed_precision: str | None = None
+    accumulate_grad_batches: int = 1
+    compile_model: bool = False
+    compile_kwargs: dict[str, Any] = field(default_factory=dict)
+    resume_from: str | None = None
 
 
 def listSupportedOptimizerNames() -> list[str]:
@@ -520,7 +546,9 @@ def buildCallbacksFromConfig(
     own config snapshot (spec §10: "config snapshotted with every run") simply by
     declaring a `config` parameter. Loggers (step 1) never receive
     `config_snapshot`: a logger's constructor has no such parameter, matching its
-    behavior before ADR 0022.
+    behavior before ADR 0022. A logger whose constructor accepts `append` and whose kwargs
+    did not give it receives `append=True` when `config.resume_from` is set, so a resumed run
+    adds to its metrics file instead of replacing it (ADR 0032).
 
     Args:
         config: A `TrainingConfig`.
@@ -540,9 +568,18 @@ def buildCallbacksFromConfig(
         TypeError: If a callback's kwargs do not match its constructor
             (propagated unchanged from that callback's own `__init__`).
     """
-    callbacks: list[TrainerCallback] = [
-        getLoggerClass(entry.name)(**entry.kwargs) for entry in config.loggers
-    ]
+    callbacks: list[TrainerCallback] = []
+    for entry in config.loggers:
+        logger_cls = getLoggerClass(entry.name)
+        logger_kwargs = dict(entry.kwargs)
+        if (
+            config.resume_from is not None
+            and "append" not in logger_kwargs
+            and "append" in inspect.signature(logger_cls.__init__).parameters
+        ):
+            # A resumed run continues the file of the first part instead of replacing it.
+            logger_kwargs["append"] = True
+        callbacks.append(logger_cls(**logger_kwargs))
 
     for name, raw_kwargs in config.callbacks.items():
         kwargs = dict(raw_kwargs) if raw_kwargs else {}
@@ -625,4 +662,50 @@ def buildTrainerFromConfig(
         callbacks=callbacks,
         log_every_n_steps=config.log_every_n_steps,
         reconstruction_reduction=reconstruction_reduction,
+        mixed_precision=config.mixed_precision,
+        accumulate_grad_batches=config.accumulate_grad_batches,
+        compile_model=config.compile_model,
+        compile_kwargs=dict(config.compile_kwargs),
     )
+
+
+def resumeTrainerFromConfig(trainer: Trainer, config: TrainingConfig) -> int:
+    """Continue `trainer` from `config.resume_from` and say how many epochs are left to run.
+
+    `num_epochs` of a config is the **total** number of epochs of the run. A checkpoint saved
+    after `trainer.start_epoch` epochs leaves `num_epochs - start_epoch` to train, so running
+    the same command line again with `training.resume_from` set completes the run it was
+    interrupted from and gives the history the uninterrupted run would have (ADR 0032). With
+    no `resume_from` the trainer is untouched and every epoch is left.
+
+    Args:
+        trainer: A trainer built from `config` by `buildTrainerFromConfig`, not yet fitted.
+        config: The training config of the run.
+
+    Returns:
+        The number of epochs `trainer.fit` should be asked to run: `config.num_epochs` for a
+        fresh run, otherwise `num_epochs - start_epoch`, or `0` when the checkpoint already
+        holds `num_epochs` epochs or more (nothing is left to train, and `fit` would refuse
+        `0`, so the caller skips it).
+
+    Raises:
+        FileNotFoundError: If `config.resume_from` is set and no file is there.
+        pickle.UnpicklingError: If the checkpoint is not readable in the safe mode (see
+            `training.checkpoint.loadCheckpoint` and `upgradeCheckpoint`).
+    """
+    if config.resume_from is None:
+        return config.num_epochs
+    path = Path(config.resume_from)
+    if not path.is_file():
+        raise FileNotFoundError(f"training.resume_from: no checkpoint at '{path}'.")
+    trainer.loadCheckpoint(path)
+    remaining = max(config.num_epochs - trainer.start_epoch, 0)
+    logger.info(
+        "Resumed from '%s' after %d epoch(s) (step %d): %d of %d epoch(s) left.",
+        path,
+        trainer.start_epoch,
+        trainer.global_step,
+        remaining,
+        config.num_epochs,
+    )
+    return remaining

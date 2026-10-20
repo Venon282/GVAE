@@ -113,9 +113,10 @@ class LoggerEntryConfig:
 
     Attributes:
         name: `training.loggers` registry key, e.g. `"csv"`,
-            `"tensorboard"`.
+            `"tensorboard"`, `"mlflow"`.
         kwargs: Forwarded to the logger's constructor, e.g.
-            `{"path": "runs/metrics.csv"}` for `"csv"`.
+            `{"path": "runs/metrics.csv"}` for `"csv"`, or
+            `{"tracking_uri": "sqlite:///runs/mlflow.db"}` for `"mlflow"`.
     """
 
     name: str = MISSING

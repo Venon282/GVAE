@@ -315,6 +315,29 @@ versioning follows [Semantic Versioning](https://semver.org/).
   interrupted and resumed, the callback states, the CSV append), `test_top_k_checkpoint.py`,
   `test_lr_schedules.py`, `test_safe_checkpoint_loading.py` and a resume class in
   `test_train_script.py` that runs `scripts/train.py` in subprocesses.
+- An MLflow experiment logger (roadmap P2-4, decision D-8 at its proposed default, ADR 0035).
+  `MlflowLogger(tracking_uri=None, experiment_name="global_vae", run_name=None,
+  artifact_location=None, tags=None, params=None)` in `training/loggers/mlflow_logger.py`,
+  registered as `mlflow`, so `training.loggers: [{name: mlflow, kwargs: {...}}]` selects it. It is an
+  optional extra (`pip install -e ".[mlflow]"`, `mlflow>=3.9`, also in `dev`) with the import
+  deferred to the constructor, as for TensorBoard: importing the package, and the runs that log
+  elsewhere, never load MLflow. It talks to an explicit `MlflowClient` and a run id, not the fluent
+  API. Scalars go in one `log_batch` request per step; `logFigure` saves
+  `figures/<name>/<tag>_<x>.png`; `logImage` uses `log_image(key, step)` (the MLflow image grid) and
+  clips a float image to `[0, 1]`; a name is sanitized so that it cannot leave the run's artifact
+  folder. The run ends `FINISHED`, `FAILED` (training raised) or `KILLED` (`KeyboardInterrupt`), and
+  keeps accepting logs afterwards, so the figures of the final model can be logged after
+  `Trainer.fit` and a second `fit` continues the run. A resumed run (`training.resume_from`) starts a
+  new MLflow run. Offline mode is a SQLite store (`tracking_uri: sqlite:///.../mlflow.db`) plus a
+  local `artifact_location`; MLflow 3 refuses its older `./mlruns` file store, so that one is not
+  documented.
+- `tests/integration/test_mlflow_logger.py` (offline, one SQLite database for the module: scalars,
+  batching, images, figures, name sanitization, the experiment race, the final statuses through a
+  real `Trainer.fit`, construction from `LoggerEntryConfig`), and a subprocess run of
+  `scripts/train.py` with the logger chosen on the command line in `test_train_script.py`.
+- `docs/adr/0035-mlflow-experiment-logger.md` and a "Track a run with MLflow" section in
+  `docs/how-to/train.md`; the spec §8 layout line and §10 tracking bullet name the new logger (spec
+  edits, to be confirmed by the owner). `.gitignore` covers `mlflow.db` and `mlartifacts/`.
 
 ### Changed
 

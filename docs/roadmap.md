@@ -523,6 +523,19 @@ either amend the spec or add one adapter as an optional extra: an `AbstractExper
 subclass registered by name, with the import deferred as for TensorBoard, logging losses, latent
 figures and reconstructions per run, tested in offline mode.
 
+**P2-4 status.** Done: [ADR 0035](adr/0035-mlflow-experiment-logger.md). D-8 was taken at its proposed
+default (MLflow as an optional extra), so the spec is not amended: it names the two backends as
+examples. `MlflowLogger`, registered as `mlflow` and selected by `training.loggers`, is an
+`AbstractExperimentLogger` with the import deferred as for TensorBoard (the `mlflow` extra,
+`mlflow>=3.9`, also in `dev`). It logs the losses (one request per step), figures
+(`figures/<name>/<tag>_<x>.png`) and images (the MLflow image grid), and sets the run's final status
+(`FINISHED`, `FAILED`, `KILLED`). Tested in offline mode, a SQLite store and a local artifact folder
+(`tests/integration/test_mlflow_logger.py`, and a subprocess run of `scripts/train.py` in
+`test_train_script.py`); MLflow 3 refuses its `./mlruns` file store, so that is not the offline mode.
+`how-to/train.md` has a "Track a run with MLflow" section. Not done: a callback that logs latent
+figures and reconstructions during training (the logger can store them, and `Trainer` does not
+produce them), continuing the same run on resume, and Weights & Biases.
+
 **P2-5. Migration trigger.** Spec §10 migrates to Lightning (or Fabric first) once the model design
 is stable and multi-GPU needs are concrete. Record the triggers as a short ADR: Phase 1 complete,
 and a real dataset or model that needs more than one GPU. Until both hold, no migration. When they

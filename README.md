@@ -75,6 +75,11 @@ deterministic run reproduces the uninterrupted loss curve
 `torch.load(weights_only=True)` by default; a file from an earlier version needs
 `upgradeCheckpoint` or `--trust-checkpoint` (`docs/adr/0034-safe-checkpoint-loading-by-default.md`).
 
+Experiment loggers are chosen by name in `training.loggers`: `csv`, `tensorboard` and `mlflow`. MLflow
+is an optional extra (`pip install -e ".[mlflow]"`) that needs no server: a `sqlite:///` tracking URI
+keeps the runs in a local file, and `mlflow ui --backend-store-uri sqlite:///...` shows them
+(`docs/how-to/train.md`, `docs/adr/0035-mlflow-experiment-logger.md`).
+
 ## Running checks
 
 ```bash

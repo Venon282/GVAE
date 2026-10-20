@@ -24,6 +24,8 @@ outputs/
 multirun/
 wandb/
 mlruns/
+mlartifacts/
+mlflow.db
 data/raw/
 data/processed/
 *.ckpt

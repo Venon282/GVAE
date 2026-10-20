@@ -189,6 +189,97 @@ python scripts/train.py training.num_epochs=200 \
   workers' seeds from elsewhere, is not, and you save its state yourself. A different PyTorch,
   hardware or thread count is outside the guarantee.
 
+## Track a run with MLflow
+
+`mlflow` is a registered logger next to `csv` and `tensorboard`
+([ADR 0035](../adr/0035-mlflow-experiment-logger.md)). It is an optional extra, and nothing in the
+shipped configs uses it:
+
+```bash
+pip install -e ".[mlflow]"
+```
+
+MLflow needs no server. A `tracking_uri` that starts with `sqlite:///` keeps the runs in a local
+file, and `artifact_location` keeps the figures and images in a local folder. This puts both under
+the run's `output_dir`:
+
+```bash
+python scripts/train.py \
+    'training.loggers=[{name: mlflow, kwargs: {tracking_uri: "sqlite:///${output_dir}/mlflow.db", artifact_location: "${output_dir}/mlartifacts", run_name: baseline}}]'
+```
+
+Overriding `training.loggers` from the command line replaces the whole list, so the `csv` and
+`tensorboard` entries of the shipped preset are gone. To keep them, list them again, or write the
+list in your own training YAML file:
+
+```yaml
+training:
+  loggers:
+    - name: csv
+      kwargs:
+        path: ${output_dir}/metrics.csv
+    - name: mlflow
+      kwargs:
+        tracking_uri: sqlite:///${output_dir}/mlflow.db
+        artifact_location: ${output_dir}/mlartifacts
+        experiment_name: saxs            # default: global_vae
+        run_name: baseline               # default: a name MLflow picks
+        tags: {dataset: saxs_v2}
+        params: {beta: 0.5, latent_dim: 16}   # hyperparameters, recorded once at the start
+```
+
+Look at the runs afterwards, still with no server of your own to run:
+
+```bash
+mlflow ui --backend-store-uri sqlite:///runs/signal_vae/mlflow.db
+```
+
+To use a tracking server instead, set `tracking_uri: http://host:5000` (or leave it out and set the
+`MLFLOW_TRACKING_URI` environment variable, which MLflow reads). `artifact_location` then belongs to
+the server's own setup, and is only used when this run creates the experiment.
+
+What the logger records, per run:
+
+| What | Where in MLflow | Notes |
+|---|---|---|
+| Step and epoch metrics (`loss/total`, `train/loss/total`, `val/...`, `train/lr`) | Metrics, with the step or the epoch as the x value | One request per step, not one per metric. |
+| Figures | Artifacts `figures/<name>/<tag>_<x>.png` | `<tag>` is `step` or `epoch`, so the two never overwrite each other. |
+| Images | The image grid of the run page, one image per step | `(C, H, W)` with `C` 1, 3 or 4, `uint8` or floats in `[0, 1]`. Floats outside that range are clipped. |
+| `params`, `tags`, `run_name` | Parameters, tags, name | `params` values are converted to strings. |
+
+`scripts/train.py` logs the scalars. Figures and images are logged by calling the logger, which
+you can do after `fit` returns: MLflow does not lock a finished run. The plots of
+`global_vae.visualization` return matplotlib figures, which `logFigure` takes as they are:
+
+```python
+from global_vae.training.loggers.mlflow_logger import MlflowLogger
+from global_vae.training.trainer import Trainer
+from global_vae.visualization.latent_plot import collectLatentParams, plotLatentSpace
+from global_vae.visualization.loss_curves import plotLossCurves
+
+logger = MlflowLogger(tracking_uri="sqlite:///runs/mlflow.db", artifact_location="runs/artifacts")
+trainer = Trainer(model, callbacks=[logger])
+trainer.fit(train_dataloader, num_epochs=50, val_dataloader=val_dataloader)
+
+mu, _ = collectLatentParams(model, val_dataloader, "z_fused")
+logger.logFigure("latent/pca", plotLatentSpace(mu), x=trainer.global_step)
+logger.logFigure("loss_curves", plotLossCurves(trainer.history), x=trainer.global_step)
+logger.logImage("reconstruction/image", reconstruction_chw, x=trainer.global_step)  # (C, H, W)
+```
+
+To log them during training, write a small callback that calls the logger, and list it after the
+logger. Neither `Trainer` nor the script logs figures by itself.
+
+- **Status.** The run ends `FINISHED` when training ends normally, `FAILED` when it raises and
+  `KILLED` on a `KeyboardInterrupt`. A second `fit` on the same trainer continues the same run.
+- **Resuming.** A run resumed with `training.resume_from` starts a new MLflow run in the same
+  experiment; its steps continue from the checkpoint's step. (`csv` continues its file; MLflow has
+  no file to continue.)
+- **The older `./mlruns` folder store** is not the documented route: MLflow 3 refuses it unless
+  `MLFLOW_ALLOW_FILE_STORE=true` is set. `sqlite:///` works with every version of the extra.
+- **`import mlflow` is slow**, so the logger imports it only when you build one; a run that logs to
+  `csv` and `tensorboard` never loads it.
+
 ## Checkpoint files and loading them safely
 
 A checkpoint is a pickle file, and loading one can run code. `loadCheckpoint` and

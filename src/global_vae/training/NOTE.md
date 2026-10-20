@@ -64,7 +64,7 @@ is then `True`: `fitEpoch` adds the rate each step trained with to the metrics, 
 epoch log line, `Trainer.history`, every logger and the checkpoint history. Without such a
 callback nothing is added.
 
-`loggers/` (`AbstractExperimentLogger`, `CsvLogger`, `TensorBoardLogger`)
+`loggers/` (`AbstractExperimentLogger`, `CsvLogger`, `TensorBoardLogger`, `MlflowLogger`)
 is implemented, covering spec §10's "Experiment tracking" bullet, and is
 a separate subsystem from `callbacks/` above: it keeps its own
 `registerLogger`/`getLoggerClass`/`listRegisteredLoggers` registry and
@@ -77,7 +77,10 @@ is itself a `TrainerCallback`, so no change to `Trainer` was needed to
 support it (`callbacks=[CsvLogger(...)]`, or several loggers at once,
 just works). See `docs/adr/0008-experiment-loggers.md` and
 `docs/adr/0022-callback-registry.md`'s own note on why the two stay
-apart.
+apart. `MlflowLogger` (`docs/adr/0035-mlflow-experiment-logger.md`) is the third backend: it
+imports `mlflow` only in its constructor, writes through an explicit `MlflowClient` and run id,
+sends the metrics of one call as one `log_batch`, sets the run's status (`FINISHED`, `FAILED`,
+`KILLED`) in `onTrainEnd`, and keeps accepting logs afterwards, so figures can follow `fit`.
 
 `trainer.py` has three opt-in capabilities, all off by default (ADR 0031): `mixed_precision`
 (`"bf16"` or `"fp16"`; autocast around the forward pass, the losses computed in `float32`, a

@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 import torch
+from mlflow import MlflowClient
 
 from global_vae.training.checkpoint import loadCheckpoint
 
@@ -92,6 +93,30 @@ class TestTrainScriptEndToEnd:
         tb_dir = output_dir / "tensorboard"
         assert tb_dir.exists()
         assert any(tb_dir.iterdir())
+
+    def test_mlflow_logger_selected_from_the_command_line_writes_an_offline_run(
+        self, tmp_path: Path
+    ) -> None:
+        """The override of `how-to/train.md`: MLflow in a local SQLite file under `output_dir`."""
+        override = (
+            "training.loggers=[{name: mlflow, kwargs: {"
+            'tracking_uri: "sqlite:///${output_dir}/mlflow.db", '
+            'artifact_location: "${output_dir}/mlartifacts", '
+            "experiment_name: train_script, run_name: from_cli}}]"
+        )
+        completed, output_dir = _runTrainScript(tmp_path, extra_overrides=[override])
+        assert completed.returncode == 0, completed.stderr
+
+        client = MlflowClient(tracking_uri=f"sqlite:///{output_dir / 'mlflow.db'}")
+        (experiment,) = [
+            item for item in client.search_experiments() if item.name == "train_script"
+        ]
+        (run,) = client.search_runs([experiment.experiment_id])
+        assert run.info.run_name == "from_cli"
+        assert run.info.status == "FINISHED"
+        epochs = client.get_metric_history(run.info.run_id, "train/loss/total")
+        assert sorted(metric.step for metric in epochs) == [0, 1]
+        assert len(client.get_metric_history(run.info.run_id, "loss/total")) > 0
 
     def test_writes_a_loadable_best_checkpoint(self, tmp_path: Path) -> None:
         completed, output_dir = _runTrainScript(tmp_path)

@@ -34,3 +34,4 @@
 - [0033: Top-K checkpoints and learning-rate schedules](0033-top-k-checkpoints-and-learning-rate-schedules.md)
 - [0034: Safe checkpoint loading by default](0034-safe-checkpoint-loading-by-default.md)
 - [0035: An MLflow experiment logger](0035-mlflow-experiment-logger.md)
+- [0036: When to migrate the training loop to Lightning or Fabric](0036-lightning-migration-triggers.md)

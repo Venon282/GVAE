@@ -4,7 +4,8 @@ Spec §10 resolves the raw-loop-vs-Lightning open question in favor of
 a raw PyTorch loop for now, migrating to Lightning (or Lightning
 Fabric as an intermediate step) once the architecture stabilizes; see
 `docs/adr/0004-pluggable-beta-schedules.md`'s own note on this and
-`training/NOTE.md`'s prior history. `Trainer` is that raw loop.
+`training/NOTE.md`'s prior history. `Trainer` is that raw loop. The triggers for the migration
+are in `docs/adr/0036-lightning-migration-triggers.md`.
 
 Data pipeline responsibilities (datasets, transforms, batching,
 train/val/test splitting) are explicitly out of this framework's

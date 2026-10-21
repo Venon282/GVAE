@@ -541,6 +541,15 @@ is stable and multi-GPU needs are concrete. Record the triggers as a short ADR: 
 and a real dataset or model that needs more than one GPU. Until both hold, no migration. When they
 do, the `TrainerCallback` seam maps onto Lightning callbacks and the config stays as it is.
 
+**P2-5 status.** Done: [ADR 0036](adr/0036-lightning-migration-triggers.md), a document and no code.
+Migrate only when both triggers hold: Phase 1 is complete (met: P1-1 to P1-6 are done and the
+configuration matrix test passes 8 of 8), and one measured run on real data or a real backbone, on
+one GPU with bf16, accumulation and compile already on, shows that the model does not fit or that the
+epochs take longer than the owner accepts (not met: no real run exists, and the wall-time limit is the
+owner's to give). The ADR also lists what a migration must keep (the config, the callback seam through
+one adapter, the checkpoint file and the resume guarantee, the caller's `loader_factory`) and starts
+with Fabric, the intermediate step of spec §10. Revisit it when P3-1 produces its first run.
+
 ### Phase 3: real data and richer backbones
 
 | ID | Item | Size | Depends on |
@@ -643,7 +652,8 @@ Each item needs an explicit go-ahead and an ADR before any code.
 - Modality-specific or dataset-specific transforms, SAXS included (spec §6.2 and §12).
 - U-Net style encoder to decoder skip connections ([ADR 0014](adr/0014-residual-1d-encoder-decoder.md)
   rules them out: they bypass the latent).
-- A Lightning or Fabric migration before the P2-5 triggers hold.
+- A Lightning or Fabric migration before the P2-5 triggers hold
+  ([ADR 0036](adr/0036-lightning-migration-triggers.md)).
 - Any component wired into `GlobalVae` by name: every new component goes through its registry.
 
 ## 9. Risks

@@ -338,6 +338,13 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `docs/adr/0035-mlflow-experiment-logger.md` and a "Track a run with MLflow" section in
   `docs/how-to/train.md`; the spec §8 layout line and §10 tracking bullet name the new logger (spec
   edits, to be confirmed by the owner). `.gitignore` covers `mlflow.db` and `mlartifacts/`.
+- `docs/adr/0036-lightning-migration-triggers.md` (roadmap P2-5, no code): the two triggers for
+  migrating the training loop to Lightning or Fabric, both needed. Phase 1 complete (met) and a
+  measured need for more than one GPU on real data or a real backbone, after the shipped levers (not
+  met). It lists what a migration must keep (the config, the `TrainerCallback` seam through one
+  adapter, the checkpoint file and the resume guarantee of ADR 0032, the caller's `loader_factory`),
+  and starts with Fabric. The spec §10 training-loop bullet points to it (a spec edit, to be
+  confirmed by the owner).
 
 ### Changed
 

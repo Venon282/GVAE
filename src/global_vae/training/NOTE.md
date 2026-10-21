@@ -112,4 +112,5 @@ from an earlier version (ADR 0034).
 Every item spec §10 explicitly lists for the training loop (raw loop, reconstruction +
 regularization loss, optimizer, device placement, logging, reproducibility, experiment tracking,
 checkpointing) is built. Multi-GPU and migrating to PyTorch Lightning remain the eventual plan once
-the architecture stabilizes (spec §10).
+the architecture stabilizes (spec §10). The two triggers for that migration, and what it must keep,
+are in `docs/adr/0036-lightning-migration-triggers.md`.

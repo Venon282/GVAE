@@ -26,6 +26,21 @@ pearson_r), per-latent-space regularization values and latent diagnostics to
 the console, and (with `--output-dir`) saves a JSON report plus
 reconstruction / latent-space figures.
 
+The reconstruction figure of a modality depends on what its decoder produces. A decoder of 1D
+series gets a grid of overlaid curves (`reconstructions_<modality>.png`). A decoder of images
+(`(N, H, W)` or `(N, C, H, W)`) gets a grid with the original and the reconstruction side by
+side, one row per example, under the same file name. For a model with several input modalities,
+the cross-modal figures show what each decoder produces from each subset of the inputs: the
+decoders of 1D series share `cross_modal_reconstructions.png`, and each image decoder has its
+own `cross_modal_reconstructions_<decoder>.png`. In both image figures a row shares one colour
+scale between the original and the outputs, so the same colour means the same value across it.
+
+From Python, the same figures are `plotImageReconstructionGrid` (with `show_error=True` for a
+column of absolute error) and `plotImageCrossModalReconstructionMatrix` in
+`global_vae.visualization.image_plot`. The second takes the `inputs` you want drawn before the
+target (a signal as a line, an image as an image) and several `example_indices`, which the
+command line, showing one example, does not.
+
 The checkpoint is read in the safe mode (`weights_only=True`,
 [ADR 0034](../adr/0034-safe-checkpoint-loading-by-default.md)). A file saved by an
 earlier version of the framework is refused with a message that says so; if you trust it,

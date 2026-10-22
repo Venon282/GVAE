@@ -242,3 +242,65 @@ def buildTwoModalityDataloaderForScript() -> list[dict[str, torch.Tensor]]:
         {"x": torch.randn(BATCH_SIZE, INPUT_DIM), "y": torch.randn(BATCH_SIZE, INPUT_DIM)}
         for _ in range(2)
     ]
+
+
+SIGNAL_LENGTH = 32
+IMAGE_SIDE = 16
+
+
+def buildSignalImageModelForScript() -> GlobalVae:
+    """Model factory for the image-figures CLI test: a signal and a 16 x 16 image, fused by PoE.
+
+    Built from the framework's own 1D and 2D CNN pairs (tiny ones), not from dummies, so the
+    figures are drawn from tensors with the shapes a real image model produces: the decoder of
+    `signal` yields `(N, 32)`, the decoder of `image` yields `(N, 16, 16)`.
+    """
+    return GlobalVae.createSingleLatent(
+        modality_configs={
+            "signal": {"encoder": "1d_cnn_encoder_v1", "decoder": "1d_cnn_decoder_v1"},
+            "image": {"encoder": "2d_cnn_encoder_v1", "decoder": "2d_cnn_decoder_v1"},
+        },
+        latent_dim=LATENT_DIM,
+        fusion_strategy="poe",
+        encoder_kwargs={
+            "signal": {
+                "latent_dim": LATENT_DIM,
+                "hidden_channels": (4, 8),
+                "modality_name": "signal",
+            },
+            "image": {
+                "latent_dim": LATENT_DIM,
+                "hidden_channels": (4, 8),
+                "modality_name": "image",
+            },
+        },
+        decoder_kwargs={
+            "signal": {
+                "latent_dim": LATENT_DIM,
+                "output_length": SIGNAL_LENGTH,
+                "hidden_channels": (8, 4),
+                "upsample_modes": "conv_transpose",
+                "modality_name": "signal",
+            },
+            "image": {
+                "latent_dim": LATENT_DIM,
+                "output_shape": (IMAGE_SIDE, IMAGE_SIDE),
+                "hidden_channels": (8, 4),
+                "seed_shape": (4, 4),
+                "upsample_modes": "conv_transpose",
+                "modality_name": "image",
+            },
+        },
+    )
+
+
+def buildSignalImageDataloaderForScript() -> list[dict[str, torch.Tensor]]:
+    """Dataloader factory paired with `buildSignalImageModelForScript`."""
+    torch.manual_seed(0)
+    return [
+        {
+            "signal": torch.randn(BATCH_SIZE, SIGNAL_LENGTH),
+            "image": torch.rand(BATCH_SIZE, IMAGE_SIDE, IMAGE_SIDE),
+        }
+        for _ in range(2)
+    ]

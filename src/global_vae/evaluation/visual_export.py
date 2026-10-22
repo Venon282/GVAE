@@ -4,7 +4,9 @@ See spec: "éventuellement export des reconstructions pour inspection visuelle".
 
 Pure wiring, no new plotting logic: reuses `visualization/`'s collection and plotting
 functions (`docs/adr/0009-visualization.md`) and simply saves the resulting figures as
-PNG files under `output_dir`.
+PNG files under `output_dir`. A modality whose decoder produces images (`(N, H, W)` or
+`(N, C, H, W)`, `visualization.image_plot.isImageBatch`) gets the side-by-side image grid; a
+modality of 1D series gets the line-overlay grid.
 """
 
 from collections.abc import Callable
@@ -14,6 +16,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from global_vae.models.global_vae import GlobalVae
+from global_vae.visualization.image_plot import isImageBatch, plotImageReconstructionGrid
 from global_vae.visualization.latent_plot import (
     collectLatentParams,
     plotLatentSpace,
@@ -38,8 +41,9 @@ def exportEvaluationFigures(
 ) -> list[Path]:
     """Save the reconstruction, latent-space and KL figures of `model` under `output_dir`.
 
-    Writes one reconstruction grid per modality, then, for every latent space, a
-    latent-space scatter plot and a per-dimension KL bar chart.
+    Writes one reconstruction grid per modality (a line-overlay grid for 1D series, a
+    side-by-side original and reconstruction grid for images), then, for every latent space,
+    a latent-space scatter plot and a per-dimension KL bar chart.
 
     Args:
         model: The model to visualize.
@@ -52,11 +56,12 @@ def exportEvaluationFigures(
             missing).
         device: Batches are moved here before the forward pass.
             Defaults to `model`'s own device.
-        max_examples: Forwarded to `plotReconstructionGrid`.
+        max_examples: Forwarded to `plotReconstructionGrid` or, for an image modality, to
+            `plotImageReconstructionGrid`.
         latent_projection_method: Forwarded to `plotLatentSpace`'s
             `method` (`"auto"`/`"pca"`/`"tsne"`/`"umap"`/`"none"`).
         inverse_transforms: Modality name -> inverse-preprocessing
-            callable, forwarded to `plotReconstructionGrid`'s own
+            callable, forwarded to the reconstruction grid's own
             `inverse_transform` for that modality (spec §6: this
             framework has no built-in transforms of its own to invert,
             see `visualization.reconstruction_plot`'s module
@@ -75,7 +80,10 @@ def exportEvaluationFigures(
         originals, reconstructions = collectReconstructions(
             model, dataloader, modality_name, device=device
         )
-        fig = plotReconstructionGrid(
+        grid_plotter = (
+            plotImageReconstructionGrid if isImageBatch(originals) else plotReconstructionGrid
+        )
+        fig = grid_plotter(
             originals,
             reconstructions,
             inverse_transform=inverse_transforms.get(modality_name),

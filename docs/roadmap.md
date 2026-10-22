@@ -625,6 +625,21 @@ owner's choice with the first real run (P3-1).
 only today. Remove the example-local grid helper of example 03 once it exists. Tests use the Agg
 backend.
 
+**P3-4 status.** Done. `visualization/image_plot.py` holds `plotImageReconstructionGrid` (original
+and reconstruction side by side, an optional absolute-error column, grayscale or RGB),
+`plotImageCrossModalReconstructionMatrix` (one image decoder per figure, one column per input
+subset, optional input columns) and `isImageBatch`. The helper of example 03 is removed: the
+example draws `translation_grid.png` with the library function. **Finding:** before this item,
+`exportEvaluationFigures` and `exportCrossModalFigures` raised `ValueError` for any image decoder,
+so `scripts/evaluate.py` could not write figures for an image or a signal plus image model; both
+exporters now pick the plot from the shape of the collected tensors, and
+`tests/integration/test_evaluate_script.py` runs the script on a signal plus image model. Choices
+made here, not in the item: the image matrix takes one decoder per figure and several examples
+(the 1D matrix takes every decoder and one example), because images are large; the exporters write
+one `cross_modal_reconstructions_<decoder>.png` per image decoder and keep
+`cross_modal_reconstructions.png` for the series decoders; the exporter's image grid has no error
+column (a parameter of the function, not of the exporter).
+
 **P3-5. Transformer and ViT backbones.** Spec §6 names a small transformer over the series and a
 ViT. Each follows the new-modality checklist with zero core changes, which is the practical test
 of the registry design: if a core edit looks necessary, flag it. They also give `cross_attention`

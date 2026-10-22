@@ -3,11 +3,12 @@
 See spec §10 "reconstructions" and spec §6.1 milestone 1's `signal -> z -> signal`
 case.
 
-A line-overlay plot, not an image comparison: the only concrete decoder built so far
-(`OneDCnnDecoder`) reconstructs a 1D series, matching spec §6's Phase-1 signal
-modality. An image-comparison variant (side-by-side original/reconstruction images)
-is a natural future addition once an image decoder exists (spec §6.1 milestone 2), not
-built here.
+A line-overlay plot, not an image comparison: it draws 1D series, matching spec §6's
+Phase-1 signal modality (`OneDCnnDecoder`). The image counterparts, which lay the original
+and the reconstruction side by side because two images cannot share one pixel grid, live in
+`image_plot.py` (`plotImageReconstructionGrid`, `plotImageCrossModalReconstructionMatrix`,
+spec §6.1 milestone 2). The collection helpers below work for both, since they return tensors
+of any shape; only the plotting differs.
 
 `inverse_transform` is how this module respects the framework/data boundary: spec §6
 is explicit that preprocessing (e.g. log-scale SAXS intensity) lives in the caller's
@@ -53,7 +54,8 @@ def _plotOnePair(
     if original.dim() != 1 or reconstruction.dim() != 1:
         raise ValueError(
             f"original and reconstruction must be 1-dimensional series, got shapes "
-            f"{tuple(original.shape)} and {tuple(reconstruction.shape)}."
+            f"{tuple(original.shape)} and {tuple(reconstruction.shape)}. For images use "
+            "global_vae.visualization.image_plot."
         )
     if original.shape != reconstruction.shape:
         raise ValueError(

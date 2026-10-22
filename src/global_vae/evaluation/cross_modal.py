@@ -20,7 +20,9 @@ module is purely a reporting layer over that existing mechanism
 and lays the results out for comparison, both as figures
 (`visualization.reconstruction_plot.plotCrossModalReconstructionMatrix`) and as
 numbers (`computeCrossModalReconstructionMetrics`, reusing `evaluation.metrics`'s
-existing metric functions).
+existing metric functions). The figure for a decoder of 1D series is that matrix; the figure
+for a decoder of images is `visualization.image_plot.plotImageCrossModalReconstructionMatrix`,
+one file per image decoder.
 
 Deliberately its own module, separate from `evaluate()`/`exportEvaluationFigures()`
 (`evaluate.py`/`visual_export.py`): cross-modal reporting is opt-in and, for a
@@ -43,6 +45,10 @@ import torch
 
 from global_vae.evaluation.metrics import DEFAULT_RECONSTRUCTION_METRICS, MetricFn
 from global_vae.models.global_vae import GlobalVae
+from global_vae.visualization.image_plot import (
+    isImageBatch,
+    plotImageCrossModalReconstructionMatrix,
+)
 from global_vae.visualization.reconstruction_plot import (
     InverseTransform,
     collectCrossModalReconstructions,
@@ -109,7 +115,12 @@ def exportCrossModalFigures(
     inverse_transforms: dict[str, InverseTransform] | None = None,
     max_samples: int | None = None,
 ) -> list[Path]:
-    """Save a cross-modal reconstruction matrix figure if `model` has more than one modality.
+    """Save the cross-modal reconstruction figures if `model` has more than one modality.
+
+    Decoders of 1D series share one matrix figure (`cross_modal_reconstructions.png`, written
+    only if the model has such a decoder); every decoder that produces images gets a figure of
+    its own (`cross_modal_reconstructions_<decoder>.png`), since images are too large to tile
+    several decoders and several input subsets in one picture.
 
     No-op (returns an empty list, writes nothing) for a model with fewer than two
     input modalities (`model.input_modalities`, which counts the modalities of a
@@ -133,15 +144,18 @@ def exportCrossModalFigures(
         device: Batches are moved here before the forward pass. Defaults to
             `model`'s own device.
         use_mean: Forwarded to `collectCrossModalReconstructions`.
-        example_index: Forwarded to `plotCrossModalReconstructionMatrix`.
-        inverse_transforms: Forwarded to `plotCrossModalReconstructionMatrix`'s
-            own `inverse_transform` (already per-decoder-name, matching
-            `exportEvaluationFigures`'s own parameter of the same name).
+        example_index: The sample shown, forwarded to `plotCrossModalReconstructionMatrix`
+            and, as the only row, to `plotImageCrossModalReconstructionMatrix`.
+        inverse_transforms: Decoder name -> inverse-preprocessing callable. Forwarded as
+            `plotCrossModalReconstructionMatrix`'s own `inverse_transform` (already
+            per-decoder-name, matching `exportEvaluationFigures`'s own parameter of the same
+            name), and, one entry at a time, as `plotImageCrossModalReconstructionMatrix`'s.
         max_samples: Forwarded to `collectCrossModalReconstructions`.
 
     Returns:
-        `[output_dir / "cross_modal_reconstructions.png"]` if the figure was
-        written, or `[]` if `model` has fewer than two input modalities.
+        Paths of every PNG file written: `cross_modal_reconstructions.png` first (if any
+        decoder produces 1D series), then one `cross_modal_reconstructions_<decoder>.png` per
+        image decoder, sorted by name. `[]` if `model` has fewer than two input modalities.
     """
     if len(model.input_modalities) < 2:
         return []
@@ -157,13 +171,43 @@ def exportCrossModalFigures(
         use_mean=use_mean,
         max_samples=max_samples,
     )
-    fig = plotCrossModalReconstructionMatrix(
-        collected,
-        example_index=example_index,
-        inverse_transform=inverse_transforms,
-        title="Cross-modal reconstructions",
+    image_decoders = sorted(
+        {
+            decoder_name
+            for per_decoder in collected.values()
+            for decoder_name, (originals, _) in per_decoder.items()
+            if isImageBatch(originals)
+        }
     )
-    path = resolved_output_dir / "cross_modal_reconstructions.png"
-    fig.savefig(path)
-    plt.close(fig)
-    return [path]
+    series_collected = {
+        subset: series
+        for subset, per_decoder in collected.items()
+        if (series := {k: v for k, v in per_decoder.items() if k not in image_decoders})
+    }
+
+    written_paths: list[Path] = []
+    if series_collected:
+        fig = plotCrossModalReconstructionMatrix(
+            series_collected,
+            example_index=example_index,
+            inverse_transform=inverse_transforms,
+            title="Cross-modal reconstructions",
+        )
+        path = resolved_output_dir / "cross_modal_reconstructions.png"
+        fig.savefig(path)
+        plt.close(fig)
+        written_paths.append(path)
+
+    for decoder_name in image_decoders:
+        image_fig = plotImageCrossModalReconstructionMatrix(
+            collected,
+            decoder_name,
+            example_indices=[example_index],
+            inverse_transform=(inverse_transforms or {}).get(decoder_name),
+            title=f"Cross-modal reconstructions: {decoder_name}",
+        )
+        image_path = resolved_output_dir / f"cross_modal_reconstructions_{decoder_name}.png"
+        image_fig.savefig(image_path)
+        plt.close(image_fig)
+        written_paths.append(image_path)
+    return written_paths

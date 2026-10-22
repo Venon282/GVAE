@@ -10,6 +10,10 @@ notebook, or `logger.logFigure(name, fig, step)` via `training/loggers/`) is the
 caller's decision, keeping this subpackage decoupled from both file I/O and any
 particular experiment-tracking backend.
 
+Reconstructions are drawn by `reconstruction_plot` for 1D series (an overlay of the two curves)
+and by `image_plot` for images (the two side by side); `image_plot.isImageBatch` tells which
+applies to a collected batch.
+
 Requires the `visualization` extra (`pip install -e ".[visualization]"`, matplotlib
 only): unlike every other subpackage, importing `global_vae.visualization` does
 require an extra dependency, since there is no meaningful "plotting without a

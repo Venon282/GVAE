@@ -15,7 +15,11 @@ import pytest
 
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import saveCheckpoint
-from tests.integration._script_fixtures import buildModelForScript, buildTwoModalityModelForScript
+from tests.integration._script_fixtures import (
+    buildModelForScript,
+    buildSignalImageModelForScript,
+    buildTwoModalityModelForScript,
+)
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[2] / "scripts" / "evaluate.py"
 
@@ -24,6 +28,10 @@ _DATALOADER_FACTORY = "tests.integration._script_fixtures:buildDataloaderForScri
 _TWO_MODALITY_MODEL_FACTORY = "tests.integration._script_fixtures:buildTwoModalityModelForScript"
 _TWO_MODALITY_DATALOADER_FACTORY = (
     "tests.integration._script_fixtures:buildTwoModalityDataloaderForScript"
+)
+_SIGNAL_IMAGE_MODEL_FACTORY = "tests.integration._script_fixtures:buildSignalImageModelForScript"
+_SIGNAL_IMAGE_DATALOADER_FACTORY = (
+    "tests.integration._script_fixtures:buildSignalImageDataloaderForScript"
 )
 
 
@@ -265,3 +273,44 @@ class TestCrossModalFigures:
             ]
         )
         assert not (output_dir / "cross_modal_reconstructions.png").exists()
+
+
+class TestImageFigures:
+    """`scripts/evaluate.py` on a model with an image decoder (roadmap P3-4).
+
+    Before the image plots existed, both figure exporters raised `ValueError` for any decoder
+    that produces images, so an image or signal plus image model could not be evaluated with
+    figures at all.
+    """
+
+    @pytest.fixture
+    def signal_image_checkpoint_path(self, tmp_path: Path) -> Path:
+        path = tmp_path / "signal_image_model.pt"
+        saveCheckpoint(path, model=buildSignalImageModelForScript())
+        return path
+
+    def test_signal_image_model_writes_the_image_figures(
+        self, script: ModuleType, signal_image_checkpoint_path: Path, tmp_path: Path
+    ) -> None:
+        output_dir = tmp_path / "results"
+        script.main(
+            [
+                "--checkpoint",
+                str(signal_image_checkpoint_path),
+                "--model-factory",
+                _SIGNAL_IMAGE_MODEL_FACTORY,
+                "--dataloader-factory",
+                _SIGNAL_IMAGE_DATALOADER_FACTORY,
+                "--device",
+                "cpu",
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
+        written = {path.name for path in output_dir.glob("*.png")}
+        assert {
+            "reconstructions_signal.png",
+            "reconstructions_image.png",
+            "cross_modal_reconstructions.png",
+            "cross_modal_reconstructions_image.png",
+        } <= written

@@ -115,8 +115,9 @@ Two things it shows that the other examples cannot:
   the degraded input, the target, and the output from each input subset. The
   signal-only output is a blob smeared along y (right x, unknown y), the image-only
   output can put the blob in the wrong place when it is occluded, and the fused output
-  gets both right. It is drawn by the script itself: the framework's cross-modal
-  matrix plot handles 1D series only.
+  gets both right. It is the framework's own
+  `visualization.image_plot.plotImageCrossModalReconstructionMatrix`, which you can
+  call the same way on any image decoder.
 
 ```bash
 pip install -e ".[dev]"

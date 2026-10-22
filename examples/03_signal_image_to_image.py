@@ -58,9 +58,9 @@ Stages, in order:
    "return the degraded input" baseline.
 5. Figures: a translation grid and the training curves.
 
-Note on the figure: `visualization.reconstruction_plot.plotCrossModalReconstructionMatrix`
-draws 1D series only (an image comparison plot is still listed as deferred in
-`visualization/NOTE.md`), so the image grid below is example-local.
+Note on the figure: the translation grid is the framework's own
+`visualization.image_plot.plotImageCrossModalReconstructionMatrix`: one row per test sample,
+with the two inputs, the clean target and what the decoder produces from each input subset.
 
 Run:
     pip install -e ".[dev]"
@@ -82,7 +82,6 @@ matplotlib.use("Agg")  # file-only output: this script never opens an interactiv
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from matplotlib.figure import Figure
 
 from global_vae.evaluation.cross_modal import computeCrossModalReconstructionMetrics
 from global_vae.evaluation.metrics import computeMse, computePearsonR, computeR2
@@ -94,6 +93,7 @@ from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.training.loggers.csv_logger import CsvLogger
 from global_vae.training.trainer import Trainer
 from global_vae.utils.seed import setGlobalSeed
+from global_vae.visualization.image_plot import plotImageCrossModalReconstructionMatrix
 from global_vae.visualization.loss_curves import plotLossCurves
 from global_vae.visualization.reconstruction_plot import collectCrossModalReconstructions
 
@@ -370,59 +370,6 @@ def formatMetricsTable(rows: dict[str, dict[str, float]]) -> str:
 # --- Stage 5: figures ----------------------------------------------------------------------
 
 
-def plotTranslationGrid(
-    test_split: dict[str, torch.Tensor],
-    collected: dict[frozenset[str], dict[str, tuple[torch.Tensor, torch.Tensor]]],
-    example_indices: list[int],
-) -> Figure:
-    """Lay out, for a few test samples, every input and what each input subset produces.
-
-    Columns: the 1D signal, the degraded input image, the clean target, then the model's
-    `image_out` from `signal` alone, from `image_in` alone, and from both.
-
-    Args:
-        test_split: The test split, as from `buildSplit` (aligned with `collected`, since
-            the test batches were not shuffled).
-        collected: As from `collectCrossModalReconstructions`.
-        example_indices: Which test samples to show, one row each.
-
-    Returns:
-        The matplotlib `Figure`.
-    """
-    subsets = [frozenset({SIGNAL}), frozenset({IMAGE_IN}), frozenset({SIGNAL, IMAGE_IN})]
-    titles = [
-        "signal (input)",
-        "image_in (input, degraded)",
-        "image_out (target)",
-        "output from\nsignal only",
-        "output from\nimage_in only",
-        "output from\nboth",
-    ]
-    fig, axes = plt.subplots(
-        len(example_indices),
-        len(titles),
-        figsize=(2.6 * len(titles), 2.4 * len(example_indices)),
-        squeeze=False,
-    )
-    for row, sample in enumerate(example_indices):
-        axes[row][0].plot(test_split[SIGNAL][sample].numpy(), linewidth=1.2)
-        axes[row][0].set_ylim(-0.2, 1.2)
-        images = [
-            test_split[IMAGE_IN][sample],
-            test_split[IMAGE_OUT][sample],
-            *(collected[subset][IMAGE_OUT][1][sample] for subset in subsets),
-        ]
-        for column, image in enumerate(images, start=1):
-            axes[row][column].imshow(image.numpy(), vmin=0.0, vmax=1.0, cmap="viridis")
-            axes[row][column].set_xticks([])
-            axes[row][column].set_yticks([])
-        if row == 0:
-            for column, title in enumerate(titles):
-                axes[row][column].set_title(title, fontsize=9)
-    fig.tight_layout()
-    return fig
-
-
 # --- Entry point ---------------------------------------------------------------------------
 
 
@@ -525,7 +472,16 @@ def main(argv: list[str] | None = None) -> None:
     (output_dir / "metrics_by_input_subset.json").write_text(json.dumps(rows, indent=2))
 
     logger.info("Step 5/5: saving figures.")
-    grid_fig = plotTranslationGrid(test_split, collected, example_indices=[0, 1, 2, 3, 4])
+    grid_fig = plotImageCrossModalReconstructionMatrix(
+        collected,
+        IMAGE_OUT,
+        example_indices=[0, 1, 2, 3, 4],
+        inputs={SIGNAL: test_split[SIGNAL], IMAGE_IN: test_split[IMAGE_IN]},
+        subset_order=[frozenset({SIGNAL}), frozenset({IMAGE_IN}), frozenset({SIGNAL, IMAGE_IN})],
+        original_label="image_out (target)",
+        vmin=0.0,
+        vmax=1.0,
+    )
     grid_fig.savefig(output_dir / "translation_grid.png", dpi=110)
     plt.close(grid_fig)
 

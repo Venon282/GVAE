@@ -405,8 +405,40 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `docs/how-to/train.md`, `docs/how-to/choose-beta.md` (an "Images" bullet under "Choose a
   reduction"), the notes of `configs/data/` and `configs/experiment/`, `examples/README.md` and the
   README mention the image configs.
+- Image plots (roadmap P3-4, spec §6.1 milestone 2). The new `visualization/image_plot.py` holds
+  `plotImageReconstructionGrid` (one row per example, the original next to the reconstruction, with
+  an optional absolute-error column; `(N, H, W)`, `(N, 1, H, W)` and `(N, 3, H, W)` batches, an
+  `inverse_transform` applied one image at a time, one colour scale per row so a colour means the
+  same value across it) and `plotImageCrossModalReconstructionMatrix` (for one image decoder, one
+  row per example and one column per input-modality subset, next to the target and, optionally, the
+  inputs that went in, a series as a line and an image as an image), plus `isImageBatch`, which
+  tells an image batch from a batch of 1D series. The image matrix draws one decoder per figure and
+  examples down the rows, where the 1D matrix puts every decoder in one figure and shows one
+  example, because images are large. `collectReconstructions` and
+  `collectCrossModalReconstructions` feed both unchanged.
+- `tests/integration/test_image_plot.py` (Agg backend): the pixels each panel shows, the colour
+  scales, the inverse transform, the error column, grayscale and RGB, every error path, the
+  complementarity with the 1D matrix, and both exporters on a tiny signal plus image model built
+  from the real 1D and 2D CNN pairs. `tests/integration/test_evaluate_script.py` gains
+  `TestImageFigures`, which runs `scripts/evaluate.py` on that model
+  (`buildSignalImageModelForScript` and `buildSignalImageDataloaderForScript`, new in
+  `_script_fixtures.py`).
 
 ### Changed
+
+- `exportEvaluationFigures` draws the reconstruction grid of a modality with
+  `plotImageReconstructionGrid` when its decoder produces images, and with
+  `plotReconstructionGrid` otherwise; the file names do not change. `exportCrossModalFigures` splits
+  the decoders: those of 1D series share `cross_modal_reconstructions.png` as before (written only
+  if the model has one), and each image decoder gets `cross_modal_reconstructions_<decoder>.png`,
+  so the return value lists those paths after the first. A model with only series decoders gets
+  exactly what it got before.
+- `examples/03_signal_image_to_image.py` draws `translation_grid.png` with the framework's
+  `plotImageCrossModalReconstructionMatrix`, from the same inputs, target and subsets, in the same
+  file. One cosmetic difference: the input columns are titled `signal (input)` and `image_in
+  (input)` (the second used to say `degraded`), and the signal line is autoscaled.
+- The error of `plotReconstructionGrid` and `plotCrossModalReconstructionMatrix` for a tensor that
+  is not a 1D series now points to `visualization.image_plot`.
 
 - `GlobalVae.forward` and modality dropout (ADR 0024). A decoder that consumes several latent
   spaces and is missing some of them in a pass (the private latent of a modality that was left
@@ -530,6 +562,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Removed
 
+- `plotTranslationGrid`, the image grid that was local to `examples/03_signal_image_to_image.py`:
+  the framework's `plotImageCrossModalReconstructionMatrix` replaces it, as the note in
+  `visualization/NOTE.md` said it should.
 - The `NotImplementedError` that `GlobalVae.__init__` raised for an encoder assigned to more than
   one latent space (the fan-out guard of ADR 0002, superseded by ADR 0024).
 - The `dimension_locked_assemblers` argument of `validateRoutingGraph` (default `{"sum", "average"}`):
@@ -538,3 +573,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
   assembler (`getAssemblerClass(name)()`) is gone with it: assemblers need `input_dims`.
 
 ### Fixed
+
+- `scripts/evaluate.py` could not write figures for a model with an image decoder:
+  `exportEvaluationFigures` and `exportCrossModalFigures` raised `ValueError` ("must be
+  1-dimensional series") on the first image tensor, so an image or signal plus image model could be
+  evaluated for its numbers but not for its figures. Both now draw images (see Added).

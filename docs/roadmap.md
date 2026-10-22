@@ -13,7 +13,8 @@ item that depends on one says `needs D-n`, and section 7 lists them all.
 
 Milestone 1 (a single-modality signal VAE, spec §6.1) is complete. Milestone 2 (signal plus
 image, fusion, missing modalities) runs end to end on synthetic data
-(`examples/03_signal_image_to_image.py`). Only the real paired dataset is missing, and that
+(`examples/03_signal_image_to_image.py`), and a reference paired `loader_factory` exists
+(`examples/04_paired_loader.py`, P3-2). Only the real paired dataset is missing, and that
 belongs to the caller by design (spec §6.2). Of the 8 configurations of spec §2.1, `EN-L1-DN` is
 complete and tested. Three more can already be built (one is exercised only through an example,
 two by no test at all). The four shared-encoder rows (`E1-*`) cannot be built, and neither can
@@ -572,6 +573,25 @@ first real values for D-6 and should run in parallel with Phase 1, since it only
 **P3-2. Paired loader.** Pairing stays the caller's job (spec §6.2, and `datamodule.py` is not
 planned). After D-5, write a reference `loader_factory` for the real pairs, kept outside
 `src/global_vae` (for example `examples/04_paired_loader.py`), and run `scripts/train.py` on it.
+
+**P3-2 status.** Done, on synthetic pairs: no real dataset was available, and the loader is
+written to be adapted to one. D-5 was taken at its proposed default, **not yet confirmed by the
+owner**, so spec §11's fourth bullet stays open and the spec is not amended: samples are paired by
+sample ID and a sample with only one modality is left out (single-modality batches are not
+produced). `examples/04_paired_loader.py` holds `buildPairedDataloaders(config: DataConfig) ->
+DataloaderBundle`, which reads `<train_path>/signal/<sample_id>.npy` and
+`<train_path>/image/<sample_id>.npy`, pairs by ID and never by position, splits by sample ID with
+`data.seed` (or reads `val_path` and `test_path` folders), applies `data.transforms`, checks the
+signal length against `data.sequence_length` and returns `DataLoader`s of `signal` `(batch, 256)`
+and `image` `(batch, 64, 64)`. Three functions, `sampleIdFromPath`, `loadSignal` and `loadImage`,
+are the only code that knows the files, so a different convention (a prefix per modality, a
+manifest) or format (HDF5, TIFF) changes them and nothing else. `scripts/train.py --config-name
+experiment/signal_image_vae` runs on it (`--train` of the example, and a subprocess test with
+explicit validation and test folders); 10 epochs on 192 training pairs take about 15 seconds on
+CPU. `src/global_vae` is untouched and no ADR is needed. It does not serve
+`signal_image_to_image`, whose inputs are a degraded and a clean copy of one image. Next: P3-6
+(paired-data evaluation) can reuse the loader, and P3-1 and the owner's real pairs are the first
+real test of the convention.
 
 **P3-3. Milestone 2 configs.** [ADR 0017](adr/0017-2d-cnn-encoder-decoder.md) and
 [ADR 0018](adr/0018-2d-residual-encoder-decoder.md) leave as next steps two model configs

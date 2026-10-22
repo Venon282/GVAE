@@ -30,6 +30,9 @@ For the multimodal case, `(signal, image) -> image` with a target that differs f
 every input, two encoders fused into one latent space and reconstruction from either
 input alone, see `examples/03_signal_image_to_image.py`.
 
+For a `loader_factory` that pairs a signal with an image by sample ID, splits the pairs and
+feeds `scripts/train.py`, see `examples/04_paired_loader.py`.
+
 ## Train on your own data
 
 ```bash

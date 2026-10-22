@@ -9,7 +9,9 @@ cloning the repository. `_synthetic_signal_data.py` is shared scaffolding the fi
 two scripts below both import their data from (the leading underscore marks it as not
 meant to be run directly, mirroring `tests/integration/_script_fixtures.py`'s own
 convention); it is not an example of its own. `03_signal_image_to_image.py` generates
-its own data and needs no shared helper.
+its own data and needs no shared helper. `04_paired_loader.py` is the exception to
+"synthetic data generated in-memory": reading paired files is what it demonstrates, so it
+writes a small synthetic dataset to disk first.
 
 ## `01_signal_vae_pipeline.py`
 
@@ -127,3 +129,59 @@ Every output (best checkpoint, CSV metrics, `metrics_by_input_subset.json`,
 `translation_grid.png`, `loss_curves.png`) is written to
 `examples/outputs/03_signal_image_to_image/` (git-ignored, same pattern as above). The
 defaults (2048 training samples, 40 epochs) take a few minutes on CPU.
+
+## `04_paired_loader.py`
+
+The reference `loader_factory` for **paired (signal, image) data** (roadmap P3-2, spec §6.1
+milestone 2, §6.2). Spec §6.2 keeps dataset loading, pairing and splitting out of
+`src/global_vae` for good, so this is what they look like on the caller's side: one function,
+`buildPairedDataloaders(config: DataConfig) -> DataloaderBundle`, that `scripts/train.py`
+resolves from `data.loader_factory` and that yields the `signal` `(batch, 256)` and `image`
+`(batch, 64, 64)` batches of the signal plus image experiments
+(`configs/data/signal_image.yaml`).
+
+It is written for the pairing convention the roadmap proposes (decision D-5, taken at its
+default and not yet confirmed by the owner): **samples are paired by sample ID, and a sample
+that has only one modality is left out.** On disk that is one folder per modality and one
+`.npy` file per sample, paired when the names agree up to the extension:
+
+```text
+<train_path>/signal/<sample_id>.npy     # 1D array
+<train_path>/image/<sample_id>.npy      # 2D array
+```
+
+Pairing goes by ID and never by position, so a sample missing from one folder does not shift
+the pairs that follow it. Three small functions are the only code that knows your files:
+`sampleIdFromPath` (file name -> sample ID), `loadSignal` and `loadImage` (file -> tensor).
+Change them for your own naming or format (HDF5, TIFF, ...); the rest is generic: the seeded
+split by sample ID (`val_split`, `test_split` and `seed`, or explicit `val_path` and
+`test_path` folders), the per-modality `data.transforms` through `buildTransformPipeline`, a
+check of the signal length against `data.sequence_length` before training starts, and the
+`DataLoader` settings (`batch_size`, `num_workers`, `shuffle_train`).
+
+With no argument the script writes a synthetic paired dataset (with a few samples that have
+one modality only, mixed in among the pairs), loads it through the factory from the composed
+`experiment/signal_image_vae` config and prints what came out. With `--train` it then runs
+`scripts/train.py` on that folder, exactly as you would on your own data:
+
+```bash
+pip install -e ".[dev]"
+python examples/04_paired_loader.py                      # write the data, load it, print the command
+python examples/04_paired_loader.py --train              # ... and train on it with scripts/train.py
+python examples/04_paired_loader.py --help               # every option
+
+# what --train runs, to adapt to your data (the repository root on PYTHONPATH):
+PYTHONPATH=. python scripts/train.py --config-name experiment/signal_image_vae \
+    data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
+    data.train_path=/path/to/dataset
+```
+
+For your own project, copy the file into your package and point `data.loader_factory` at
+`my_project.data:buildPairedDataloaders`. `signal_image_independent_latents` and
+`signal_image_shared_private` read the same batches. `signal_image_to_image` does not: its
+inputs are a degraded and a clean copy of one image, which real signal plus image pairs do not
+have.
+
+Every output (the synthetic dataset, checkpoints, `metrics.csv`, the Hydra run folder) is
+written to `examples/outputs/04_paired_loader/` (git-ignored, same pattern as above). The
+default 10 epochs take well under a minute on CPU.

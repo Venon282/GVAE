@@ -26,7 +26,9 @@ checks on dummy paired batches. See `docs/adr/0025-config-schema-for-several-lat
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a
 `loader_factory` of your own that yields `signal`, `image` and, for the translation-style models,
-`image_out`), and pairing stays the caller's `loader_factory` (spec §11, roadmap P3-2). The
+`image_out`), and pairing stays the caller's `loader_factory` (spec §6.2).
+`examples/04_paired_loader.py` is a reference one, run through `scripts/train.py` on
+`experiment/signal_image_vae` (roadmap P3-2); the real dataset is what is still open. The
 image-only model configs and the review of `configs/model/default.yaml` are roadmap P3-3.
 
 A model whose decoder target is not an encoder input (signal and image to image, as in

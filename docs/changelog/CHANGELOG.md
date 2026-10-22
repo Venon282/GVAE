@@ -345,6 +345,32 @@ versioning follows [Semantic Versioning](https://semver.org/).
   adapter, the checkpoint file and the resume guarantee of ADR 0032, the caller's `loader_factory`),
   and starts with Fabric. The spec §10 training-loop bullet points to it (a spec edit, to be
   confirmed by the owner).
+- A reference `loader_factory` for paired signal plus image data, `examples/04_paired_loader.py`
+  (roadmap P3-2, spec §6.2). Nothing is added to `src/global_vae`: pairing, splitting and file
+  reading stay the caller's, and `datamodule.py` stays unplanned. Decision D-5 is taken at its
+  proposed default, not yet confirmed by the owner: samples are paired by sample ID, and a sample
+  with only one modality is left out. `buildPairedDataloaders(config: DataConfig)` reads
+  `<train_path>/signal/<sample_id>.npy` and `<train_path>/image/<sample_id>.npy`, pairs by ID (never
+  by position), logs what it leaves out, splits the pairs by sample ID with `data.seed` (`val_split`
+  and `test_split`, or explicit `val_path` and `test_path` folders), applies `data.transforms`
+  through `buildTransformPipeline`, checks the signal length against `data.sequence_length` on the
+  first sample, and returns `DataLoader`s that yield `signal` `(batch, 256)` and `image`
+  `(batch, 64, 64)` (`batch_size`, `num_workers` and `shuffle_train` are honoured; only training
+  shuffles, with a seeded generator). Three functions are the only code that knows the files:
+  `sampleIdFromPath`, `loadSignal` and `loadImage`. `python examples/04_paired_loader.py` writes a
+  synthetic paired dataset (with samples that have one modality only, mixed in) and loads it, and
+  `--train` runs `scripts/train.py --config-name experiment/signal_image_vae` on it through
+  `data.loader_factory=examples.04_paired_loader:buildPairedDataloaders`: 10 epochs on 192 training
+  pairs take about 15 seconds on CPU and bring the loss from 3.46 to 0.73.
+- `tests/integration/test_paired_loader_example.py`: the pairing (by ID, not position; what is left
+  out; duplicate and missing IDs), the file readers, the seeded split (disjoint, reproducible,
+  independent of file order, never empty), the loaders (keys, shapes, a signal and an image that
+  share an ID in every batch, transforms, shuffling, workers, explicit `val_path` and `test_path`,
+  the `sequence_length` check) and two `scripts/train.py` subprocess runs, one through the example's
+  `--train` flag and one with explicit validation and test folders.
+- `examples/README.md`, `docs/how-to/train.md` ("Train on paired signal and image data"),
+  `docs/getting-started.md` and the notes of `configs/data/` and `configs/experiment/` point to the
+  reference loader.
 
 ### Changed
 

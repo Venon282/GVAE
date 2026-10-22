@@ -43,6 +43,27 @@ your `loader_factory` yields `signal` and `image` batches (plus `image_out` for 
 latent spaces model). How the models are written is in
 [configure encoders, decoders and latent spaces](configure-latent-spaces.md).
 
+## Train on paired signal and image data
+
+Pairing a signal with its image is your `loader_factory`'s job like the rest of the data
+pipeline (spec §6.2). `examples/04_paired_loader.py` is a reference you can copy and adapt: it
+pairs two folders of files by sample ID, leaves out the samples that have only one modality,
+splits the pairs by sample ID with `data.seed`, runs `data.transforms` and checks the signal
+length against `data.sequence_length`.
+
+```bash
+PYTHONPATH=. python scripts/train.py --config-name experiment/signal_image_vae \
+    data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
+    data.train_path=/path/to/dataset
+```
+
+The dataset folder holds `signal/<sample_id>.npy` and `image/<sample_id>.npy`. To read another
+layout or format, change the three adaptation points at the top of the example
+(`sampleIdFromPath`, `loadSignal`, `loadImage`). If your signals do not have
+`data.sequence_length.signal` points, add a `resample` step to `data.transforms.signal` instead
+of changing the model. `python examples/04_paired_loader.py --train` writes a synthetic dataset
+in that layout and trains on it, end to end.
+
 ## Watch the learning rate
 
 A callback that changes the learning rate, such as `reduce_lr_on_plateau`, is recorded without any

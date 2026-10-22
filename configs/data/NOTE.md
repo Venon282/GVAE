@@ -22,7 +22,10 @@ and an image (`configs/experiment/signal_image_*.yaml`, `docs/adr/0025-config-sc
 a `loader_factory` of your own, per-modality `transforms` for `signal` and `image`, and
 `sequence_length.signal`. It describes the batches the experiments expect (`signal`, `image`, and
 `image_out` for the translation-style models); pairing a signal with its image stays the
-`loader_factory`'s job.
+`loader_factory`'s job. `examples/04_paired_loader.py` is a reference for it (roadmap P3-2): it
+pairs two folders of files by sample ID, leaves out the samples that have one modality only,
+splits by sample ID with `seed`, applies `transforms` and checks `sequence_length`. It is an
+example, not framework code.
 
 # Still deferred / permanent scope boundary
 

@@ -4,7 +4,8 @@
 # "module.path:function_name" returning a global_vae.config.data.DataloaderBundle whose
 # batches carry one tensor per key the model uses: `signal` of shape (batch, 256), `image` of
 # shape (batch, 64, 64), plus `image_out` (the target) for the models whose decoder is named
-# that. Pairing a signal with its image is yours too (spec §11, roadmap P3-2).
+# that. Pairing a signal with its image is yours too (spec §6.2); examples/04_paired_loader.py
+# is a reference `loader_factory` that pairs by sample ID (roadmap P3-2).
 # `train_path`/`loader_factory` are left as required (`???`, Hydra's MISSING marker): fill them
 # in, or override them on the command line.
 loader_factory: ??? # e.g. "my_project.data:buildPairedDataloaders"

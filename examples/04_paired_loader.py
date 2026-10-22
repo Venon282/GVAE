@@ -66,8 +66,9 @@ use `my_project.data:buildPairedDataloaders` instead):
         data.train_path=/path/to/dataset
 
 The other signal plus image experiments (`signal_image_independent_latents`,
-`signal_image_shared_private`) read the same batches. `signal_image_to_image` does not: its
-inputs are a degraded and a clean copy of one image, which these pairs do not have.
+`signal_image_shared_private`) read the same batches, and so do the image-only ones (`image_vae`,
+`image_resnet_vae`, which read the `image` key and ignore `signal`). `signal_image_to_image` does
+not: its inputs are a degraded and a clean copy of one image, which these pairs do not have.
 
 Everything is written to `examples/outputs/04_paired_loader/` (git-ignored). On CPU the whole
 run, training included, takes well under a minute.

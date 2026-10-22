@@ -371,6 +371,40 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `examples/README.md`, `docs/how-to/train.md` ("Train on paired signal and image data"),
   `docs/getting-started.md` and the notes of `configs/data/` and `configs/experiment/` point to the
   reference loader.
+- Image-only model configs and experiments (roadmap P3-3, spec §6.1 milestone 2). The image
+  counterparts of the signal files, as ADRs 0017 and 0018 left them as next steps:
+  `configs/model/image_single_latent.yaml` (the plain 2D pair) and `image_resnet_single_latent.yaml`
+  (the residual pair), each one `image` modality of 64 x 64 into one unfused latent space `z_fused`
+  of 16 dimensions; the data contract `configs/data/image.yaml` (batches with one `image` key, a
+  per-modality `standardize` entry, no `sequence_length`); and the experiments
+  `configs/experiment/image_vae.yaml` and `image_resnet_vae.yaml`. `model=` swaps one model for the
+  other, and the paired loader of `examples/04_paired_loader.py` serves both (a key with no encoder
+  or decoder is ignored). `configs/model/default.yaml` (a signal plus image model, buildable since
+  P0-7), `signal_image_vae.yaml` and `signal_image_to_image.yaml` already covered the rest of the
+  item and are unchanged; `default.yaml` keeps its name, since `model=default` is in use.
+- The image experiments train on the `sum` reconstruction loss with weight 0.5, not the default
+  `mean`. On the synthetic pairs of `examples/04_paired_loader.py` (30 epochs, 192 training images),
+  the plain model under `mean` left 0 of 16 latent units active and reconstructed worse than the
+  mean image (R^2 of -0.13 against it, a free-bits KL did not help), while `sum` at 0.5, the ELBO of
+  a unit-variance Gaussian decoder, used all 16 units (R^2 of 0.59, and 0.64 for the residual
+  model). These are measurements on synthetic data, not a tuned value: beta stays decision D-6, and
+  the comment of each experiment file says how to go back to `mean`. `signal_image_vae.yaml` was
+  not changed: on the same pairs it collapses under `mean` (0 of 32 units, R^2 near 0 for both
+  modalities), and `sum` at 0.5 fits the signal (R^2 of 0.90) and barely the image (0.07).
+- `tests/integration/test_image_model_configs.py`: for both model files, the one-modality unfused
+  wiring, the names of the 2D pair, a YAML list `output_shape` that gives the reconstruction it
+  declares, an explicit channel axis, agreement of the image size with `default.yaml`, the latent
+  width set in one place, a gradient on every parameter, a falling loss, and the ignoring of an
+  extra `signal` key; for the data contract, the required fields, the per-modality transforms and
+  their round trip; for each experiment, its composition, the `model=` swap, one override changing
+  the latent width, the loss scale and the arithmetic behind it (`sum` at 0.5 is `N / 2 = 2048`
+  times `mean`); and two `scripts/train.py` runs per experiment, on dummy images
+  (`buildDummyImageDataloaders`, new in `_train_script_fixtures.py`) and on the paired loader.
+  `test_model_config_schema.py` now covers the two new model files in its
+  `createSingleLatent` equivalence test and counts them among the shipped files.
+- `docs/how-to/train.md`, `docs/how-to/choose-beta.md` (an "Images" bullet under "Choose a
+  reduction"), the notes of `configs/data/` and `configs/experiment/`, `examples/README.md` and the
+  README mention the image configs.
 
 ### Changed
 

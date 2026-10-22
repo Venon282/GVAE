@@ -602,6 +602,24 @@ paired signal plus image experiment file. Add those, a signal plus image PoE mod
 modalities are reconstructed works with today's schema; a translation variant (decoder target that
 is not an input) needs P1-3.
 
+**P3-3 status.** Done. Most of the item already existed, so it is unchanged: `default.yaml` has been
+a buildable signal plus image PoE model since P0-7, `experiment/signal_image_vae.yaml` came with
+ADR 0025, and the translation variant is `signal_image_to_image.yaml` (P1-3). `default.yaml` keeps
+its name, since renaming it would break `model=default` for no gain. Added what ADRs 0017 and 0018
+left as next steps: `configs/model/image_single_latent.yaml` and `image_resnet_single_latent.yaml`
+(one 64 x 64 `image` modality, one unfused latent space of 16 dimensions), the data contract
+`configs/data/image.yaml`, and the experiments `image_vae.yaml` and `image_resnet_vae.yaml`.
+`tests/integration/test_image_model_configs.py` checks them in the style of `test_yaml_shapes.py`
+and trains each through `scripts/train.py`, on dummy images and on the paired loader of P3-2.
+The old ADRs are not edited. **Finding for D-6:** on the synthetic pairs, an image model under the
+default `mean` loss and `beta = 1` collapses (0 of 16 latent units active, worse than the mean
+image), because `N = 4096` makes the KL weigh 2048 times the ELBO. The image experiments therefore
+set `sum` at weight 0.5, which used all units (R^2 of 0.59 plain, 0.64 residual); a free-bits KL did
+not help under `mean`. This is synthetic data, not a tuned value. `signal_image_vae.yaml` shows the
+same collapse (0 of 32 units) and was not changed: `sum` at 0.5 fits the signal (R^2 of 0.90) and
+barely the image (0.07), so a model with both modalities needs a per-modality weight, which is the
+owner's choice with the first real run (P3-1).
+
 **P3-4. Image plots.** A side-by-side original and reconstruction grid (deferred in
 `visualization/NOTE.md`) and an image version of the cross-modal matrix, which draws 1D series
 only today. Remove the example-local grid helper of example 03 once it exists. Tests use the Agg

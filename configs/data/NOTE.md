@@ -27,6 +27,15 @@ pairs two folders of files by sample ID, leaves out the samples that have one mo
 splits by sample ID with `seed`, applies `transforms` and checks `sequence_length`. It is an
 example, not framework code.
 
+`configs/data/image.yaml` is the contract of the single-modality image models
+(`configs/experiment/image_vae.yaml` and `image_resnet_vae.yaml`, roadmap P3-3): a
+`loader_factory` of your own whose batches carry one key, `image`, of shape `(batch, 64, 64)`, and
+a per-modality `transforms` entry for `image` (an identity `standardize` to fill in). It has no
+`sequence_length`, which is the length of a 1D signal: an image's size is the decoder's
+`output_shape`. A loader that yields more keys, such as the paired one of
+`examples/04_paired_loader.py`, serves these experiments as well, since a key with no encoder or
+decoder is ignored.
+
 # Still deferred / permanent scope boundary
 
 No dataset/pairing/splitting *code* exists in this framework, and none is planned:

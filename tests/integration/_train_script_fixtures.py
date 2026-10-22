@@ -64,3 +64,25 @@ def buildDummySignalImageDataloaders(config: DataConfig) -> DataloaderBundle:
         return batches
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummyImageDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the image-only models (`experiment/image_*.yaml`).
+
+    The batches carry one key, `image`, of shape `(batch, 64, 64)`: the data contract of
+    `configs/data/image.yaml`. Like the other builders of this module, it never touches disk.
+
+    Args:
+        config: The data config; `seed` is read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        return [
+            {"image": torch.randn(BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE)} for _ in range(num_batches)
+        ]
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))

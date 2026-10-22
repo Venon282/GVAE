@@ -177,7 +177,8 @@ See spec §8 for the target layout; `src/global_vae/` mirrors it.
 3. Register both (the decorator does this: nothing else to wire up).
 4. Add a config entry referencing the two registry names (see
    `configs/model/default.yaml` for a two-modality example,
-   `configs/model/signal_single_latent.yaml` for a single-modality one and
+   `configs/model/signal_single_latent.yaml` or `configs/model/image_single_latent.yaml` for a
+   single-modality one and
    `docs/how-to/configure-latent-spaces.md` for several latent spaces).
 5. Add a test: a unit test for the encoder/decoder shapes (in `tests/unit/`), and
    ideally an entry in the relevant integration test (in `tests/integration/`).

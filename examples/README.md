@@ -178,9 +178,10 @@ PYTHONPATH=. python scripts/train.py --config-name experiment/signal_image_vae \
 
 For your own project, copy the file into your package and point `data.loader_factory` at
 `my_project.data:buildPairedDataloaders`. `signal_image_independent_latents` and
-`signal_image_shared_private` read the same batches. `signal_image_to_image` does not: its
-inputs are a degraded and a clean copy of one image, which real signal plus image pairs do not
-have.
+`signal_image_shared_private` read the same batches, and so do the image-only experiments
+`image_vae` and `image_resnet_vae` (they read `image` and ignore `signal`).
+`signal_image_to_image` does not: its inputs are a degraded and a clean copy of one image, which
+real signal plus image pairs do not have.
 
 Every output (the synthetic dataset, checkpoints, `metrics.csv`, the Hydra run folder) is
 written to `examples/outputs/04_paired_loader/` (git-ignored, same pattern as above). The

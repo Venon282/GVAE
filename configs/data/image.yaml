@@ -1,0 +1,38 @@
+# Data contract for the single-modality image models (spec §6.1 milestone 2, image side;
+# configs/model/image_single_latent.yaml and image_resnet_single_latent.yaml). Same stance as
+# signal.yaml: framework-agnostic, no dataset code anywhere in this framework (data/NOTE.md).
+# `loader_factory` must point at your own "module.path:function_name" returning a
+# global_vae.config.data.DataloaderBundle whose batches carry one key, `image`, of shape
+# (batch, 64, 64). Extra keys are harmless: a key with no encoder is never encoded, and one
+# with no decoder is never reconstructed, so the paired loader of
+# examples/04_paired_loader.py (which also yields `signal`) serves these experiments too.
+# `train_path`/`loader_factory` are left as required (`???`, Hydra's MISSING marker): fill them
+# in, or override them on the command line.
+loader_factory: ??? # e.g. "my_project.data:buildImageDataloaders"
+train_path: ???      # e.g. "data/raw/images_train"
+val_path: null
+test_path: null
+
+batch_size: 32
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing steps (spec §6.2), keyed per modality
+# (docs/adr/0015-per-modality-data-transforms.md). Nothing here is applied automatically: your
+# own `loader_factory` decides whether and how to use it. The values are placeholders (an
+# identity `standardize`): replace `mean` and `std` with statistics of your own training split.
+# Add a `resample` step (num_spatial_dims: 2) if your images are not 64 x 64 already: the
+# decoder never resizes, its `output_shape` is the size of the image it produces.
+transforms:
+  image:
+    - name: standardize
+      kwargs:
+        mean: 0.0
+        std: 1.0
+
+# No `sequence_length`: it is the target length of a 1D signal, and an image's size is the
+# decoder's `output_shape` (configs/model/image_single_latent.yaml).
+
+seed: 0

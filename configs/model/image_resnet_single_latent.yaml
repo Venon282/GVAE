@@ -1,0 +1,45 @@
+# Single-modality image VAE (spec §6.1 milestone 2, image side), using the residual
+# ("ResNet-style") 2D encoder/decoder (ADR 0018, spec §7: "scaling toward larger backbones")
+# in place of image_single_latent.yaml's 2d_cnn_encoder_v1/2d_cnn_decoder_v1. The image
+# counterpart of signal_resnet_single_latent.yaml. Same image -> z -> image shape, no fusion
+# strategy (spec §4: a single encoder needs none). Validated against
+# global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+#
+# The batch an experiment feeds this model carries one key, `image`, a (batch, 64, 64) tensor.
+name: global_vae_image_resnet_single_latent
+latent_mode: single
+
+modalities:
+  image:
+    encoder:
+      name: 2d_cnn_resnet_encoder_v1
+      kwargs:
+        hidden_channels: [16, 32, 64]
+        kernel_sizes: 3
+        # How many internal conv layers each stage's residual block has before its own
+        # shortcut, per stage: the flexibility this encoder adds over 2d_cnn_encoder_v1's plain
+        # single layer per stage.
+        block_depths: [2, 3, 2]
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: 2d_cnn_resnet_decoder_v1
+      kwargs:
+        # output_shape must match the images your own loader_factory yields (height, width).
+        # TwoDCnnResidualDecoder's own bare defaults (kernel_sizes=3, strides=2, paddings=1,
+        # upsample_modes="interpolate_conv") already double each axis at every transition
+        # (unlike 2d_cnn_decoder_v1's, tuned for conv_transpose), so 3 hidden_channels entries
+        # take the default 8 x 8 seed to 16 -> 32 -> 64 with no upsample_modes/kernel_sizes
+        # override needed. Use TwoDCnnResidualDecoder.computeOutputShape(...) to verify any
+        # configuration before committing to it.
+        output_shape: [64, 64]
+        hidden_channels: [64, 32, 16]
+        block_depths: [2, 3, 2]
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

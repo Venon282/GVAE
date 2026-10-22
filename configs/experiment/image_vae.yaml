@@ -1,0 +1,30 @@
+# @package _global_
+# Full experiment for a single-modality image VAE (spec §6.1 milestone 2, image side): assembles
+# model + data + training into one composed, validated
+# global_vae.config.experiment.ExperimentConfig. The image counterpart of signal_vae.yaml.
+# Run with:
+#   python scripts/train.py --config-name experiment/image_vae \
+#       data.train_path=/path/to/images data.loader_factory=my_project.data:buildImageDataloaders
+# The batches carry one key, `image`, both the encoder input and its decoder's target.
+defaults:
+  - /model: image_single_latent
+  - /data: image
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/image_vae
+
+# Loss scale for images (docs/adr/0029-loss-scale-convention.md, docs/how-to/choose-beta.md). Under
+# the default `mean` reduction, `beta = 1` weights the KL N / 2 = 2048 times more than the ELBO
+# does for a 64 x 64 image (N = 4096 values), and the model collapses: on the synthetic images of
+# examples/04_paired_loader.py, 30 epochs left 0 of 16 latent units active and a reconstruction
+# worse than the mean image (R^2 of -0.13 against it). `sum` with weight 0.5 is the ELBO of a
+# unit-variance Gaussian decoder, so `beta = 1` (the warm-up of training/default.yaml) is its
+# natural position: the same run used all 16 units and reached an R^2 of 0.59. These are numbers
+# from synthetic data, not a tuned value: the choice of beta is roadmap decision D-6, which waits
+# for a real run. Delete the `training` block below to go back to `mean`.
+training:
+  reconstruction_reduction: sum
+  reconstruction_weight: 0.5

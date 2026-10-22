@@ -22,6 +22,17 @@ config (`configs/training/default.yaml` for the single latent space,
 others). All three train through `scripts/train.py`, which `tests/integration/test_train_script.py`
 checks on dummy paired batches. See `docs/adr/0025-config-schema-for-several-latent-spaces.md`.
 
+`configs/experiment/image_vae.yaml` and `image_resnet_vae.yaml` (roadmap P3-3) are the image
+counterparts of `signal_vae.yaml` and `signal_resnet_vae.yaml`: a single-modality image VAE,
+`image -> z -> image`, composing `configs/model/image_single_latent.yaml` (the plain 2D pair,
+ADR 0017) or `image_resnet_single_latent.yaml` (the residual pair, ADR 0018), the data contract
+`configs/data/image.yaml` and `configs/training/default.yaml`. Both train through
+`scripts/train.py` (`tests/integration/test_image_model_configs.py`), and `model=` swaps one for
+the other. Unlike the signal ones they set `training.reconstruction_reduction: sum` and
+`reconstruction_weight: 0.5`: under the default `mean` and `beta = 1` the plain image model
+collapsed on synthetic images (the comment of each file has the numbers, and says they are not a
+tuned value, roadmap decision D-6).
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a
@@ -29,7 +40,9 @@ The paired data itself: `configs/data/signal_image.yaml` only states the contrac
 `image_out`), and pairing stays the caller's `loader_factory` (spec §6.2).
 `examples/04_paired_loader.py` is a reference one, run through `scripts/train.py` on
 `experiment/signal_image_vae` (roadmap P3-2); the real dataset is what is still open. The
-image-only model configs and the review of `configs/model/default.yaml` are roadmap P3-3.
+image-only model configs of roadmap P3-3 are the two experiments above. `signal_image_vae.yaml`
+still trains on the default `mean` loss scale, which collapsed on the synthetic pairs (roadmap P3-3
+status): the loss scale of a model with an image and a signal is a choice for decision D-6.
 
 A model whose decoder target is not an encoder input (signal and image to image, as in
 `examples/03_signal_image_to_image.py`) is `configs/model/signal_image_to_image.yaml`: the

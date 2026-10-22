@@ -50,6 +50,12 @@ for every modality, or one per decoder (see
   weight of an ELBO.
 - **Mix them** with a mapping when modalities call for different treatment. A decoder you leave
   out keeps `mean`.
+- **Images** are where `mean` fails first, because `N` is large (4096 for a 64 by 64 image, so
+  `beta = 1` weights the KL 2048 times more than the ELBO does). The image experiments
+  (`experiment/image_vae`, `experiment/image_resnet_vae`) therefore set `sum` with weight 0.5. On
+  the synthetic images of `examples/04_paired_loader.py`, 30 epochs under `mean` left no latent
+  unit active, and under `sum` all 16 were. That is a measurement on synthetic data, not a tuned
+  value: the numbers are D-6's.
 
 ```yaml
 training:

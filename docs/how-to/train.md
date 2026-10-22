@@ -40,7 +40,12 @@ Experiment files ship for each pattern of the model schema: `experiment/signal_v
 space), `experiment/signal_image_independent_latents` and `experiment/signal_image_shared_private`
 (several latent spaces). The last three read the data contract `configs/data/signal_image.yaml`, so
 your `loader_factory` yields `signal` and `image` batches (plus `image_out` for the independent
-latent spaces model). How the models are written is in
+latent spaces model). `experiment/image_vae` and `experiment/image_resnet_vae` are the image-only
+counterparts of the two signal experiments (the plain and the residual 2D pair): they read
+`configs/data/image.yaml`, so the batches carry an `image` of shape `(batch, 64, 64)`, and the
+paired loader below serves them too. They train on the `sum` reconstruction loss with weight 0.5,
+since the default `mean` collapsed an image model on synthetic data; see
+[choose beta](choose-beta.md#choose-a-reduction). How the models are written is in
 [configure encoders, decoders and latent spaces](configure-latent-spaces.md).
 
 ## Train on paired signal and image data

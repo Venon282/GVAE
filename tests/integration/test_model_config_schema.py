@@ -95,8 +95,8 @@ def _shapes(model: GlobalVae) -> dict[str, tuple[int, ...]]:
 
 class TestEveryShippedFile:
     def test_the_directories_are_not_empty(self) -> None:
-        assert len(_MODEL_FILES) >= 6
-        assert len(_EXPERIMENT_FILES) >= 5
+        assert len(_MODEL_FILES) >= 8
+        assert len(_EXPERIMENT_FILES) >= 7
 
     @pytest.mark.parametrize("path", _MODEL_FILES, ids=lambda path: path.name)
     def test_a_model_file_validates_and_builds(self, path: Path) -> None:
@@ -289,7 +289,14 @@ class TestSingleLatentFilesAreUnchanged:
     """`single` files go through `GlobalVae.__init__` now, and must build what they always did."""
 
     @pytest.mark.parametrize(
-        "name", ["default", "signal_single_latent", "signal_resnet_single_latent"]
+        "name",
+        [
+            "default",
+            "signal_single_latent",
+            "signal_resnet_single_latent",
+            "image_single_latent",
+            "image_resnet_single_latent",
+        ],
     )
     def test_the_model_equals_what_create_single_latent_builds(self, name: str) -> None:
         config = _modelConfigFromFile(_CONFIG_DIR / "model" / f"{name}.yaml")

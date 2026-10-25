@@ -32,6 +32,13 @@ Where, in your own code (anywhere importable on `PYTHONPATH`):
         # evaluation.evaluate's and evaluation.visual_export's own docstrings
         return DataLoader(MyTestDataset(...), batch_size=32)
 
+Two options serve a very large or a paired test set (`docs/adr/0038-paired-data-evaluation.md`):
+`--streaming` computes the reconstruction metrics batch by batch instead of pooling every
+reconstruction, and `--paired`, for a model with several modalities, adds retrieval and alignment
+between the modalities' posterior means (`paired_results.json`) and the cross-modal reconstruction
+metrics. With `--output-dir` the per-modality table is written as `metrics_table.md` and
+`metrics_table.csv`.
+
 Reconstruction figures are plotted in whatever space the batch itself is in: if your own
 data pipeline applied a `data.transforms` step (`log`/`standardize`/`resample`, spec
 §6.2) before training, the figures show *that* space, not the original physical units,
@@ -50,6 +57,7 @@ Run `python scripts/evaluate.py --help` for the full option list.
 import argparse
 import logging
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 import torch
@@ -63,14 +71,27 @@ from global_vae.config.training import (
     validateReconstructionLoss,
     validateReconstructionWeight,
 )
-from global_vae.evaluation.cross_modal import exportCrossModalFigures
+from global_vae.evaluation.cross_modal import (
+    computeCrossModalReconstructionMetrics,
+    exportCrossModalFigures,
+)
 from global_vae.evaluation.evaluate import evaluate
 from global_vae.evaluation.latent_diagnostics import DEFAULT_ACTIVE_UNIT_THRESHOLD
+from global_vae.evaluation.metrics_table import buildMetricsTable
+from global_vae.evaluation.paired_alignment import (
+    DEFAULT_CHUNK_SIZE,
+    DEFAULT_RETRIEVAL_KS,
+    SIMILARITIES,
+    PairedAlignmentResults,
+    evaluatePairedAlignment,
+    validateRetrievalSettings,
+)
 from global_vae.evaluation.visual_export import exportEvaluationFigures
 from global_vae.losses.reconstruction import DEFAULT_REDUCTION, validateReduction
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.utils.imports import importCallable as _importCallable
+from global_vae.visualization.reconstruction_plot import collectCrossModalReconstructions
 
 logger = logging.getLogger("global_vae.scripts.evaluate")
 
@@ -257,11 +278,42 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         "mean over the evaluation set is above this value (default: %(default)s).",
     )
     parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Compute the reconstruction metrics (mse, rmse, mae, r2, pearson_r) batch by "
+        "batch instead of over the pooled test set, so that the memory they need does not grow "
+        "with it. The values equal the pooled ones up to rounding.",
+    )
+    parser.add_argument(
+        "--paired",
+        action="store_true",
+        help="For a model with several modalities, also report retrieval and alignment between "
+        "the posterior means each modality gives on its own ('paired_results.json'), and the "
+        "reconstruction metrics of every input subset in the table. Needs batches that carry the "
+        "modalities of one sample together. Does nothing for a single-modality model.",
+    )
+    parser.add_argument(
+        "--retrieval-k",
+        type=int,
+        nargs="+",
+        default=list(DEFAULT_RETRIEVAL_KS),
+        metavar="K",
+        help="With --paired, the k of each recall@k (default: %(default)s).",
+    )
+    parser.add_argument(
+        "--retrieval-similarity",
+        default="cosine",
+        choices=SIMILARITIES,
+        help="With --paired, what retrieval ranks by: 'cosine' (default) or 'l2' (the negative "
+        "squared Euclidean distance).",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=None,
-        help="If given, save a JSON report ('results.json') here, and (unless "
-        "--no-figures) reconstruction/latent-space figures too.",
+        help="If given, save a JSON report ('results.json') and the per-modality table "
+        "('metrics_table.md', 'metrics_table.csv') here, and (unless --no-figures) "
+        "reconstruction/latent-space figures too.",
     )
     parser.add_argument(
         "--no-figures",
@@ -307,6 +359,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser = _buildArgumentParser()
     args = parser.parse_args(argv)
+    if args.paired:
+        try:
+            validateRetrievalSettings(
+                args.retrieval_k, args.retrieval_similarity, DEFAULT_CHUNK_SIZE
+            )
+        except ValueError as error:
+            parser.error(f"--retrieval-k: {error}")
 
     model_factory = _importCallable(args.model_factory)
     dataloader_factory = _importCallable(args.dataloader_factory)
@@ -358,13 +417,54 @@ def main(argv: list[str] | None = None) -> None:
         max_samples=args.max_samples,
         reconstruction_reduction=reconstruction_reduction,
         active_unit_threshold=args.active_unit_threshold,
+        streaming=args.streaming,
     )
     print(results.summary())
+
+    # Each paired pass reads the data afresh: the factory returns a new iterable, which a
+    # single-use iterator would not give a second time.
+    def freshDataloader() -> Iterable[dict[str, torch.Tensor]]:
+        return dataloader if isinstance(dataloader, list) else dataloader_factory()  # type: ignore[operator]
+
+    paired_results: PairedAlignmentResults | None = None
+    cross_modal_metrics = None
+    if args.paired and len(model.input_modalities) >= 2:
+        paired_results = evaluatePairedAlignment(
+            model,
+            freshDataloader(),
+            ks=args.retrieval_k,
+            similarity=args.retrieval_similarity,
+            device=resolved_device,
+            max_samples=args.max_samples,
+        )
+        print(paired_results.summary())
+        cross_modal_metrics = computeCrossModalReconstructionMetrics(
+            collectCrossModalReconstructions(
+                model,
+                freshDataloader(),
+                device=resolved_device,
+                max_samples=args.max_samples,
+            )
+        )
+    elif args.paired:
+        logger.info("--paired does nothing: the model has fewer than two input modalities.")
+
+    table = buildMetricsTable(
+        results, cross_modal_metrics, omit_subsets=[frozenset(model.input_modalities)]
+    )
+    if args.paired:
+        print("\n" + table.toMarkdown())
 
     if args.output_dir is not None:
         report_path = args.output_dir / "results.json"
         results.save(report_path)
         logger.info("Saved evaluation report to '%s'.", report_path)
+        for table_name in ("metrics_table.md", "metrics_table.csv"):
+            table.save(args.output_dir / table_name)
+        logger.info("Saved the per-modality table to '%s'.", args.output_dir)
+        if paired_results is not None:
+            paired_results.save(args.output_dir / "paired_results.json")
+            logger.info("Saved the paired evaluation to '%s'.", args.output_dir)
 
         if want_figures:
             figure_paths = exportEvaluationFigures(

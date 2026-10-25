@@ -9,4 +9,8 @@ does not need an optimizer" design. This is what makes re-running evaluation wit
 retraining (the concern that originally motivated `saveCheckpoint`/`loadCheckpoint`,
 `docs/adr/0006-reproducibility-seed-and-checkpointing.md`) actually possible: build a
 model, `loadCheckpoint(path, model=model)`, then `evaluate(model, test_dataloader)`.
+
+For paired data, `paired_alignment` measures retrieval and alignment between the modalities'
+posterior means, `metrics_table` lays the metrics out as a per-modality table, and
+`streaming_metrics` lets `evaluate(streaming=True)` skip the pooled dataset (roadmap P3-6).
 """

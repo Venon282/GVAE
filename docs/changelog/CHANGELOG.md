@@ -460,6 +460,46 @@ versioning follows [Semantic Versioning](https://semver.org/).
   A mapping by modality is refused, a weight or reduction mapping by decoder name is accepted and
   not applied, and a loss function mapping raises `KeyError` at the first step. A single value
   works and covers every modality. See ADR 0037 and the roadmap.
+- Paired-data evaluation (roadmap P3-6, ADR 0038), all inside `global_vae.evaluation` and
+  `scripts/evaluate.py`, with no change to `models/`, `latent/`, `losses/` or `config/`.
+  `evaluation/streaming_metrics.py`: `StreamingMse`, `StreamingRmse`, `StreamingMae`,
+  `StreamingR2` and `StreamingPearsonR` (`update(reconstruction, target)` batch by batch,
+  `compute()` at the end, `count`), `STREAMING_RECONSTRUCTION_METRICS` (the names and order of
+  `DEFAULT_RECONSTRUCTION_METRICS`) and `buildStreamingMetrics()`. The state is a count, a mean, a
+  sum of squared deviations and a co-moment per stream, merged batch by batch with the parallel
+  update of Chan, Golub and LeVeque in `float64`, so the result does not depend on the batch size
+  and does not lose digits at a large offset (the sum-of-squares form is off by about 0.2% at a
+  mean of `1e8`). `evaluate(..., streaming=True)` feeds these meters instead of pooling the
+  originals and reconstructions, and `EvaluationResults.metrics_streaming` (default `False`) says
+  which it was; it cannot be combined with custom `reconstruction_metrics`. The latent
+  `(mu, logvar)` are still pooled (they are small).
+- `evaluation/paired_alignment.py`: `collectModalityPosteriorMeans` (one forward per input
+  modality alone, `use_mean=True`, keeping the `mu` of every latent space that modality reaches),
+  `computeRetrievalMetrics` (recall@k, `chance_recall@k = k / N`, mean and median rank, MRR; cosine
+  or `l2` similarity; chunked, so no `N x N` matrix; ties counted as a random order would count
+  them, so a collapsed latent scores chance), `computeAlignmentMetrics` (paired against
+  mismatched cosine and squared distance, their gap and ratio, and the mean per-dimension
+  correlation, in closed form in `O(N * D)`), `evaluatePairedAlignment` and the
+  `PairedAlignmentResults` dataclass (`toDict`, `save`, `summary`). A model with fewer than two
+  input modalities returns empty results ("absent, not an error", as `exportCrossModalFigures`).
+- `evaluation/metrics_table.py`: `MetricsTable` and `MetricsTableRow`, `buildMetricsTable(
+  evaluation, cross_modal, omit_subsets)` (one row per input subset and modality, one column per
+  metric) and `toMarkdown`, `toCsv`, `toDict` and `save` (by `.md`, `.csv` or `.json` suffix).
+- `scripts/evaluate.py`: `--streaming`, `--paired`, `--retrieval-k` (default `1 5 10`) and
+  `--retrieval-similarity` (`cosine` or `l2`). With `--output-dir` it now also writes
+  `metrics_table.md` and `metrics_table.csv` (always) and `paired_results.json` (with
+  `--paired`); `--paired` also prints the table with the cross-modal rows. `--paired` on a
+  single-modality model logs that it does nothing.
+- Tests: `tests/unit/test_streaming_metrics.py`, `test_paired_alignment.py` and
+  `test_metrics_table.py`, and `tests/integration/test_paired_evaluation.py` (identity-encoder
+  models with known answers, real two-modality models, streaming against pooled, and the script).
+  `tests/integration/_script_fixtures.py` gains `buildTwoModalityGeneratorForScript()`.
+- Docs: ADR 0038, a "A per-modality table", "A test set too large to pool" and "Paired data:
+  retrieval and alignment" section in `docs/how-to/evaluate.md`, the README, and
+  `src/global_vae/evaluation/NOTE.md`, whose deferred item is now done.
+- **Finding.** The `evaluation/NOTE.md` note said streaming applied to `mse`, `rmse` and `mae`
+  and that `r2` and `pearson_r` need the pool. They do not: both come from the same running
+  moments, so all five metrics stream and all five are implemented.
 
 ### Changed
 

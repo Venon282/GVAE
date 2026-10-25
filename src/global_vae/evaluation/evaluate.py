@@ -16,7 +16,11 @@ first), not batch-averaged, since some metrics (R^2, Pearson r) are not correctl
 computable as a naive average of per-batch values, and a naive average would also be
 subtly wrong for any metric once batch sizes differ (e.g. a shorter final batch). This
 trades memory (the whole test set's reconstructions/latents held at once) for
-correctness; `max_samples` bounds it for a very large test set.
+correctness; `max_samples` bounds it for a very large test set, and `streaming=True` removes the
+pool of reconstructions altogether: the same five metrics are accumulated batch by batch
+(`evaluation.streaming_metrics`, `docs/adr/0038-paired-data-evaluation.md`). The latent
+posteriors are still pooled, `num_samples x latent_dim` values per latent space, which is small
+next to the reconstructions.
 """
 
 import json
@@ -36,6 +40,7 @@ from global_vae.evaluation.latent_diagnostics import (
     validateActiveUnitThreshold,
 )
 from global_vae.evaluation.metrics import DEFAULT_RECONSTRUCTION_METRICS, MetricFn
+from global_vae.evaluation.streaming_metrics import StreamingMetric, buildStreamingMetrics
 from global_vae.losses.reconstruction import (
     DEFAULT_REDUCTION,
     LossFn,
@@ -120,6 +125,9 @@ class EvaluationResults:
             `losses.reconstruction.computeTotalReconstructionLoss`), kept in
             the report because the value of that loss cannot be read
             without it (`docs/adr/0029-loss-scale-convention.md`).
+        metrics_streaming: `True` if `reconstruction_metrics` were accumulated batch by batch
+            (`evaluate(..., streaming=True)`) and not computed over the pooled dataset. The
+            values agree to the rounding of the pool.
     """
 
     num_samples: int
@@ -129,6 +137,7 @@ class EvaluationResults:
     regularization_metrics: dict[str, dict[str, float]] = field(default_factory=dict)
     latent_diagnostics: dict[str, LatentDiagnostics] = field(default_factory=dict)
     reconstruction_reduction: str | dict[str, str] = DEFAULT_REDUCTION
+    metrics_streaming: bool = False
 
     def toDict(self) -> dict[str, Any]:
         """Return a plain, JSON-serializable dict.
@@ -167,7 +176,11 @@ class EvaluationResults:
                 f"  reconstruction reduction: {_formatReduction(self.reconstruction_reduction)}"
             )
         if self.reconstruction_metrics:
-            lines.append("  reconstruction metrics:")
+            lines.append(
+                "  reconstruction metrics (streamed):"
+                if self.metrics_streaming
+                else "  reconstruction metrics:"
+            )
             for name, metrics in self.reconstruction_metrics.items():
                 formatted = ", ".join(f"{key}={value:.6f}" for key, value in metrics.items())
                 lines.append(f"    [{name}] {formatted}")
@@ -195,6 +208,7 @@ def evaluate(
     max_samples: int | None = None,
     reconstruction_reduction: str | Mapping[str, str] = DEFAULT_REDUCTION,
     active_unit_threshold: float = DEFAULT_ACTIVE_UNIT_THRESHOLD,
+    streaming: bool = False,
 ) -> EvaluationResults:
     """Run a full evaluation pass over `dataloader` and report reconstruction metrics.
 
@@ -256,6 +270,13 @@ def evaluate(
         active_unit_threshold: A latent dimension is an active unit when
             the variance of its posterior mean over the pooled samples is
             above this value (`LatentDiagnostics`). Defaults to 0.01.
+        streaming: If `True`, the default five reconstruction metrics are accumulated one batch
+            at a time (`evaluation.streaming_metrics`) and the originals and reconstructions are
+            never pooled, so the memory this pass needs does not grow with the dataset. The
+            values equal the pooled ones up to the rounding of the `float32` pool. Custom
+            `reconstruction_metrics` need the pool, so they cannot be combined with it.
+            `max_samples` keeps its meaning (the first `max_samples` samples). Defaults to
+            `False`.
 
     Returns:
         `EvaluationResults`.
@@ -267,8 +288,15 @@ def evaluate(
             `GlobalVae.selectEncoderInputs`) some batch has no key
             naming any of `model`'s encoders, or if (via
             `computeTotalReconstructionLoss`) a reconstruction and its
-            target in some batch differ in shape.
+            target in some batch differ in shape, or if `streaming` is combined with custom
+            `reconstruction_metrics`.
     """
+    if streaming and reconstruction_metrics is not None:
+        raise ValueError(
+            "evaluate(streaming=True) computes the default metrics batch by batch and cannot "
+            "take custom `reconstruction_metrics`, which need the pooled dataset. Drop one of "
+            "the two."
+        )
     validateReduction(reconstruction_reduction, "reconstruction_reduction")
     validateActiveUnitThreshold(active_unit_threshold)
     resolved_device = device if device is not None else next(model.parameters()).device
@@ -281,6 +309,7 @@ def evaluate(
     collected_reconstructions: dict[str, list[torch.Tensor]] = {}
     collected_mu: dict[str, list[torch.Tensor]] = {}
     collected_logvar: dict[str, list[torch.Tensor]] = {}
+    streamed_metrics: dict[str, dict[str, StreamingMetric]] = {}
     total_reconstruction_loss_sum = 0.0
     total_regularization_loss_sum = 0.0
     num_batches = 0
@@ -305,8 +334,17 @@ def evaluate(
 
             if max_samples is None or num_samples < max_samples:
                 for name, reconstruction in outputs["reconstructions"].items():
-                    collected_originals.setdefault(name, []).append(batch[name].cpu())
-                    collected_reconstructions.setdefault(name, []).append(reconstruction.cpu())
+                    if streaming:
+                        # Rows beyond `max_samples` are left out, as the pooled path trims them.
+                        rows = (
+                            slice(None) if max_samples is None else slice(max_samples - num_samples)
+                        )
+                        meters = streamed_metrics.setdefault(name, buildStreamingMetrics())
+                        for meter in meters.values():
+                            meter.update(reconstruction[rows], batch[name][rows])
+                    else:
+                        collected_originals.setdefault(name, []).append(batch[name].cpu())
+                        collected_reconstructions.setdefault(name, []).append(reconstruction.cpu())
                 for name, (mu, logvar) in outputs["latent_params"].items():
                     collected_mu.setdefault(name, []).append(mu.cpu())
                     collected_logvar.setdefault(name, []).append(logvar.cpu())
@@ -324,6 +362,12 @@ def evaluate(
         reconstruction_metric_results[name] = {
             metric_name: metric_fn(reconstructions, originals)
             for metric_name, metric_fn in resolved_metrics.items()
+        }
+
+    if streaming:
+        reconstruction_metric_results = {
+            name: {metric_name: meter.compute() for metric_name, meter in meters.items()}
+            for name, meters in streamed_metrics.items()
         }
 
     regularization_metric_results: dict[str, dict[str, float]] = {}
@@ -353,4 +397,5 @@ def evaluate(
             if isinstance(reconstruction_reduction, Mapping)
             else reconstruction_reduction
         ),
+        metrics_streaming=streaming,
     )

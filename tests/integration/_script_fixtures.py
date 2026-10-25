@@ -10,7 +10,7 @@ time and raise "already registered" (see `test_checkpoint.py`'s module docstring
 the same concern with a sibling test file).
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import torch
 from torch import nn
@@ -242,6 +242,15 @@ def buildTwoModalityDataloaderForScript() -> list[dict[str, torch.Tensor]]:
         {"x": torch.randn(BATCH_SIZE, INPUT_DIM), "y": torch.randn(BATCH_SIZE, INPUT_DIM)}
         for _ in range(2)
     ]
+
+
+def buildTwoModalityGeneratorForScript() -> Iterator[dict[str, torch.Tensor]]:
+    """Like `buildTwoModalityDataloaderForScript`, but a single-use generator.
+
+    `scripts/evaluate.py --paired` makes several passes over the data, and a generator cannot
+    give a second one: the script has to call the factory again for each pass (roadmap P3-6).
+    """
+    return iter(buildTwoModalityDataloaderForScript())
 
 
 SIGNAL_LENGTH = 32

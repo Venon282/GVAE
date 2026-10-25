@@ -688,6 +688,40 @@ experiment). **Findings:**
 recall@k between modality-specific posterior means), a per-modality metrics table, and streaming
 versions of `mse`, `rmse` and `mae` for very large test sets (noted in `evaluation/NOTE.md`).
 
+**P3-6 status.** Done, with no core change ([ADR 0038](adr/0038-paired-data-evaluation.md)). All of
+it sits in `evaluation/` and `scripts/evaluate.py`, and is opt-in: `paired_alignment.py`
+(`collectModalityPosteriorMeans`, `computeRetrievalMetrics`, `computeAlignmentMetrics`,
+`evaluatePairedAlignment`), `metrics_table.py` (`MetricsTable`, `buildMetricsTable`) and
+`streaming_metrics.py`, with the script flags `--paired`, `--streaming`, `--retrieval-k` and
+`--retrieval-similarity`, and `metrics_table.md`, `metrics_table.csv` and `paired_results.json`
+written next to `results.json`. Tests: `tests/unit/test_streaming_metrics.py`,
+`test_paired_alignment.py`, `test_metrics_table.py` and `tests/integration/test_paired_evaluation.py`.
+**Findings:**
+
+- **All five metrics stream, not three.** The `evaluation/NOTE.md` premise that `r2` and
+  `pearson_r` need the pooled tensors was wrong: both come from the same running moments as the
+  variance. `evaluate(streaming=True)` streams all five, exact for any batch size and at a large
+  offset (the naive sum-of-squares form is off by about 0.2% at a mean of `1e8`). The latent
+  `(mu, logvar)` are still pooled, and `--paired` pools the reconstructions of its cross-modal
+  table (bounded by `--max-samples`).
+- **A recall means nothing without its chance level.** Every retrieval result carries
+  `chance_recall@k`. Ties are counted as a random order would count them, so a collapsed latent
+  space scores exactly chance and not a perfect or a worst score by row order.
+- **Retrieval costs one forward per modality per batch, decoders included**, because
+  `GlobalVae.forward` has no encode-only path. Adding one is a core change and is not made; say so
+  if a large set makes it worth it.
+- **The framework has no contrastive objective, so retrieval measures what joint training
+  induced.** On the synthetic pairs (40 epochs, one seed, 103 test pairs, chance mean rank 52) the
+  three two-modality experiments are weakly aligned: mean rank 28 to 51, `recall@10` 0.10 to
+  0.25 against a chance of 0.097, a positive `cosine_gap` in all three. The generator gives the two
+  modalities one scalar in common (the size) and the image a position the signal does not carry, so
+  these numbers show that the metrics run and respond, not what a real dataset would give. If real
+  pairs align poorly and alignment matters, a contrastive term is a new loss and a new decision.
+- **Pairs are assumed, not checked.** Row `i` of every modality in a batch must be the same
+  sample, as the paired loader of P3-2 guarantees; a mismatch reads as chance.
+- Not done: the spec §8 file tree is unchanged. The P3-5 finding on the loss settings of a shared
+  decoder still stands.
+
 **P3-7. Variable-length and masked signals.** Spec §6 describes variable-length series.
 `OneDCnnEncoder` is length-agnostic through adaptive pooling, but decoders rebuild a fixed
 `output_length`. Confirm that variable length is a real requirement before designing padding, masks

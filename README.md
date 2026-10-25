@@ -54,6 +54,13 @@ the learning rate during the run (for example `reduce_lr_on_plateau`). That call
 `train/lr` to the per-epoch metrics shown in the training logs, the loggers and the checkpoint
 history (`docs/how-to/train.md`, `docs/adr/0028-learning-rate-in-the-metrics.md`).
 
+For a model with several modalities, `evaluate.py --paired` adds cross-modal retrieval and
+alignment between the posterior means each modality gives on its own (recall@k, ranks, cosine and
+distance comparisons with mismatched samples: `paired_results.json`), `--streaming` computes the
+reconstruction metrics batch by batch for a test set too large to pool, and `--output-dir` always
+writes the per-modality table as `metrics_table.md` and `metrics_table.csv`
+(`docs/how-to/evaluate.md`, `docs/adr/0038-paired-data-evaluation.md`).
+
 `evaluate.py` also reports, per latent space, the KL of every latent dimension and the number of
 active units. The reconstruction term is a per-element mean by default while the KL is a sum over
 the latent dimensions, so `beta = 1` is not the usual ELBO; `training.reconstruction_reduction`

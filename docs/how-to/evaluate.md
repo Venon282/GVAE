@@ -74,6 +74,82 @@ figures are plotted in that transformed space by default. Pass
 straight from a `DataConfig` via `buildTransformPipeline`) to have them
 plotted in the original, physical-units space instead.
 
+## A per-modality table
+
+With `--output-dir`, the reconstruction metrics are also written as a table, one row per modality
+and one column per metric, as `metrics_table.md` (for a report or a pull request) and
+`metrics_table.csv` (for a spreadsheet). The values below are made up to show the layout:
+
+```text
+| inputs | modality | mse | rmse | mae | r2 | pearson_r |
+|---|---|---:|---:|---:|---:|---:|
+| all | signal | 0.0123 | 0.111 | 0.0832 | 0.971 | 0.986 |
+| all | image | 0.0456 | 0.214 | 0.153 | 0.62 | 0.79 |
+```
+
+The first column says which inputs the model was given: `all` for the ordinary pass. A model
+with several modalities can be queried with a subset of them (spec §5), so with `--paired` the
+table also has one row per input subset and modality: the row with `signal` as its inputs and
+`image` as its modality is the image reconstructed from the signal alone. From Python,
+`buildMetricsTable(results, cross_modal)` in `global_vae.evaluation.metrics_table` builds the same
+`MetricsTable`, and `MetricsTable.save(path)` writes `.md`, `.csv` or `.json` by the suffix.
+
+## A test set too large to pool
+
+`evaluate` computes each metric over the whole pooled test set, which keeps every original and
+every reconstruction in memory. `--streaming` (`evaluate(..., streaming=True)` in Python) computes
+the same five metrics one batch at a time from running statistics, so the memory they need does
+not grow with the test set. The values equal the pooled ones up to the rounding of the `float32`
+pool, whatever the batch size. It cannot be combined with custom `reconstruction_metrics`, which
+are functions of the pooled tensors. What stays in memory is the latent posteriors
+(`num_samples x latent_dim` per latent space); `--max-samples` still bounds everything.
+
+## Paired data: retrieval and alignment
+
+A model fed a signal and an image of the same sample should put the two at the same point of its
+latent space. Reconstruction metrics do not say whether it does. `--paired`, for a model with
+several input modalities, queries the model with each modality alone, keeps the posterior mean
+of each latent space, and compares the means of the two modalities of every sample
+(`paired_results.json`, and a summary on the console):
+
+- **Retrieval.** Each sample's mean from one modality is a query; all the means from the other
+  modality are ranked by similarity (`--retrieval-similarity cosine`, the default, or `l2`). The
+  true partner is the match. Reported in both directions, `signal->image` and `image->signal`:
+  `recall@k` for each `--retrieval-k` (default 1 5 10), the mean and median rank of the partner
+  (`1` is best, `(N + 1) / 2` is chance), and the mean reciprocal rank. Each `recall@k` comes with
+  `chance_recall@k = k / N`, the value of a random ranking, which is the number to read it against.
+- **Alignment.** `cosine_paired` against `cosine_mismatched` (the mean cosine of a sample's two
+  views, and of views of different samples; `cosine_gap` is the difference), the squared distance
+  of paired and of mismatched samples and their ratio (below `1` when partners are closer than
+  strangers), and `dimension_correlation`, the mean over the latent dimensions of the correlation
+  between the two modalities' values of that dimension.
+
+A tie counts as a random ordering would count it. A model whose latent space has collapsed (every
+sample at the same point) therefore reports `recall@k = k / N`, not a perfect retrieval.
+
+Read it with care. Nothing in the training loss asks the two modalities to agree except through
+the fusion and the shared decoder, so these numbers measure what that induced, and they depend on
+the size of the latent space and of the evaluation set: compare a run with another only at the same
+`N`, or against its own `chance_recall@k`. The batches must carry the modalities of one sample
+together, and row `i` of each modality must be the same sample, which the paired loader of
+`examples/04_paired_loader.py` guarantees. A latent space that only one modality feeds (the private
+spaces of a shared plus private model) has nothing to compare and is left out.
+
+From Python:
+
+```python
+from global_vae.evaluation.paired_alignment import evaluatePairedAlignment
+
+results = evaluatePairedAlignment(model, test_dataloader, ks=(1, 5, 10), similarity="cosine")
+print(results.summary())
+results.retrieval["z_fused"]["signal->image"]["recall@5"]
+results.alignment["z_fused"]["signal|image"]["cosine_gap"]
+```
+
+`computeRetrievalMetrics(queries, gallery)` and `computeAlignmentMetrics(first, second)` take two
+`(samples, latent_dim)` matrices directly, for means you collected yourself. Retrieval is computed
+`chunk_size` queries at a time, so a large `N` does not need an `N x N` matrix.
+
 ## Quick latent-space inspection
 
 ```bash

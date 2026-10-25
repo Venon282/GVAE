@@ -1,0 +1,35 @@
+# @package _global_
+# Same single-modality signal experiment as signal_vae.yaml, but composing
+# signal_transformer_single_latent (a small transformer over the series, spec §6, roadmap P3-5)
+# instead of signal_single_latent. Assembles model + data + training into one composed, validated
+# global_vae.config.experiment.ExperimentConfig.
+# Run with: python scripts/train.py --config-name experiment/signal_transformer_vae
+# Or override the model group on top of signal_vae.yaml, without a second experiment file:
+#   python scripts/train.py model=signal_transformer_single_latent ...
+# Override anything else from the command line exactly as with signal_vae.yaml, e.g.:
+#   python scripts/train.py --config-name experiment/signal_transformer_vae \
+#       data.train_path=/path/to/data data.loader_factory=my_project.data:buildSignalDataloaders \
+#       model.single_latent.dim=32 training.num_epochs=50 training.optimizer.kwargs.lr=0.0003
+defaults:
+  - /model: signal_transformer_single_latent
+  - /data: signal
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/signal_transformer_vae
+
+# Loss scale (docs/adr/0029-loss-scale-convention.md, docs/how-to/choose-beta.md). Under the
+# default `mean` reduction, `beta = 1` weights the KL N / 2 = 128 times more than the ELBO does
+# for a series of 256 points; on the synthetic pairs of examples/04_paired_loader.py (60 epochs,
+# about 800 training series) this model left 0 of 16 latent units active and reconstructed no
+# better than the batch mean (R^2 of -0.01), and the 1D CNN of signal_vae.yaml did the same at 30
+# epochs. `sum` with weight 0.5 is the ELBO of a unit-variance Gaussian decoder, so `beta = 1` (the
+# warm-up of training/default.yaml) is its natural position: this experiment then reached an R^2
+# of 0.99 (the CNN: 0.98). These are numbers from synthetic data, not a tuned value: the choice of
+# beta is roadmap decision D-6, which waits for a real run. Delete the `training` block below to
+# go back to `mean`.
+training:
+  reconstruction_reduction: sum
+  reconstruction_weight: 0.5

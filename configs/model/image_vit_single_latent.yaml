@@ -1,0 +1,49 @@
+# Single-modality image VAE with a Vision Transformer (spec §6, roadmap P3-5): `image -> z ->
+# image`, no fusion strategy since exactly one encoder feeds the single latent space (spec §4).
+# The ViT counterpart of image_single_latent.yaml (2D CNN) and image_resnet_single_latent.yaml
+# (residual 2D CNN). Validated against global_vae.config.model.ModelConfig
+# (see src/global_vae/config/model.py).
+#
+# The batch an experiment feeds this model carries one key, `image`, a (batch, 64, 64) tensor
+# (one grayscale channel; a (batch, 1, 64, 64) tensor works too), the data contract of
+# configs/data/image.yaml. The image is cut into patches of patch_size x patch_size pixels, each
+# projected to a `d_model` token: 64 x 64 with patch_size 8 is an 8 x 8 grid of 64 tokens, plus
+# one [CLS] token on the encoder side. Attention is quadratic in the number of tokens, so a
+# larger image wants a larger patch_size.
+name: global_vae_image_vit_single_latent
+latent_mode: single
+
+modalities:
+  image:
+    encoder:
+      name: 2d_vit_encoder_v1
+      kwargs:
+        patch_size: 8
+        d_model: 64 # a multiple of 4 for the 2D sinusoidal positions (half row, half column)
+        num_heads: 4
+        num_layers: 3
+        # Sinusoidal positions (the default) need no size: the encoder accepts an image of any
+        # height and width. positional_encoding: learned instead holds one trained vector per
+        # patch of `image_size: [64, 64]`, and then refuses any other grid.
+        #
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: 2d_vit_decoder_v1
+      kwargs:
+        # output_shape must match the images your own loader_factory yields (height, width). The
+        # decoder has one token per patch of that shape and crops the bottom and right patches to
+        # it, so it needs no particular size, unlike a stack of doublings.
+        output_shape: [64, 64]
+        patch_size: 8
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

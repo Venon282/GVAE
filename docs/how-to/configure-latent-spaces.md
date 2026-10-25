@@ -14,7 +14,7 @@ working file for each case below, and `buildModelFromConfig` turns any of them i
 | One latent space; a decoder whose target is not an encoder input | `latent_mode: single`, `encoders`, `decoders`, `single_latent` | `signal_image_to_image.yaml` |
 | Several independent latent spaces | `latent_mode: several`, `latent` | `signal_image_independent_latents.yaml` |
 | Shared plus private latent spaces (encoder fan-out) | `latent_mode: several`, `latent` with a `head` on some `fed_by` edges | `signal_image_shared_private.yaml` |
-| One encoder over several modalities, or one decoder reconstructing several | `encoders` or `decoders` naming a shared module, in either `latent_mode` | none yet (no shared backbone ships) |
+| One encoder over several modalities, or one decoder reconstructing several | `encoders` or `decoders` naming a shared module, in either `latent_mode` | `signal_image_shared_transformer.yaml` |
 
 `latent_mode` is explicit. `single` takes `single_latent` and refuses `latent`; `several` takes
 `latent` and refuses `single_latent`. A section that would be ignored is an error.

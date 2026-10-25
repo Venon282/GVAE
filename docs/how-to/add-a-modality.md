@@ -77,10 +77,13 @@ What the model asks of the two classes:
 - **The batch key is the modality name.** The modality `signal` is read from `batch["signal"]` and
   reconstructed against `batch["signal"]`, whether a shared module or a one-modality one handles it.
 
-`tests/integration/_shared_modules.py` has a pair of small shared modules (a linear token per
-modality averaged over the ones present, and one linear layer per output) that are a starting
-point. The four `E1-*` rows of the configuration matrix are built from them in
-`tests/integration/test_configuration_matrix.py`.
+`encoders/shared_transformer_encoder.py` and `decoders/shared_transformer_decoder.py` are a real
+one (ADR 0037): each modality becomes patch tokens with its own embedding and a learned modality
+vector, the tokens of the modalities present form one sequence for one transformer, and a missing
+modality is simply a shorter sequence. `tests/integration/_shared_modules.py` has a pair of much
+smaller modules (a linear token per modality averaged over the ones present, and one linear layer
+per output) that are a starting point for something simpler. The four `E1-*` rows of the
+configuration matrix are built from them in `tests/integration/test_configuration_matrix.py`.
 
 See the [project specification, §6](../global-vae-project-specification.md)
 for the full modality roadmap (1D signals and images are Phase 1; anything

@@ -33,6 +33,16 @@ the other. Unlike the signal ones they set `training.reconstruction_reduction: s
 collapsed on synthetic images (the comment of each file has the numbers, and says they are not a
 tuned value, roadmap decision D-6).
 
+`signal_transformer_vae.yaml`, `image_vit_vae.yaml`, `signal_image_transformer_vae.yaml` and
+`signal_image_shared_transformer_vae.yaml` (roadmap P3-5, ADR 0037) compose the transformer
+models of `configs/model/`: a small transformer over the series, a ViT over the image, both fused
+by `cross_attention`, and both through one shared transformer with no fusion (the
+`encoders`/`decoders` form of the schema, ADR 0027). They read the data contracts of the CNN
+experiments they mirror (`signal.yaml`, `image.yaml`, `signal_image.yaml`), train through
+`scripts/train.py` (`tests/integration/test_transformer_model_configs.py`) and set the `sum`
+loss with weight 0.5 like the image ones, with the numbers in the comment of each file. For the
+shared decoder the loss settings stay single values (the comment of that file says why).
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a

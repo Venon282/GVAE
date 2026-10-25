@@ -1,0 +1,47 @@
+# Single-modality signal VAE with a small transformer over the series (spec §6, roadmap P3-5):
+# `signal -> z -> signal`, no fusion strategy since exactly one encoder feeds the single latent
+# space (spec §4). The transformer counterpart of signal_single_latent.yaml (1D CNN) and
+# signal_resnet_single_latent.yaml (residual 1D CNN). Validated against
+# global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+#
+# The series is cut into patches of `patch_size` values, each projected to a `d_model` token, and
+# a stack of pre-norm transformer layers lets every patch attend to every other. A length 256
+# series with patch_size 16 is 16 tokens (plus one [CLS] token on the encoder side). Attention is
+# quadratic in the number of tokens: for a long series raise patch_size rather than num_layers.
+name: global_vae_signal_transformer_single_latent
+latent_mode: single
+
+modalities:
+  signal:
+    encoder:
+      name: 1d_transformer_encoder_v1
+      kwargs:
+        patch_size: 16
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+        # Sinusoidal positions (the default) need no length: the encoder accepts a series of any
+        # length, like the CNN encoders. positional_encoding: learned instead holds one trained
+        # vector per patch, and then needs max_length (the longest series it must cover).
+        #
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: 1d_transformer_decoder_v1
+      kwargs:
+        # output_length must match configs/data/signal.yaml's sequence_length.signal. The decoder
+        # has ceil(output_length / patch_size) tokens and crops its last patch to the length, so
+        # it needs no particular length, unlike a stack of doublings.
+        output_length: 256
+        patch_size: 16
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

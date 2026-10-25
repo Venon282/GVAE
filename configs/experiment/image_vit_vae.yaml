@@ -1,0 +1,34 @@
+# @package _global_
+# Same single-modality image experiment as image_vae.yaml, but composing image_vit_single_latent
+# (a Vision Transformer, spec §6, roadmap P3-5) instead of image_single_latent. Assembles
+# model + data + training into one composed, validated
+# global_vae.config.experiment.ExperimentConfig.
+# Run with: python scripts/train.py --config-name experiment/image_vit_vae
+# Or override the model group on top of image_vae.yaml, without a second experiment file:
+#   python scripts/train.py --config-name experiment/image_vae model=image_vit_single_latent ...
+# Override anything else from the command line exactly as with image_vae.yaml, e.g.:
+#   python scripts/train.py --config-name experiment/image_vit_vae \
+#       data.train_path=/path/to/images data.loader_factory=my_project.data:buildImageDataloaders \
+#       model.single_latent.dim=32 training.num_epochs=50
+defaults:
+  - /model: image_vit_single_latent
+  - /data: image
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/image_vit_vae
+
+# Loss scale for images, as in image_vae.yaml (docs/adr/0029-loss-scale-convention.md,
+# docs/how-to/choose-beta.md): under the default `mean` reduction, `beta = 1` weights the KL
+# N / 2 = 2048 times more than the ELBO does for a 64 x 64 image (N = 4096 values), and the image
+# experiments collapsed under it. `sum` with weight 0.5 is the ELBO of a unit-variance Gaussian
+# decoder, so `beta = 1` (the warm-up of training/default.yaml) is its natural position. The
+# choice of beta is roadmap decision D-6, which waits for a real run. Delete the `training` block
+# below to go back to `mean`. Measured on the synthetic pairs of examples/04_paired_loader.py (40
+# epochs, about 800 training images): `mean` left 0 of 16 units active, `sum` at 0.5 reached an R^2
+# of 0.92 with 4 of 16 units (image_vae.yaml, the 2D CNN: 0.65 with 13 of 16).
+training:
+  reconstruction_reduction: sum
+  reconstruction_weight: 0.5

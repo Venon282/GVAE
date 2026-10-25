@@ -32,7 +32,12 @@ Four strategies are built in. To write your own, see
   `modality_dropout_p > 0`.
 - **`cross_attention` when modalities may interact non-trivially**, or when you expect to
   scale toward larger backbones (spec §7). It has the most parameters and the most
-  hyperparameters, so it is the one most worth tuning.
+  hyperparameters, so it is the one most worth tuning. Note what it attends over: one token per
+  modality, the `(mu, logvar)` of each encoder, so with a transformer or ViT backbone
+  (`configs/model/signal_image_transformer_cross_attention.yaml`) the sequence is still two
+  tokens, and a bigger backbone does not change the fusion. Attention across the patches of
+  several modalities is what the shared transformer does (`shared_transformer_encoder_v1`, ADR 0037),
+  with no fusion strategy at all.
 
 ## Configuration
 

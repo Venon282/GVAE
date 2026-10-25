@@ -55,7 +55,15 @@ for every modality, or one per decoder (see
   (`experiment/image_vae`, `experiment/image_resnet_vae`) therefore set `sum` with weight 0.5. On
   the synthetic images of `examples/04_paired_loader.py`, 30 epochs under `mean` left no latent
   unit active, and under `sum` all 16 were. That is a measurement on synthetic data, not a tuned
-  value: the numbers are D-6's.
+  value: the numbers are D-6's. The transformer and ViT experiments of ADR 0037
+  (`signal_transformer_vae`, `image_vit_vae`, `signal_image_transformer_vae`,
+  `signal_image_shared_transformer_vae`) set `sum` with weight 0.5 for the same reason, and `mean`
+  collapsed each of them on the same data.
+- **A shared decoder takes one value.** For a decoder that reconstructs several modalities
+  (`shared_transformer_decoder_v1`), give `reconstruction_reduction`, `reconstruction_weight` and
+  `reconstruction_loss` a single value, which applies to every modality. A mapping is not usable
+  there yet: one keyed by modality is refused, and one keyed by decoder name is not applied by the
+  loss (a weight or a reduction) or raises `KeyError` (a loss function), see the finding of ADR 0037.
 
 ```yaml
 training:

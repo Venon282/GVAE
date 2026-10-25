@@ -1,0 +1,35 @@
+# @package _global_
+# Signal plus image fused by cross-attention into ONE latent space, with a small transformer over
+# the series and a ViT over the image (spec §4, §6, roadmap P3-5): composes
+# signal_image_transformer_cross_attention, the data contract of signal_image.yaml and the default
+# training. The transformer-backbone counterpart of signal_image_vae.yaml (1D and 2D CNNs fused by
+# Product-of-Experts). Assembles model + data + training into one composed, validated
+# global_vae.config.experiment.ExperimentConfig.
+# Run with:
+#   python scripts/train.py --config-name experiment/signal_image_transformer_vae \
+#       data.train_path=/path/to/data data.loader_factory=my_project.data:buildPairedDataloaders
+# The batches carry `signal` and `image`, each both an encoder input and its decoder's target;
+# examples/04_paired_loader.py is a reference loader that serves them.
+defaults:
+  - /model: signal_image_transformer_cross_attention
+  - /data: signal_image
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/signal_image_transformer_vae
+
+# Loss scale (docs/adr/0029-loss-scale-convention.md, docs/how-to/choose-beta.md): under the
+# default `mean` reduction the KL weighs N / 2 times the ELBO of each modality (N = 256 for the
+# signal, 4096 for the image), and on the synthetic pairs of examples/04_paired_loader.py (40
+# epochs, about 800 training pairs) this model collapsed: 0 of 32 latent units active, R^2 of
+# -0.04 (signal) and -0.03 (image) against the batch mean. `sum` with weight 0.5 is the ELBO of a
+# unit-variance Gaussian decoder, so `beta = 1` (the warm-up of training/default.yaml) is its
+# natural position: this experiment then reached an R^2 of 0.98 for the signal and 0.24 for the
+# image, with 1 of 32 units active. Numbers from synthetic data, not a tuned value (the image
+# is the harder half, and 40 epochs is short): the choice of beta is roadmap decision D-6, which
+# waits for a real run. Delete the `training` block below to go back to `mean`.
+training:
+  reconstruction_reduction: sum
+  reconstruction_weight: 0.5

@@ -1,0 +1,52 @@
+# Signal plus image through ONE transformer (spec §2.1 `E1-L1-D1`, ADR 0027, roadmap P3-5): the
+# patch tokens of both modalities form one stream into the encoder, and one stream out of the
+# decoder is split back into a signal and an image. The first concrete shared backbone: the
+# tokenisation that ADR 0027 leaves to the shared module lives in the two classes named below.
+#
+# One encoder and one decoder serve both modalities, so they are declared under `encoders` and
+# `decoders` by instance name (`backbone`, `backbone_out`), not under `modalities`, which pairs one
+# encoder and one decoder under one name (ADR 0025). The batch keys are the modalities the two
+# classes declare in `modalities` below, `signal` and `image`, which no instance name has to
+# match. There is no fusion strategy: the encoder is the only one, and the cross-modal mixing
+# happens inside its attention. A missing modality (spec §5) is a shorter token stream, so the
+# model encodes either input alone with no mask and no placeholder.
+#
+# The batch carries `signal` (batch, 256) and `image` (batch, 64, 64), each both an encoder input
+# and a decoder target: the data contract of configs/data/signal_image.yaml.
+# Validated against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+name: global_vae_signal_image_shared_transformer
+latent_mode: single
+
+encoders:
+  backbone:
+    name: shared_transformer_encoder_v1
+    kwargs:
+      modalities:
+        signal: {kind: series, patch_size: 16}
+        image: {kind: image, patch_size: 8}
+      d_model: 64 # a multiple of 4: the image positions use half the width for rows, half for columns
+      num_heads: 4
+      num_layers: 4
+      # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+      # single_latent.dim below, for every encoder and decoder.
+
+decoders:
+  backbone_out:
+    name: shared_transformer_decoder_v1
+    kwargs:
+      modalities:
+        # output_length and output_shape must match configs/data/signal_image.yaml's
+        # sequence_length.signal and the images your own loader_factory yields.
+        signal: {kind: series, output_length: 256, patch_size: 16}
+        image: {kind: image, output_shape: [64, 64], patch_size: 8}
+      d_model: 64
+      num_heads: 4
+      num_layers: 4
+
+single_latent:
+  dim: 32
+  name: z_fused
+  # fusion: omitted on purpose. One shared encoder feeds the latent space, so there is nothing to
+  # fuse (spec §4).
+  regularizer:
+    strategy: kl_standard_normal

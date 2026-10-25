@@ -45,7 +45,14 @@ counterparts of the two signal experiments (the plain and the residual 2D pair):
 `configs/data/image.yaml`, so the batches carry an `image` of shape `(batch, 64, 64)`, and the
 paired loader below serves them too. They train on the `sum` reconstruction loss with weight 0.5,
 since the default `mean` collapsed an image model on synthetic data; see
-[choose beta](choose-beta.md#choose-a-reduction). How the models are written is in
+[choose beta](choose-beta.md#choose-a-reduction).
+
+The transformer backbones (ADR 0037) have their own experiments: `experiment/signal_transformer_vae`
+and `experiment/image_vit_vae` (the same single-modality contracts as the CNN ones, with a small
+transformer over the series and a ViT over the image), `experiment/signal_image_transformer_vae`
+(both, fused by `cross_attention`) and `experiment/signal_image_shared_transformer_vae` (both,
+through one shared transformer, no fusion). All four set the `sum` loss with weight 0.5 and read
+the data contracts above. How the models are written is in
 [configure encoders, decoders and latent spaces](configure-latent-spaces.md).
 
 ## Train on paired signal and image data

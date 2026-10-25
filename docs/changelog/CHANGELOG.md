@@ -423,6 +423,43 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `TestImageFigures`, which runs `scripts/evaluate.py` on that model
   (`buildSignalImageModelForScript` and `buildSignalImageDataloaderForScript`, new in
   `_script_fixtures.py`).
+- Transformer and ViT backbones (roadmap P3-5, spec §6, ADR 0037), with no change to any core
+  module. Six registered classes, imported by `encoders/__init__.py` and `decoders/__init__.py`:
+  `1d_transformer_encoder_v1`/`1d_transformer_decoder_v1` (a small transformer over the series),
+  `2d_vit_encoder_v1`/`2d_vit_decoder_v1` (a ViT) and `shared_transformer_encoder_v1`/
+  `shared_transformer_decoder_v1`, the first concrete `AbstractSharedEncoder` and
+  `AbstractSharedDecoder` (ADR 0027): one token stream for a series and an image, any non-empty
+  subset of the modalities in (a missing modality is a shorter stream), one reconstruction per
+  modality out. Patches are cut by a strided convolution, a size that is not a multiple of the
+  patch is padded with the edge value and cropped back by the decoder, positions are sinusoidal
+  (any size) or learned (`max_length`, `image_size`), an encoder pools a `[CLS]` token or the mean,
+  and a decoder's tokens are its positions plus the projected latent vector. The shared pieces live
+  in `utils/transformer_blocks.py`.
+- Configs for them: `configs/model/signal_transformer_single_latent.yaml`,
+  `image_vit_single_latent.yaml`, `signal_image_transformer_cross_attention.yaml` (the two
+  backbones fused by `cross_attention`) and `signal_image_shared_transformer.yaml` (the shared
+  pair, no fusion), and `configs/experiment/signal_transformer_vae.yaml`, `image_vit_vae.yaml`,
+  `signal_image_transformer_vae.yaml` and `signal_image_shared_transformer_vae.yaml`. The
+  experiments set `reconstruction_reduction: sum` and `reconstruction_weight: 0.5`; under the
+  default `mean` each of them collapsed on the synthetic pairs, and the numbers are in the comment
+  of each file (not a tuned value, roadmap decision D-6).
+- `tests/unit/test_transformer_blocks.py`, `test_transformer_signal_backbone.py`,
+  `test_vit_backbone.py` and `test_shared_transformer.py`, and
+  `tests/integration/test_transformer_model_configs.py`: shapes for any size, the gradient, subsets
+  of the inputs, every error path, the configs, the experiments and a `scripts/train.py` run per
+  experiment on dummy batches and on the paired loader. Two strict `xfail` tests state what a
+  per-decoder loss mapping should do for a shared decoder (see the finding below).
+- `docs/how-to/add-a-modality.md`, `choose-a-fusion-strategy.md`, `configure-latent-spaces.md`,
+  `train.md` and `choose-beta.md`, the note of `configs/experiment/`, `examples/README.md` and the
+  README describe the backbones. They say that `cross_attention` attends over one token per
+  modality (the `(mu, logvar)` of each encoder), so a bigger backbone does not change its scale, and
+  that attention across the patches of several modalities is the shared transformer's.
+- **Finding, not fixed (a core and config change).** For a shared decoder, the config layer keys
+  `reconstruction_weight`, `reconstruction_reduction` and `reconstruction_loss` mappings by
+  decoder instance name, and the loss looks them up by reconstruction name, which is the modality.
+  A mapping by modality is refused, a weight or reduction mapping by decoder name is accepted and
+  not applied, and a loss function mapping raises `KeyError` at the first step. A single value
+  works and covers every modality. See ADR 0037 and the roadmap.
 
 ### Changed
 

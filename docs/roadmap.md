@@ -398,7 +398,8 @@ default (it needs the owner's approval). One departure from the plan: the cross-
 figure export and `scripts/visualize_latent.py` needed a small change, not none. They used the
 encoder names as the modality names, and now use `GlobalVae.input_modalities` and
 `output_modalities`, which are the same sets for every model without a shared module. No concrete
-shared backbone ships; P3-5 writes the first one.
+shared backbone shipped with it; P3-5 wrote the first one
+([ADR 0037](adr/0037-transformer-and-vit-backbones.md)).
 
 ### P1-6. Configuration matrix test (M, three stages)
 **Status:** done
@@ -644,6 +645,44 @@ column (a parameter of the function, not of the exporter).
 ViT. Each follows the new-modality checklist with zero core changes, which is the practical test
 of the registry design: if a core edit looks necessary, flag it. They also give `cross_attention`
 fusion a meaningful scale and are where the tokenisation of P1-5 lives.
+
+**P3-5 status.** Done, with no core change: the registry design held. Six classes, registered by
+the imports of `encoders/__init__.py` and `decoders/__init__.py` ([ADR 0037](adr/0037-transformer-and-vit-backbones.md)):
+`1d_transformer_*` (a small transformer over the series), `2d_vit_*` and `shared_transformer_*`,
+the first concrete shared encoder and decoder (ADR 0027), whose tokenisation lives in
+`utils/transformer_blocks.py`. Four model files and four experiments in `configs/`, and
+`tests/unit/test_transformer_blocks.py`, `test_transformer_signal_backbone.py`,
+`test_vit_backbone.py`, `test_shared_transformer.py` and
+`tests/integration/test_transformer_model_configs.py` (with a `scripts/train.py` run per
+experiment). **Findings:**
+
+- **The loss settings of a shared decoder disagree between two layers (flagged, not fixed: a
+  core and config change).** `resolveReconstructionWeight`, `resolveReconstructionReduction` and
+  `resolveReconstructionLoss` check a per-decoder mapping against the decoder instance names
+  (`backbone_out`), and `computeTotalReconstructionLoss` looks the keys up by modality (`signal`,
+  `image`). A mapping by modality is refused, a weight or reduction mapping by decoder name is
+  accepted and silently not applied, and a loss function mapping raises `KeyError` at the first
+  step. A single value works for every modality, which is what the shipped experiment uses.
+  Two strict `xfail` tests state the intended behavior. The fix is to key these settings by the
+  reconstruction names of a shared decoder (its `output_modalities`) in `config/training.py`, with
+  a check that two modalities of one decoder may differ. It matters for the owner's choice at the
+  first real run (see P3-3: one weight cannot balance a signal and an image), since a shared
+  decoder cannot take a weight per modality until it is made.
+- **`cross_attention` keeps a scale of two tokens.** A fusion receives `(mu, logvar)` per
+  encoder, so it attends over one token per modality whatever the backbone, and a transformer or
+  ViT encoder does not change it (a test compares its parameters for 3 and 6 encoder layers). The
+  attention across the patches of several modalities that the roadmap had in mind is in the shared
+  transformer, and needs no fusion strategy. Giving a fusion the patch tokens would change
+  `AbstractFusion` and `AbstractEncoder`, so it is not done; say so if that is wanted.
+- **`mean` collapses the new models too.** On the synthetic pairs (40 to 60 epochs, one seed),
+  the four experiments under `mean` left no latent unit active, and under `sum` at 0.5 they train:
+  signal R^2 of 0.99 (the 1D CNN: 0.98), image R^2 of 0.92 for the ViT (the 2D CNN: 0.65), and for
+  the two-modality models 0.99 and 0.45 (shared) or 0.98 and 0.24 (`cross_attention`) for signal
+  and image. The experiments set `sum` at 0.5 like the image ones; this is synthetic data, not a
+  tuned value, and the beta choice stays D-6. `signal_vae.yaml` and the other earlier experiments
+  are unchanged.
+- **Sizes.** With `d_model` 64 and a latent of 32, the `cross_attention` model has 653,104
+  parameters and the shared one 417,168.
 
 **P3-6. Paired-data evaluation.** Cross-modal retrieval and alignment metrics (for example
 recall@k between modality-specific posterior means), a per-modality metrics table, and streaming

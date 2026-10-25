@@ -229,10 +229,13 @@ reconstructing several) use `AbstractSharedEncoder` and `AbstractSharedDecoder`
 (`docs/adr/0027-shared-encoders-and-decoders.md`): a shared encoder declares
 the modalities it ingests and receives them as a `dict[str, Tensor]`, a shared
 decoder returns one, and `GlobalVae` flattens it into `"reconstructions"` by
-modality, so the losses, the evaluation and the figures are unchanged. No
-concrete shared backbone ships yet (roadmap P3-5): the tests build the four
-rows with small dummy modules, and `docs/how-to/add-a-modality.md` says what to
-implement.
+modality, so the losses, the evaluation and the figures are unchanged. The
+first concrete shared backbone is `shared_transformer_encoder_v1` and
+`shared_transformer_decoder_v1` (`docs/adr/0037-transformer-and-vit-backbones.md`,
+`configs/model/signal_image_shared_transformer.yaml`): one transformer over the
+patch tokens of a series and an image. The four `E1-*` rows are also built with
+small dummy modules in the tests, and `docs/how-to/add-a-modality.md` says what
+to implement for your own.
 
 Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
 `docs/adr/0001-phase1-default-configuration.md`.

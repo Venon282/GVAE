@@ -1,0 +1,69 @@
+# Signal plus image fused into ONE latent space by cross-attention (spec §4, §6.1 milestone 2),
+# each decoded back to itself, with transformer backbones on both sides (roadmap P3-5): a small
+# transformer over the series and a ViT over the image. The variant of default.yaml (1D and 2D
+# CNNs, Product-of-Experts) for a model that scales toward larger backbones (spec §7).
+#
+# What cross_attention fuses is one token per modality, the (mu, logvar) of its encoder, not the
+# patch tokens inside the encoders: a fusion strategy sees the encoders' outputs only. With two
+# modalities that is a sequence of two tokens, so the attention here is cheap, and a bigger
+# backbone changes the encoders and not the fusion. Attention across the patches of both
+# modalities is what the shared transformer does: see signal_image_shared_transformer.yaml.
+# A missing modality is an omitted token (spec §5), so the decoder can be queried with either
+# input alone.
+#
+# The batch carries `signal` (batch, 256) and `image` (batch, 64, 64), each both an encoder input
+# and its decoder's target: the data contract of configs/data/signal_image.yaml.
+# Validated against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+name: global_vae_signal_image_transformer_cross_attention
+latent_mode: single
+
+modalities:
+  signal:
+    encoder:
+      name: 1d_transformer_encoder_v1
+      kwargs:
+        patch_size: 16
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+    decoder:
+      name: 1d_transformer_decoder_v1
+      kwargs:
+        # output_length must match configs/data/signal_image.yaml's sequence_length.signal.
+        output_length: 256
+        patch_size: 16
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+  image:
+    encoder:
+      name: 2d_vit_encoder_v1
+      kwargs:
+        patch_size: 8
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+    decoder:
+      name: 2d_vit_decoder_v1
+      kwargs:
+        # output_shape must match the images your own loader_factory yields (height, width).
+        output_shape: [64, 64]
+        patch_size: 8
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+
+single_latent:
+  dim: 32
+  name: z_fused
+  fusion:
+    strategy: cross_attention
+    kwargs:
+      # Unlike an encoder's or decoder's latent_dim, the fusion's is not filled in: it must equal
+      # single_latent.dim above.
+      latent_dim: 32
+      num_heads: 4 # must divide d_model, which defaults to latent_dim
+      num_layers: 2
+      known_modalities: [signal, image] # a learned embedding per modality
+  regularizer:
+    strategy: kl_standard_normal

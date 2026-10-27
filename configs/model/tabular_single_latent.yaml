@@ -1,0 +1,47 @@
+# Single-modality tabular VAE (spec §6, roadmap P3-8): `tabular -> z -> tabular`, no fusion
+# strategy since exactly one encoder feeds the single latent space (spec §4). The second proof of
+# the genericity claim after the 1D signal and the image: a modality added through the registries
+# only, with no core change. Validated against global_vae.config.model.ModelConfig (see
+# src/global_vae/config/model.py).
+#
+# A batch key `tabular` holds one flat float tensor, `(batch, num_features)`: numeric columns
+# first (standardized), then one one-hot block per categorical column. Building it from a table,
+# imputing missing values included, is the caller's `loader_factory` (spec §6.2).
+name: global_vae_tabular_single_latent
+latent_mode: single
+
+modalities:
+  tabular:
+    encoder:
+      name: tabular_mlp_encoder_v1
+      kwargs:
+        # num_features must match the decoder's and the width of the rows configs/data/tabular.yaml
+        # describes. It is data-dependent, so it is never filled in for you (like a decoder's
+        # output_length).
+        num_features: 16
+        hidden_dims: [128, 64]
+        activation: relu
+        # normalization: null | layer | batch, and dropout: a probability, are off by default.
+        #
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: tabular_mlp_decoder_v1
+      kwargs:
+        num_features: 16
+        hidden_dims: [64, 128]
+        activation: relu
+        # For a table with categorical columns, list the number of categories of each one-hot block
+        # (they are the last sum(categorical_sizes) of the num_features columns, in this order):
+        #   categorical_sizes: [3, 5]
+        # A softmax is then applied inside each block, so the default `mse` reconstruction loss is
+        # the Brier score of that column (docs/adr/0039-tabular-modality.md). Left out, every output
+        # is a linear value, which is right for an all-numeric table.
+
+single_latent:
+  dim: 8
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

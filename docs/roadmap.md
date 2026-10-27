@@ -731,6 +731,41 @@ and a mask-aware loss.
 the checklist and only once a dataset is named. Tabular data is the cheapest way to prove the
 genericity claim a second time.
 
+**P3-8 status.** Tabular is done, with no core change ([ADR 0039](adr/0039-tabular-modality.md)); the
+other modalities are open and wait for a named dataset. No table was named, so the proof is on a
+synthetic one. The checklist of spec §10 in full: `TabularMlpEncoder` and `TabularMlpDecoder`
+(`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, registered by the imports of
+`encoders/__init__.py` and `decoders/__init__.py`, with `utils/mlp_blocks.py` for the shared stack),
+`configs/model/tabular_single_latent.yaml`, `configs/data/tabular.yaml` and
+`configs/experiment/tabular_vae.yaml`, and `tests/unit/test_tabular_backbone.py` and
+`tests/integration/test_tabular_model_configs.py` (with a `scripts/train.py` run). A test reads the
+source of `models/`, `latent/`, `losses/`, `training/`, `evaluation/`, `config/`, `data/`, `fusion/`,
+`heads/`, `assemblers/` and `visualization/` and checks that none names the new classes or the batch
+key. **Findings:**
+
+- **A row is a flat float vector built by the caller.** Numeric columns first (standardized), then
+  one one-hot block per categorical column, imputed and encoded in the `loader_factory` (spec §6.2).
+  The decoder takes an optional `categorical_sizes` and applies a softmax inside each block, so the
+  default `mse` is the Brier score of a categorical column. A `NaN` is not handled: it makes its
+  row `NaN`, and a test pins it.
+- **One loss per decoder (flagged, not fixed: a core and config change).** A table cannot take a
+  cross-entropy on its categorical columns and a squared error on its numeric ones. The softmax
+  with `mse` is the closest thing without a change to `config/training.py` and
+  `losses/reconstruction.py`, and the decoder returns a mean only, so the likelihood has a fixed
+  variance (the single-tensor decoder item of P4-0).
+- **YAML cannot write per-column statistics (flagged, not fixed: a `data/transforms` change).**
+  `standardize` takes a float or a tensor, and a YAML list fails with a `TypeError` that does not
+  name the cause. The loader builds the transform with tensors, `configs/data/tabular.yaml` says
+  so, and a strict `xfail` test states the intended behavior.
+- **`mean` collapses this model too.** On a synthetic table (1,000 rows, a latent of 8, 60 epochs,
+  one seed) `mean` left 0 of 8 latent units active and an R^2 of 0.00 to 0.01, and `sum` at 0.5
+  trained it: 4 of 8 units, R^2 of 0.23 on 16 numeric columns and 0.46 on 10 numeric plus two
+  one-hot columns (category accuracy 0.51, chance 0.33). 300 epochs gave 0.21 and 0.44, so more
+  epochs did not help. The experiment sets `sum` at 0.5 like the image and transformer ones; this
+  is synthetic data and no tuning, and the beta choice stays D-6.
+- Not done: a reference `loader_factory` for a real table (its imputation and encoding are what a
+  named dataset would decide), and the spec §6 and §8 text, which is unchanged.
+
 ### Phase 4: long-term research (spec §7)
 
 Each item needs an explicit go-ahead and an ADR before any code.

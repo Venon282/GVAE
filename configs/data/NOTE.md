@@ -36,6 +36,13 @@ a per-modality `transforms` entry for `image` (an identity `standardize` to fill
 `examples/04_paired_loader.py`, serves these experiments as well, since a key with no encoder or
 decoder is ignored.
 
+`configs/data/tabular.yaml` is the contract of the tabular model (`configs/experiment/tabular_vae.yaml`, roadmap
+P3-8): a `loader_factory` of your own whose batches carry one key, `tabular`, of shape
+`(batch, num_features)` (numeric columns standardized, then one-hot blocks, no missing value), and a per-modality
+`transforms` entry for `tabular` (an identity `standardize` to replace). Per-column statistics are tensors, which
+YAML cannot write, so the loader builds the transform in code (`docs/how-to/train-on-a-table.md`). It has no
+`sequence_length`: the width of a row is `num_features` in the model file.
+
 # Still deferred / permanent scope boundary
 
 No dataset/pairing/splitting *code* exists in this framework, and none is planned:

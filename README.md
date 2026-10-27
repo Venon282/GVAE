@@ -244,6 +244,11 @@ patch tokens of a series and an image. The four `E1-*` rows are also built with
 small dummy modules in the tests, and `docs/how-to/add-a-modality.md` says what
 to implement for your own.
 
+A table is the first modality added after the core was written, through the registries only
+(`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, `docs/adr/0039-tabular-modality.md`,
+`configs/experiment/tabular_vae.yaml`): a row is a flat float vector, numeric columns first and one-hot
+blocks after, built by your `loader_factory` (`docs/how-to/train-on-a-table.md`).
+
 Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
 `docs/adr/0001-phase1-default-configuration.md`.
 

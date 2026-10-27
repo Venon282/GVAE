@@ -23,6 +23,18 @@ special-casing the new modality in.
    if your modality changes which of the 8 architecture configurations
    (spec §2.1) are exercised end to end.
 
+## A worked example that is not a grid: tabular data
+
+The signal and the image were written with the core, so they did not test the steps above. The
+tabular modality ([ADR 0039](../adr/0039-tabular-modality.md)) is the first that followed them
+afterwards, with no change to the core: `encoders/tabular_mlp_encoder.py` and
+`decoders/tabular_mlp_decoder.py` (steps 1 to 3, plus their two lines in the `__init__.py` files),
+`configs/model/tabular_single_latent.yaml` with a data file and an experiment (step 4), and
+`tests/unit/test_tabular_backbone.py` and `tests/integration/test_tabular_model_configs.py` (step 5).
+That integration test also checks that no core package names the new classes or the `tabular` batch
+key, which is a useful test to copy for your own modality. [Train on a table](train-on-a-table.md)
+shows the part that is not in the two classes: the `loader_factory` that builds the rows.
+
 ## One encoder or decoder for several modalities
 
 The steps above give each modality its own encoder and decoder (`EN-*` and `*-DN` in spec §2.1).

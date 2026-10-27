@@ -43,6 +43,13 @@ experiments they mirror (`signal.yaml`, `image.yaml`, `signal_image.yaml`), trai
 loss with weight 0.5 like the image ones, with the numbers in the comment of each file. For the
 shared decoder the loss settings stay single values (the comment of that file says why).
 
+`tabular_vae.yaml` (roadmap P3-8, ADR 0039) is the single-modality VAE of a table, `tabular -> z -> tabular`,
+composing `configs/model/tabular_single_latent.yaml`, the data contract `configs/data/tabular.yaml` and
+`configs/training/default.yaml`. It trains through `scripts/train.py`
+(`tests/integration/test_tabular_model_configs.py`) and sets `training.reconstruction_reduction: sum` and
+`reconstruction_weight: 0.5` like the image and transformer ones, with the numbers in the comment of the file.
+`num_features` has to be set in the encoder and the decoder to the width of your rows.
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a

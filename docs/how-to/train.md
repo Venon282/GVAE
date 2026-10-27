@@ -55,6 +55,11 @@ through one shared transformer, no fusion). All four set the `sum` loss with wei
 the data contracts above. How the models are written is in
 [configure encoders, decoders and latent spaces](configure-latent-spaces.md).
 
+`experiment/tabular_vae` (ADR 0039) is the single-modality VAE of a table: it reads
+`configs/data/tabular.yaml`, so the batches carry a `tabular` tensor of shape `(batch, num_features)`,
+and it sets the `sum` loss with weight 0.5 like the image and transformer ones. [Train on a
+table](train-on-a-table.md) says how to build the rows and set `num_features`.
+
 ## Train on paired signal and image data
 
 Pairing a signal with its image is your `loader_factory`'s job like the rest of the data

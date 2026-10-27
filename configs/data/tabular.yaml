@@ -1,0 +1,39 @@
+# Data contract for the tabular VAE (spec §6, roadmap P3-8). Framework-agnostic on purpose: no
+# dataset code is written for one specific table anywhere in this framework (data/NOTE.md);
+# `loader_factory` must point at your own "module.path:function_name" returning a
+# global_vae.config.data.DataloaderBundle whose batches carry one key, `tabular`, of shape
+# `(batch, num_features)` and dtype float. `train_path`/`loader_factory` below are left as required
+# (`???`, Hydra's MISSING marker): fill them in, or override on the command line
+# (e.g. `data.train_path=... data.loader_factory=my_project.data:buildTabularDataloaders`).
+loader_factory: ??? # e.g. "my_project.data:buildTabularDataloaders"
+train_path: ???      # e.g. "data/raw/customers_train.csv"
+val_path: null
+test_path: null
+
+batch_size: 64
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing (spec §6.2), per modality (ADR 0015). The value below is a
+# placeholder, an identity `standardize`. A real table needs one mean and one standard deviation
+# per numeric column, computed on the training split only (this framework never computes them,
+# see StandardizeTransform), and those are tensors, which YAML cannot write: build the pipeline in
+# your `loader_factory` with
+# `StandardizeTransform(mean=torch.tensor([...]), std=torch.tensor([...]))` for the numeric
+# columns. One-hot encoding of the categorical columns, and the imputation of missing values
+# (a NaN makes every output NaN), are the `loader_factory`'s job too: there is no transform for
+# either, and a table has no common recipe for them.
+transforms:
+  tabular:
+    - name: standardize
+      kwargs:
+        mean: 0.0
+        std: 1.0
+
+# No `sequence_length`: it is the length of a 1D signal. The width of a row is `num_features` in
+# the encoder and decoder kwargs of configs/model/tabular_single_latent.yaml, and the two must
+# match the rows your loader yields.
+
+seed: 0

@@ -37,3 +37,4 @@
 - [0036: When to migrate the training loop to Lightning or Fabric](0036-lightning-migration-triggers.md)
 - [0037: Transformer and ViT backbones](0037-transformer-and-vit-backbones.md)
 - [0038: Paired-data evaluation](0038-paired-data-evaluation.md)
+- [0039: The tabular modality](0039-tabular-modality.md)

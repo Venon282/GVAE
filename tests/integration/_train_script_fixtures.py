@@ -15,6 +15,7 @@ from global_vae.config.data import DataConfig, DataloaderBundle
 
 BATCH_SIZE = 4
 IMAGE_SIZE = 64
+TABULAR_FEATURES = 16
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
@@ -84,5 +85,27 @@ def buildDummyImageDataloaders(config: DataConfig) -> DataloaderBundle:
         return [
             {"image": torch.randn(BATCH_SIZE, IMAGE_SIZE, IMAGE_SIZE)} for _ in range(num_batches)
         ]
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummyTabularDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the tabular model (`experiment/tabular_vae.yaml`).
+
+    The batches carry one key, `tabular`, of shape `(batch, 16)`: the data contract of
+    `configs/data/tabular.yaml` and the `num_features` of
+    `configs/model/tabular_single_latent.yaml`.
+    Like the other builders of this module, it never touches disk.
+
+    Args:
+        config: The data config; `seed` is read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        return [{"tabular": torch.randn(BATCH_SIZE, TABULAR_FEATURES)} for _ in range(num_batches)]
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))

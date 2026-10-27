@@ -1,0 +1,34 @@
+# @package _global_
+# Full experiment for a single-modality tabular VAE (spec §6, roadmap P3-8): assembles model + data
+# + training into one composed, validated global_vae.config.experiment.ExperimentConfig. The
+# tabular counterpart of signal_vae.yaml and image_vae.yaml.
+# Run with:
+#   python scripts/train.py --config-name experiment/tabular_vae \
+#       data.train_path=/path/to/table data.loader_factory=my_project.data:buildTabularDataloaders
+# The batches carry one key, `tabular`, of shape `(batch, num_features)`, both the encoder input
+# and its decoder's target. Set `num_features` (and `categorical_sizes`, for one-hot columns) in
+# configs/model/tabular_single_latent.yaml, or from the command line, e.g.
+#   model.modalities.tabular.encoder.kwargs.num_features=24 \
+#   model.modalities.tabular.decoder.kwargs.num_features=24
+defaults:
+  - /model: tabular_single_latent
+  - /data: tabular
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/tabular_vae
+
+# Loss scale (docs/adr/0029-loss-scale-convention.md, docs/how-to/choose-beta.md). Under the
+# default `mean` reduction, `beta = 1` weights the KL N / 2 = 8 times more than the ELBO does for a
+# row of 16 values, and the model collapses: on a synthetic table (1000 rows driven by 4 hidden
+# factors, 60 epochs) it left 0 of 8 latent units active and an R^2 of 0.00 to 0.01 against the
+# column means. `sum` with weight 0.5 is the ELBO of a unit-variance Gaussian decoder, so `beta = 1`
+# (the warm-up of training/default.yaml) is its natural position: the same run used 4 of 8 units
+# (R^2 of 0.23 with 16 numeric columns, 0.46 with 10 numeric and two one-hot columns). These are
+# numbers from synthetic data and a short run, not a tuned value: the choice of beta is roadmap
+# decision D-6, which waits for a real run. Delete the `training` block below to go back to `mean`.
+training:
+  reconstruction_reduction: sum
+  reconstruction_weight: 0.5

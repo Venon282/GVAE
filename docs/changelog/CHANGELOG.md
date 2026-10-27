@@ -500,6 +500,39 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - **Finding.** The `evaluation/NOTE.md` note said streaming applied to `mse`, `rmse` and `mae`
   and that `r2` and `pearson_r` need the pool. They do not: both come from the same running
   moments, so all five metrics stream and all five are implemented.
+- Tabular modality (roadmap P3-8, spec §6 and §10, ADR 0039): the second proof of the genericity
+  claim, added through the registries only, with no change to `models/`, `latent/`, `losses/`,
+  `training/`, `evaluation/`, `config/` or `data/`. `TabularMlpEncoder` (`tabular_mlp_encoder_v1`) maps
+  a row, a `(batch, num_features)` float tensor, to `(mu, logvar)`; `TabularMlpDecoder`
+  (`tabular_mlp_decoder_v1`) reconstructs a row of the same fixed width. Both are an MLP configured by
+  name (`hidden_dims`, `activation` among `relu`, `gelu`, `silu`, `leaky_relu` and `tanh`,
+  `normalization` of `None`, `"layer"` or `"batch"`, `dropout`), with `modality_name` defaulting to
+  `tabular`; the encoder's `minimal_input_length` is `num_features`, and a row of another width is
+  refused with an error naming the shape. The decoder takes `categorical_sizes`: the last
+  `sum(categorical_sizes)` outputs are one-hot blocks, with a softmax inside each, so the default
+  `mse` is the Brier score of a categorical column and the numeric outputs stay linear. The two
+  modules are imported by `encoders/__init__.py` and `decoders/__init__.py`, and the stack they share
+  is `utils/mlp_blocks.py` (`buildMlp`, `listSupportedActivations`).
+- `configs/model/tabular_single_latent.yaml` (16 features, a latent of 8, no fusion),
+  `configs/data/tabular.yaml` (the contract of the `tabular` batch key, with an identity `standardize`
+  to replace, and no `sequence_length`) and `configs/experiment/tabular_vae.yaml`, which sets the
+  `sum` reduction with weight 0.5 because `mean` collapsed the model on synthetic data (0 of 8 latent
+  units active, against 4 of 8; the numbers are in the file and in the ADR, and are not a tuned value).
+- Tests: `tests/unit/test_tabular_backbone.py` (registration, `buildMlp`, shapes, validation, gradient
+  flow, the one-hot blocks as probabilities, a `NaN` row staying `NaN`) and
+  `tests/integration/test_tabular_model_configs.py` (a test that no core package names the new
+  classes or the `tabular` key, the model and the experiment built from YAML, a table with one-hot
+  columns, the loss arithmetic behind the experiment's scale, the data contract, and a
+  `scripts/train.py` run). `_train_script_fixtures.py` gains `buildDummyTabularDataloaders`.
+- Docs: `docs/adr/0039-tabular-modality.md`, `docs/how-to/train-on-a-table.md`, a pointer in
+  `docs/how-to/add-a-modality.md`, the README, the roadmap status of P3-8 and the status notes of
+  `configs/experiment/` and `configs/data/`.
+- **Findings, not fixed.** The reconstruction loss is one function per decoder, so a table cannot take
+  a cross-entropy on its categorical columns and a squared error on its numeric ones (the softmax
+  with `mse` stands in for it). A decoder returns a mean only, so the likelihood has a fixed
+  variance. `StandardizeTransform` takes a float or a tensor and a per-column list written in YAML
+  fails with an unhelpful `TypeError`, so a table's statistics are built in the `loader_factory`
+  (a strict `xfail` test states the intended behavior). Each is flagged in ADR 0039.
 
 ### Changed
 

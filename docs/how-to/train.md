@@ -60,6 +60,12 @@ the data contracts above. How the models are written is in
 and it sets the `sum` loss with weight 0.5 like the image and transformer ones. [Train on a
 table](train-on-a-table.md) says how to build the rows and set `num_features`.
 
+`experiment/audio_vae` (ADR 0040) is the single-modality VAE of a raw waveform: it reads
+`configs/data/audio.yaml`, so the batches carry an `audio` tensor of shape `(batch, 2048)` within
+`[-1, 1]`, and it sets the `sum` loss with weight 0.5 too. The clip length is written in the data file and
+in the decoder's `output_length`. [Train on audio](train-on-audio.md) has a loader and says how to change
+the length, the channels and the stack.
+
 ## Train on paired signal and image data
 
 Pairing a signal with its image is your `loader_factory`'s job like the rest of the data

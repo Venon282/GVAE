@@ -533,6 +533,46 @@ versioning follows [Semantic Versioning](https://semver.org/).
   variance. `StandardizeTransform` takes a float or a tensor and a per-column list written in YAML
   fails with an unhelpful `TypeError`, so a table's statistics are built in the `loader_factory`
   (a strict `xfail` test states the intended behavior). Each is flagged in ADR 0039.
+- Audio modality (roadmap P3-8, spec §6 and §10, ADR 0040), added through the registries only, with no change to
+  `models/`, `latent/`, `losses/`, `training/`, `evaluation/`, `config/` or `data/`, and none to the existing
+  1D classes. `AudioWaveformEncoder` (`audio_waveform_encoder_v1`) maps a raw waveform, `(batch, samples)` or
+  `(batch, channels, samples)`, to `(mu, logvar)`: a first convolution, then per stage one residual unit per
+  value of `dilations` and a strided convolution, then a mean (or `global_pool: max`) over time and an optional
+  MLP. A downsampling convolution has kernel `2 * stride + 1` and padding `stride`, so a length `L` becomes
+  `ceil(L / stride)`: a clip of any length from one sample up is encoded to the same shape
+  (`minimal_input_length` is `1`). `AudioWaveformDecoder` (`audio_waveform_decoder_v1`) projects the latent
+  vector to a seed of `ceil(output_length / prod(strides))` frames, upsamples (nearest neighbour and a
+  convolution, exactly `stride` times longer per stage), and crops to `output_length`, so any number of samples
+  is reached whatever the strides, with an `output_activation` that is `tanh` by default and `null` for
+  unbounded data. `activation` (`elu` by default), `normalization` (`group` by default, `batch` or `null`),
+  `hidden_channels`, `strides`, `dilations`, `in_channels` and `out_channels` (stereo) are arguments with
+  defaults, and each out-of-range one is a `ValueError` that names it.
+- `utils/waveform_blocks.py` (`getNormalizationFactory`, `resolveWaveformStages`, `buildDilatedResidualUnits`,
+  `buildDownsampleConv`, `buildUpsampleStage`, `computeDownsampledLength`, `computeSeedLength`, built on the
+  unchanged `Residual1DBlock`) and `utils/activations.py` (`ACTIVATIONS`, `listSupportedActivations`,
+  `getActivationFactory`). The activation names moved there from `utils/mlp_blocks.py`, which imports them, so
+  the tabular classes behave as before; `elu` is a new name.
+- `configs/model/audio_waveform_single_latent.yaml` (2048 samples, four stages of stride 4, a latent of 16, no
+  fusion), `configs/data/audio.yaml` (the contract of the `audio` batch key, an empty transform list so the
+  waveform stays within `[-1, 1]`, and `sequence_length.audio`) and `configs/experiment/audio_vae.yaml`, which
+  sets the `sum` reduction with weight 0.5 because `mean` collapsed the model on synthetic tones (0 of 16 latent
+  units active, against 16 of 16; the numbers are in the file and in the ADR, and are not a tuned value).
+- Tests: `tests/unit/test_audio_waveform_backbone.py` (registration, every block and length rule, shapes, any
+  clip length, any output length, stereo, the `tanh` bound, validation, gradient flow, group normalization
+  independent of the batch, a tiny model learning one tone) and `tests/integration/test_audio_model_configs.py`
+  (a test that no core package names the new classes or the `audio` key, the model and the experiment built from
+  YAML, a clip of another length, a stereo model, a spectrogram trained through the 2D classes, the loss arithmetic
+  behind the experiment's scale, the data contract, and a `scripts/train.py` run). `_train_script_fixtures.py` gains
+  `buildDummyAudioDataloaders`.
+- Docs: `docs/adr/0040-audio-modality.md`, `docs/how-to/train-on-audio.md` (with a `loader_factory` that cuts clips
+  to one length), a section in `docs/how-to/add-a-modality.md`, `docs/how-to/train.md`, the README, the roadmap
+  status of P3-8 and the status notes of `configs/experiment/` and `configs/data/`.
+- **Findings, not fixed.** The latent is one vector per clip (a latent per frame is a change to the core, roadmap
+  P4-0). There is no spectral loss: from Python `Trainer(reconstruction_loss_fn=...)` takes one, from YAML the
+  loss names are the fixed table of `config/training.py`. `DataConfig` has no field for the sample rate, which
+  stays the loader's choice. Each is flagged in ADR 0040. The 1D classes were not enough for a waveform (the
+  decoder must reach `output_length` exactly, no bounded output, one dilation per stage), which is why the pair
+  exists; they are unchanged.
 
 ### Changed
 

@@ -43,6 +43,13 @@ P3-8): a `loader_factory` of your own whose batches carry one key, `tabular`, of
 YAML cannot write, so the loader builds the transform in code (`docs/how-to/train-on-a-table.md`). It has no
 `sequence_length`: the width of a row is `num_features` in the model file.
 
+`configs/data/audio.yaml` is the contract of the audio model (`configs/experiment/audio_vae.yaml`, roadmap P3-8): a
+`loader_factory` of your own whose batches carry one key, `audio`, of shape `(batch, samples)` (or `(batch, channels,
+samples)`), float, within `[-1, 1]`, at one sample rate, with `samples` equal to `sequence_length.audio`. Its
+`transforms` entry for `audio` is empty on purpose (the decoder's `tanh` bounds the waveform, which a `standardize`
+would leave), and decoding, resampling, normalizing the level and cutting to a length are the loader's
+(`docs/how-to/train-on-audio.md`). The sample rate is not a field of `DataConfig`: it is the loader's choice.
+
 # Still deferred / permanent scope boundary
 
 No dataset/pairing/splitting *code* exists in this framework, and none is planned:

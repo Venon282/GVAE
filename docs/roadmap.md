@@ -731,7 +731,8 @@ and a mask-aware loss.
 the checklist and only once a dataset is named. Tabular data is the cheapest way to prove the
 genericity claim a second time.
 
-**P3-8 status.** Tabular is done, with no core change ([ADR 0039](adr/0039-tabular-modality.md)); the
+**P3-8 status.** Tabular ([ADR 0039](adr/0039-tabular-modality.md)) and audio
+([ADR 0040](adr/0040-audio-modality.md), below the tabular findings) are done, each with no core change; the
 other modalities are open and wait for a named dataset. No table was named, so the proof is on a
 synthetic one. The checklist of spec §10 in full: `TabularMlpEncoder` and `TabularMlpDecoder`
 (`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, registered by the imports of
@@ -765,6 +766,36 @@ key. **Findings:**
   is synthetic data and no tuning, and the beta choice stays D-6.
 - Not done: a reference `loader_factory` for a real table (its imputation and encoding are what a
   named dataset would decide), and the spec §6 and §8 text, which is unchanged.
+
+**P3-8 audio.** Done, with no core change ([ADR 0040](adr/0040-audio-modality.md)); no corpus was named, so the
+proof is on synthetic tones. `AudioWaveformEncoder` and `AudioWaveformDecoder` (`audio_waveform_encoder_v1` and
+`audio_waveform_decoder_v1`, registered by the imports of `encoders/__init__.py` and `decoders/__init__.py`, with
+`utils/waveform_blocks.py` and `utils/activations.py`), `configs/model/audio_waveform_single_latent.yaml`,
+`configs/data/audio.yaml` and `configs/experiment/audio_vae.yaml`, and `tests/unit/test_audio_waveform_backbone.py`
+and `tests/integration/test_audio_model_configs.py` (with a `scripts/train.py` run). The same kind of test as for
+tabular checks that no core package names the new classes or the `audio` key. **Findings:**
+
+- **The 1D classes were not enough, and a new pair was.** A waveform is a 1D series (spec §6), but the residual 1D
+  decoder must reach `output_length` exactly (a chore for 16,000 or 22,050 samples), has no output activation and
+  has one dilation per stage. The new pair downsamples with kernel `2s + 1` (length `L` becomes `ceil(L / s)`, so
+  no clip collapses), upsamples exactly `s` times per stage and crops a rounded-up seed, so any `output_length` is
+  reached, ends in an optional `tanh`, and stacks dilated residual units (`[1, 3, 9]`). The 1D classes are unchanged.
+- **A spectrogram is an image (no new class).** A log-magnitude STFT goes through `2d_cnn_*` (a test runs it);
+  the waveform model reconstructs the sound, phase included, and the spectrogram one cannot be played back
+  without a vocoder.
+- **One latent per clip (flagged, not fixed: a core change).** The encoder averages over time, so the latent holds
+  what a clip contains and not when. A latent per frame is the single-tensor decoder item of P4-0.
+- **No spectral loss (flagged, not fixed: a change to `config/training.py`).** The loss is a squared error on
+  samples. `Trainer(reconstruction_loss_fn=...)` takes any function from Python, but the loss names of a YAML file
+  are a fixed table.
+- **No place for the sample rate (flagged, not fixed: a `config/data.py` change).** It is the loader's choice, and
+  a mismatch between the rate of the model and of a clip is not checked.
+- **`mean` collapses this model too.** On synthetic tones (480 clips, a latent of 16, 40 epochs, one seed) `mean`
+  left 0 of 16 latent units active and an R^2 of -0.01, and `sum` at 0.5 trained it: 16 of 16 units, R^2 of 0.31,
+  a mean cosine of 0.56 (0.65 and 0.82 after 150 epochs, so unlike the tabular model it keeps improving). The experiment sets `sum` at 0.5 like the others; this is synthetic data and no tuning, and
+  the beta choice stays D-6.
+- Not done: a reference `loader_factory` for a real corpus (`docs/how-to/train-on-audio.md` has a sketch), a
+  mu-law or pre-emphasis transform, and the spec §6 and §8 text, which is unchanged.
 
 ### Phase 4: long-term research (spec §7)
 

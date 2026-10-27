@@ -16,6 +16,7 @@ from global_vae.config.data import DataConfig, DataloaderBundle
 BATCH_SIZE = 4
 IMAGE_SIZE = 64
 TABULAR_FEATURES = 16
+AUDIO_SAMPLES = 2048
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
@@ -107,5 +108,28 @@ def buildDummyTabularDataloaders(config: DataConfig) -> DataloaderBundle:
 
     def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
         return [{"tabular": torch.randn(BATCH_SIZE, TABULAR_FEATURES)} for _ in range(num_batches)]
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummyAudioDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the audio model (`experiment/audio_vae.yaml`).
+
+    The batches carry one key, `audio`, of shape `(batch, 2048)` with values within `[-1, 1]`: the
+    data contract of `configs/data/audio.yaml`, whose `sequence_length.audio` is the
+    `output_length` of `configs/model/audio_waveform_single_latent.yaml`. Like the other builders
+    of this module, it never touches disk.
+
+    Args:
+        config: The data config; `seed` and `sequence_length["audio"]` are read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+    length = (config.sequence_length or {}).get("audio", AUDIO_SAMPLES)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        return [{"audio": torch.tanh(torch.randn(BATCH_SIZE, length))} for _ in range(num_batches)]
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))

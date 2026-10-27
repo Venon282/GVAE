@@ -50,7 +50,7 @@ class TabularMlpDecoder(AbstractDecoder):
             hidden_dims: Width of each hidden layer, from the latent vector outwards. Empty goes
                 straight from `z` to the output layer.
             activation: Activation after each hidden layer, one of
-                `global_vae.utils.mlp_blocks.listSupportedActivations()`.
+                `global_vae.utils.activations.listSupportedActivations()`.
             normalization: `None` (default), `"layer"` or `"batch"`.
             dropout: Dropout probability after each hidden layer.
             categorical_sizes: Number of categories of each one-hot encoded column, in the order

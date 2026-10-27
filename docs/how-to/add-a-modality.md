@@ -35,6 +35,18 @@ That integration test also checks that no core package names the new classes or 
 key, which is a useful test to copy for your own modality. [Train on a table](train-on-a-table.md)
 shows the part that is not in the two classes: the `loader_factory` that builds the rows.
 
+## A worked example where an existing family nearly fits: audio
+
+A waveform is a 1D series, so the first thing to check for a new modality is whether a class that is
+already registered does the job. The audio modality ([ADR 0040](../adr/0040-audio-modality.md)) checked,
+and found three reasons the 1D classes were not enough (a decoder that must reach `output_length` exactly,
+no bounded output, one dilation per stage), so it added `encoders/audio_waveform_encoder.py` and
+`decoders/audio_waveform_decoder.py` and left the 1D ones as they were. It is also the example of a
+modality whose most common alternative needs no class at all: a spectrogram is an image, and
+`tests/integration/test_audio_model_configs.py` runs it through the 2D classes. [Train on
+audio](train-on-audio.md) shows the `loader_factory` that cuts clips to one length and keeps them within
+`[-1, 1]`.
+
 ## One encoder or decoder for several modalities
 
 The steps above give each modality its own encoder and decoder (`EN-*` and `*-DN` in spec §2.1).

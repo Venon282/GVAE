@@ -1,0 +1,39 @@
+# Data contract for the audio VAE (spec §6, roadmap P3-8). Framework-agnostic on purpose: no
+# dataset code is written for one specific corpus anywhere in this framework (data/NOTE.md);
+# `loader_factory` must point at your own "module.path:function_name" returning a
+# global_vae.config.data.DataloaderBundle whose batches carry one key, `audio`, of shape
+# `(batch, samples)` (or `(batch, channels, samples)` for stereo), float, within [-1, 1], with
+# `samples` equal to `sequence_length.audio` below. `train_path`/`loader_factory` are left as
+# required (`???`, Hydra's MISSING marker): fill them in, or override them on the command line
+# (e.g. `data.train_path=... data.loader_factory=my_project.data:buildAudioDataloaders`).
+loader_factory: ??? # e.g. "my_project.data:buildAudioDataloaders"
+train_path: ???      # e.g. "data/raw/clips_train"
+val_path: null
+test_path: null
+
+batch_size: 16
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing (spec §6.2), per modality (ADR 0015). Empty on purpose: the
+# decoder ends in a `tanh`, so a waveform has to stay within [-1, 1], and a `standardize` would
+# take it out of that range (set `output_activation: null` in the decoder if you standardize
+# anyway). What audio does need, the loader does, because none of it is a generic transform:
+# decoding the file, mixing down or keeping the channels, resampling to ONE sample rate with a
+# proper resampler (the `resample` transform interpolates, with no anti-aliasing filter, which is
+# not a sample rate conversion), peak or loudness normalization, and cutting or padding every clip
+# to `sequence_length.audio` samples (docs/how-to/train-on-audio.md has a loader).
+transforms:
+  audio: []
+
+# Number of samples of a clip after the loader's cutting and padding: 2048 samples are 0.128 s at
+# 16 kHz. It must match configs/model/audio_waveform_single_latent.yaml's
+# decoder.kwargs.output_length, which is never filled in for you. The sample rate is not part of
+# this contract, since the model knows a number of samples: it is a choice of the loader, and the
+# one to remember when you decode a reconstruction back to sound.
+sequence_length:
+  audio: 2048
+
+seed: 0

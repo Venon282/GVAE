@@ -46,7 +46,7 @@ class TabularMlpEncoder(AbstractEncoder):
             hidden_dims: Width of each hidden layer, from the input outwards. Empty goes straight
                 from the row to `(mu, logvar)`.
             activation: Activation after each hidden layer, one of
-                `global_vae.utils.mlp_blocks.listSupportedActivations()`.
+                `global_vae.utils.activations.listSupportedActivations()`.
             normalization: `None` (default), `"layer"` or `"batch"`, after each hidden layer's
                 linear map. `"batch"` fails in training on a batch of one sample.
             dropout: Dropout probability after each hidden layer.

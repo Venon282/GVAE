@@ -38,3 +38,4 @@
 - [0037: Transformer and ViT backbones](0037-transformer-and-vit-backbones.md)
 - [0038: Paired-data evaluation](0038-paired-data-evaluation.md)
 - [0039: The tabular modality](0039-tabular-modality.md)
+- [0040: The audio modality](0040-audio-modality.md)

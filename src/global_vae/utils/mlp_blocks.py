@@ -6,30 +6,14 @@ which a YAML file can express (a `Callable` factory, as the CNN encoders take, c
 in one).
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 from torch import nn
 
-ACTIVATIONS: dict[str, Callable[[], nn.Module]] = {
-    "relu": nn.ReLU,
-    "gelu": nn.GELU,
-    "silu": nn.SiLU,
-    "leaky_relu": nn.LeakyReLU,
-    "tanh": nn.Tanh,
-}
-"""Activation name -> zero-argument factory returning a fresh module."""
+from global_vae.utils.activations import getActivationFactory
 
 NORMALIZATIONS: tuple[str | None, ...] = (None, "layer", "batch")
 """Every value `buildMlp` accepts as `normalization`: none, `LayerNorm` or `BatchNorm1d`."""
-
-
-def listSupportedActivations() -> list[str]:
-    """Return every activation name `buildMlp` can build.
-
-    Returns:
-        The sorted activation names.
-    """
-    return sorted(ACTIVATIONS)
 
 
 def buildMlp(
@@ -49,7 +33,7 @@ def buildMlp(
         in_features: Width of the input.
         hidden_dims: Width of each hidden layer. Empty gives an identity stack, so the caller's
             output layer reads the input directly.
-        activation: One of `listSupportedActivations()`.
+        activation: One of `utils.activations.listSupportedActivations()`.
         normalization: `None` (default), `"layer"` (`LayerNorm`, independent of the batch) or
             `"batch"` (`BatchNorm1d`, which needs a training batch of at least two samples).
         dropout: Dropout probability after each hidden layer, in `[0, 1)`. `0` (default) adds no
@@ -68,10 +52,7 @@ def buildMlp(
         raise ValueError(f"in_features must be at least 1, got {in_features}.")
     if any(width < 1 for width in hidden_dims):
         raise ValueError(f"hidden_dims must all be at least 1, got {list(hidden_dims)}.")
-    if activation not in ACTIVATIONS:
-        raise ValueError(
-            f"Unknown activation '{activation}'. Expected one of {listSupportedActivations()}."
-        )
+    activation_factory = getActivationFactory(activation)
     if normalization not in NORMALIZATIONS:
         raise ValueError(
             f"Unknown normalization {normalization!r}. Expected one of {list(NORMALIZATIONS)}."
@@ -87,7 +68,7 @@ def buildMlp(
             layers.append(nn.LayerNorm(hidden))
         elif normalization == "batch":
             layers.append(nn.BatchNorm1d(hidden))
-        layers.append(ACTIVATIONS[activation]())
+        layers.append(activation_factory())
         if dropout > 0.0:
             layers.append(nn.Dropout(dropout))
         width = hidden

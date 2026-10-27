@@ -247,7 +247,11 @@ to implement for your own.
 A table is the first modality added after the core was written, through the registries only
 (`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, `docs/adr/0039-tabular-modality.md`,
 `configs/experiment/tabular_vae.yaml`): a row is a flat float vector, numeric columns first and one-hot
-blocks after, built by your `loader_factory` (`docs/how-to/train-on-a-table.md`).
+blocks after, built by your `loader_factory` (`docs/how-to/train-on-a-table.md`). Audio is the next one
+(`audio_waveform_encoder_v1` and `audio_waveform_decoder_v1`, `docs/adr/0040-audio-modality.md`,
+`configs/experiment/audio_vae.yaml`): a raw waveform, `(batch, samples)` within `[-1, 1]`, from a loader that
+fixes the sample rate and the clip length (`docs/how-to/train-on-audio.md`). A spectrogram needs no new class,
+since it is an image to the 2D ones.
 
 Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
 `docs/adr/0001-phase1-default-configuration.md`.

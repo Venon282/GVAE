@@ -50,6 +50,13 @@ composing `configs/model/tabular_single_latent.yaml`, the data contract `configs
 `reconstruction_weight: 0.5` like the image and transformer ones, with the numbers in the comment of the file.
 `num_features` has to be set in the encoder and the decoder to the width of your rows.
 
+`audio_vae.yaml` (roadmap P3-8, ADR 0040) is the single-modality VAE of a raw waveform, `audio -> z -> audio`,
+composing `configs/model/audio_waveform_single_latent.yaml`, the data contract `configs/data/audio.yaml` and
+`configs/training/default.yaml`. It trains through `scripts/train.py` (`tests/integration/test_audio_model_configs.py`)
+and sets `training.reconstruction_reduction: sum` and `reconstruction_weight: 0.5` like the image, transformer and
+tabular ones, with the numbers in the comment of the file. The clip length is the `data.sequence_length.audio` of the
+data file and the `output_length` of the decoder, which have to agree.
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a

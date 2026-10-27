@@ -13,8 +13,9 @@ from global_vae.decoders.tabular_mlp_decoder import TabularMlpDecoder
 from global_vae.encoders.base import AbstractEncoder
 from global_vae.encoders.registry import getEncoderClass, listRegisteredEncoders
 from global_vae.encoders.tabular_mlp_encoder import TabularMlpEncoder
+from global_vae.utils.activations import ACTIVATIONS, listSupportedActivations
 from global_vae.utils.autograd import backward
-from global_vae.utils.mlp_blocks import ACTIVATIONS, buildMlp, listSupportedActivations
+from global_vae.utils.mlp_blocks import buildMlp
 
 LATENT = 4
 FEATURES = 12

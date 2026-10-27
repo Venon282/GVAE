@@ -1,0 +1,34 @@
+# @package _global_
+# Full experiment for a single-modality audio VAE over the raw waveform (spec §6, roadmap P3-8):
+# assembles model + data + training into one composed, validated
+# global_vae.config.experiment.ExperimentConfig. The audio counterpart of signal_vae.yaml,
+# image_vae.yaml and tabular_vae.yaml.
+# Run with:
+#   python scripts/train.py --config-name experiment/audio_vae \
+#       data.train_path=/path/to/clips data.loader_factory=my_project.data:buildAudioDataloaders
+# The batches carry one key, `audio`, both the encoder input and its decoder's target. For another
+# clip length, set it in both places (the decoder never resizes), for example
+#   data.sequence_length.audio=4096 model.modalities.audio.decoder.kwargs.output_length=4096
+defaults:
+  - /model: audio_waveform_single_latent
+  - /data: audio
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/audio_vae
+
+# Loss scale (docs/adr/0029-loss-scale-convention.md, docs/how-to/choose-beta.md). Under the default
+# `mean` reduction, `beta = 1` weights the KL N / 2 = 1024 times more than the ELBO does for a clip
+# of 2048 samples, and the model collapses: on synthetic decaying tones (480 clips at 16 kHz, 40
+# epochs) it left 0 of 16 latent units active and an R^2 of -0.01 against the mean clip. `sum` with
+# weight 0.5 is the ELBO of a unit-variance Gaussian decoder, so `beta = 1` (the warm-up of
+# training/default.yaml) is its natural position: the same run used all 16 units and reached an R^2
+# of 0.31 (a mean cosine similarity of 0.56 between a clip and its reconstruction), and 0.65 (0.82) after
+# 150 epochs, so it keeps improving with training. These are
+# numbers from synthetic data and a short run, not a tuned value: the choice of beta is roadmap
+# decision D-6, which waits for a real run. Delete the `training` block below to go back to `mean`.
+training:
+  reconstruction_reduction: sum
+  reconstruction_weight: 0.5

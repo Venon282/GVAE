@@ -1,0 +1,50 @@
+# Single-modality audio VAE over the raw waveform (spec §6, roadmap P3-8): `audio -> z -> audio`, no
+# fusion strategy since exactly one encoder feeds the single latent space (spec §4). Validated
+# against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+#
+# A batch key `audio` holds a float waveform, `(batch, samples)` for mono or `(batch, channels,
+# samples)`, within [-1, 1], at one sample rate. Decoding, resampling to that rate, normalizing and
+# cutting clips to one length are the caller's `loader_factory` (spec §6.2). The model knows a
+# number of samples, not a rate: 2048 samples are 0.128 s at 16 kHz.
+#
+# The encoder is a stack of stages, each a few dilated residual units and one strided convolution,
+# then a mean over time: any clip length is encoded, and one latent vector describes the clip. The
+# decoder upsamples a seed back and crops to `output_length`, which can be any number of samples.
+name: global_vae_audio_waveform_single_latent
+latent_mode: single
+
+modalities:
+  audio:
+    encoder:
+      name: audio_waveform_encoder_v1
+      kwargs:
+        in_channels: 1 # 2 for stereo, and out_channels of the decoder to match
+        hidden_channels: [8, 16, 32, 64] # one entry per stage, so four stages
+        strides: 4 # per stage, or one value for all: here 4 * 4 * 4 * 4 = 256 samples per frame
+        dilations: [1, 3] # one residual unit per dilation in every stage (add 9 for a wider view)
+        # activation: elu | gelu | relu | silu | leaky_relu | tanh; normalization: group | batch | null
+        #
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: audio_waveform_decoder_v1
+      kwargs:
+        # output_length must match configs/data/audio.yaml's sequence_length.audio. It is
+        # data-dependent, so it is never filled in for you. Any value works: the seed is
+        # ceil(output_length / 256) frames and the surplus of the upsampled waveform is cropped.
+        output_length: 2048
+        out_channels: 1
+        hidden_channels: [64, 32, 16, 8]
+        strides: 4
+        dilations: [1, 3]
+        # tanh bounds the waveform to [-1, 1]. Set output_activation: null for data that is not,
+        # for example a waveform you standardized.
+        output_activation: tanh
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

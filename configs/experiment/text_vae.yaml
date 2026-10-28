@@ -1,0 +1,38 @@
+# @package _global_
+# Full experiment for a single-modality text VAE (spec §6, roadmap P3-8): assembles model + data +
+# training into one composed, validated global_vae.config.experiment.ExperimentConfig. The text
+# counterpart of signal_vae.yaml, image_vae.yaml, tabular_vae.yaml and audio_vae.yaml.
+# Run with:
+#   python scripts/train.py --config-name experiment/text_vae \
+#       data.train_path=/path/to/sentences data.loader_factory=my_project.data:buildTextDataloaders
+# The batches carry one key, `text`, both the encoder input and its decoder's target. For another
+# text length or vocabulary, set it in every place it is written: the data file's
+# `sequence_length.text`, the decoder's `output_length`, and `vocab_size` in the encoder and the
+# decoder, for example
+#   data.sequence_length.text=16 model.modalities.text.decoder.kwargs.output_length=16
+defaults:
+  - /model: text_transformer_single_latent
+  - /data: text
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/text_vae
+
+# Loss (docs/adr/0029-loss-scale-convention.md, docs/adr/0041-text-modality.md, docs/how-to/choose-beta.md).
+# The decoder returns probabilities, so the loss compares them with the one-hot batch tensor: `bce` is
+# the closest thing to a likelihood that a loss name of a YAML file can say (there is no cross-entropy
+# in the table of config/training.py), and `sum` makes it a per-text sum like the KL term.
+# On a synthetic grammar (4,000 texts of 8 tokens over a vocabulary of 32, 60 epochs, two seeds), the
+# best constant guess is 45.5% of the tokens, and that is where every `mean` reduction stayed (0 of 16
+# latent units active). `sum` with weight 0.5 stayed there too (1 of 16 units), weight 1.0 gave 87% of
+# the tokens and 31% of whole texts, weight 2.0 gave 99.3% and 94%, and weight 4.0 gave 100% and 100%.
+# `mse` needed a weight of 8 to reach the 87% that `bce` has at 1.0. The weight is the lever (a weight
+# of w on the reconstruction is a beta of 1 / w on the KL), so this is roadmap decision D-6 again: 2.0
+# is a middle setting measured on synthetic data, not a tuned one. Delete the `training` block to go
+# back to `mean`, which collapses.
+training:
+  reconstruction_loss: bce
+  reconstruction_reduction: sum
+  reconstruction_weight: 2.0

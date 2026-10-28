@@ -731,9 +731,10 @@ and a mask-aware loss.
 the checklist and only once a dataset is named. Tabular data is the cheapest way to prove the
 genericity claim a second time.
 
-**P3-8 status.** Tabular ([ADR 0039](adr/0039-tabular-modality.md)) and audio
-([ADR 0040](adr/0040-audio-modality.md), below the tabular findings) are done, each with no core change; the
-other modalities are open and wait for a named dataset. No table was named, so the proof is on a
+**P3-8 status.** Tabular ([ADR 0039](adr/0039-tabular-modality.md)), audio
+([ADR 0040](adr/0040-audio-modality.md), below the tabular findings) and text
+([ADR 0041](adr/0041-text-modality.md), below the audio findings) are done, each with no core change; the
+other modalities (time series, graphs, point clouds) are open and wait for a named dataset. No table was named, so the proof is on a
 synthetic one. The checklist of spec §10 in full: `TabularMlpEncoder` and `TabularMlpDecoder`
 (`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, registered by the imports of
 `encoders/__init__.py` and `decoders/__init__.py`, with `utils/mlp_blocks.py` for the shared stack),
@@ -796,6 +797,41 @@ tabular checks that no core package names the new classes or the `audio` key. **
   the beta choice stays D-6.
 - Not done: a reference `loader_factory` for a real corpus (`docs/how-to/train-on-audio.md` has a sketch), a
   mu-law or pre-emphasis transform, and the spec §6 and §8 text, which is unchanged.
+
+**P3-8 text.** Done, with no core change ([ADR 0041](adr/0041-text-modality.md)); no corpus was named, so the proof
+is on a synthetic language. `TextTransformerEncoder` and `TextTransformerDecoder` (`text_transformer_encoder_v1` and
+`text_transformer_decoder_v1`, registered by the imports of `encoders/__init__.py` and `decoders/__init__.py`, with
+`utils/text_blocks.py`), `configs/model/text_transformer_single_latent.yaml`, `configs/data/text.yaml` and
+`configs/experiment/text_vae.yaml`, and `tests/unit/test_text_transformer_backbone.py` and
+`tests/integration/test_text_model_configs.py` (with a `scripts/train.py` run). The same kind of test as for the other
+modalities checks that no core package names the new classes or the `text` key. **Findings:**
+
+- **A text is a one-hot tensor, because the loss says so.** `computeTotalReconstructionLoss` refuses a reconstruction
+  and a target of different shapes, so ids `(batch, length)` cannot be the target of scores `(batch, length,
+  vocab_size)`. The batch tensor is one-hot, the decoder returns a distribution over the vocabulary at each position,
+  and the encoder takes the one-hot tensor or the ids (the same output). Padding is a token the decoder predicts and
+  the encoder skips (`pad_token_id`), so padding a text does not change its latent vector.
+- **No cross-entropy in the loss table, and ids cannot be targets (flagged, not fixed: a change to
+  `config/training.py` and `losses/reconstruction.py`).** The experiment sets `bce`, `sum`, weight 2.0. The exact
+  likelihood is `computeTokenCrossEntropy` in `utils/text_blocks.py`, for `Trainer(reconstruction_loss_fn=...)` with
+  the decoder's `output_activation: null`: a Python route only, since a YAML file cannot name it. A one-hot batch costs
+  `batch * length * vocab_size` floats (about a gigabyte for 64 texts of 128 tokens over 30,000), so a vocabulary of
+  subwords does not fit until ids can be targets.
+- **The weight is the lever, and D-6 again.** On a synthetic grammar (4,000 texts of 8 tokens, a vocabulary of 32, a
+  latent of 16, 60 epochs, two seeds; the best constant guess is 45.5% of the tokens) every `mean` reduction left 0 of
+  16 latent units active. `bce` with `sum` gave 87% of the tokens at weight 1.0, 99.3% (94% exact texts) at 2.0 and
+  100% at 4.0; `mse` needed 8.0 for 87%; the exact cross-entropy gave 55% at 1.0 and 99.6% at 2.0. A weight `w` is a
+  `beta` of `1 / w`, so this is the choice of beta of D-6 on synthetic data, not a tuned value.
+- **The 1D transformer pair is much worse here (not isolated).** One-hot rows channels-first through
+  `1d_transformer_*` reached 62% (`mse`, 8.0) and 65% (cross-entropy, 2.0), against 87% and 99.6% for the new pair. The
+  padding mask accounts for about three points; the embedding scale is the untested suspect.
+- **One latent per text (flagged, not fixed: a core change).** The encoder pools over the tokens and the decoder writes
+  every token from one vector, with no autoregression (which is also why it cannot ignore the latent vector). A
+  sequence of latents is the single-tensor decoder item of P4-0.
+- **No place for the vocabulary (flagged, not fixed: a `config/data.py` change).** It is the last axis of the batch and
+  the `vocab_size` of the encoder and the decoder.
+- Not done: a tokenizer or a vocabulary builder (`docs/how-to/train-on-text.md` has a `loader_factory` sketch), pretrained
+  embeddings, and the spec §6 and §8 text, which is unchanged.
 
 ### Phase 4: long-term research (spec §7)
 

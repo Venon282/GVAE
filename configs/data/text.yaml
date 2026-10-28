@@ -1,0 +1,38 @@
+# Data contract for the text VAE (spec §6, roadmap P3-8). Framework-agnostic on purpose: no dataset
+# code is written for one specific corpus anywhere in this framework (data/NOTE.md); `loader_factory`
+# must point at your own "module.path:function_name" returning a global_vae.config.data.DataloaderBundle
+# whose batches carry one key, `text`, of shape `(batch, length, vocab_size)`, float, one-hot (a row
+# of zeros or of the pad class is padding), with `length` equal to `sequence_length.text` below and
+# `vocab_size` equal to the one of configs/model/text_transformer_single_latent.yaml.
+# `train_path`/`loader_factory` are left as required (`???`, Hydra's MISSING marker): fill them in,
+# or override them on the command line (e.g. `data.train_path=... data.loader_factory=
+# my_project.data:buildTextDataloaders`).
+loader_factory: ??? # e.g. "my_project.data:buildTextDataloaders"
+train_path: ???      # e.g. "data/raw/sentences_train.txt"
+val_path: null
+test_path: null
+
+batch_size: 64
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing (spec §6.2), per modality (ADR 0015). Empty on purpose, and it
+# has to stay empty: every transform of this framework acts on numbers, and a one-hot token tensor
+# is not a quantity (a `standardize` would turn each class column into a z-score, a `log1p` or a
+# `resample` would break it). Everything text needs is the loader's: reading the file, normalizing
+# the characters, tokenizing, the vocabulary, cutting or padding to `sequence_length.text` and the
+# one-hot encoding (docs/how-to/train-on-text.md has a loader).
+transforms:
+  text: []
+
+# Number of tokens of a text after the loader's cutting and padding, the padding token included. It
+# must match configs/model/text_transformer_single_latent.yaml's decoder.kwargs.output_length,
+# which is never filled in for you. The size of the vocabulary is not part of this contract (there
+# is no field for it in `DataConfig`): it is the last axis of the batch tensor and the `vocab_size`
+# of the encoder and the decoder.
+sequence_length:
+  text: 8
+
+seed: 0

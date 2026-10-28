@@ -251,7 +251,10 @@ blocks after, built by your `loader_factory` (`docs/how-to/train-on-a-table.md`)
 (`audio_waveform_encoder_v1` and `audio_waveform_decoder_v1`, `docs/adr/0040-audio-modality.md`,
 `configs/experiment/audio_vae.yaml`): a raw waveform, `(batch, samples)` within `[-1, 1]`, from a loader that
 fixes the sample rate and the clip length (`docs/how-to/train-on-audio.md`). A spectrogram needs no new class,
-since it is an image to the 2D ones.
+since it is an image to the 2D ones. Text follows (`text_transformer_encoder_v1` and `text_transformer_decoder_v1`,
+`docs/adr/0041-text-modality.md`, `configs/experiment/text_vae.yaml`): token ids as a one-hot tensor
+`(batch, length, vocab_size)`, which the loss needs to be the shape of the reconstruction, from a loader that
+tokenizes and fixes the vocabulary and the length (`docs/how-to/train-on-text.md`).
 
 Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
 `docs/adr/0001-phase1-default-configuration.md`.

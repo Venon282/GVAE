@@ -57,6 +57,15 @@ and sets `training.reconstruction_reduction: sum` and `reconstruction_weight: 0.
 tabular ones, with the numbers in the comment of the file. The clip length is the `data.sequence_length.audio` of the
 data file and the `output_length` of the decoder, which have to agree.
 
+`text_vae.yaml` (roadmap P3-8, ADR 0041) is the single-modality VAE of a text, `text -> z -> text`, composing
+`configs/model/text_transformer_single_latent.yaml`, the data contract `configs/data/text.yaml` and
+`configs/training/default.yaml`. It trains through `scripts/train.py` (`tests/integration/test_text_model_configs.py`)
+and sets `training.reconstruction_loss: bce` with `reconstruction_reduction: sum` and `reconstruction_weight: 1.0`,
+not the `mse` of the others: the decoder returns probabilities over the vocabulary, and the numbers in the comment of
+the file say why `bce` and not `mse`. The length is the `data.sequence_length.text` of the data file and the
+`output_length` of the decoder, and the vocabulary size is the `vocab_size` of the encoder and of the decoder, which
+all have to agree with the loader.
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a

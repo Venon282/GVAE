@@ -66,6 +66,12 @@ table](train-on-a-table.md) says how to build the rows and set `num_features`.
 in the decoder's `output_length`. [Train on audio](train-on-audio.md) has a loader and says how to change
 the length, the channels and the stack.
 
+`experiment/text_vae` (ADR 0041) is the single-modality VAE of a text: it reads `configs/data/text.yaml`, so
+the batches carry a `text` tensor, one-hot, of shape `(batch, 8, 32)`: a length of 8 tokens over a vocabulary of
+32. It sets the `bce` loss with the `sum` reduction and weight 1.0, since the decoder returns probabilities. The
+length is written in the data file and in the decoder's `output_length`, and the vocabulary size in the encoder
+and the decoder. [Train on text](train-on-text.md) has a loader and says how to change them.
+
 ## Train on paired signal and image data
 
 Pairing a signal with its image is your `loader_factory`'s job like the rest of the data

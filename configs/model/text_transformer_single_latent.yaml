@@ -1,0 +1,56 @@
+# Single-modality text VAE (spec §6, roadmap P3-8): `text -> z -> text`, no fusion strategy since
+# exactly one encoder feeds the single latent space (spec §4). Validated against
+# global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+#
+# A batch key `text` holds a one-hot float tensor `(batch, length, vocab_size)`: one row per token,
+# padding included. The shape is not a choice of taste. A decoder's reconstruction and its target
+# (this very tensor) must have one shape, so the decoder returns a distribution over the vocabulary
+# at every position, and the target has to be one-hot. Tokenizing, building the vocabulary, cutting
+# or padding every text to one length and the one-hot encoding are the caller's `loader_factory`
+# (spec §6.2, docs/how-to/train-on-text.md).
+#
+# The encoder is a small transformer (a token embedding, positions, a few layers, a masked mean over
+# the real tokens), and it skips the padding token. The decoder gives the whole text in one pass
+# from the latent vector, with no token feeding the next, so it cannot ignore the latent vector.
+name: global_vae_text_transformer_single_latent
+latent_mode: single
+
+modalities:
+  text:
+    encoder:
+      name: text_transformer_encoder_v1
+      kwargs:
+        # vocab_size is data-dependent, so it is never filled in for you. It counts the padding token
+        # and must equal the decoder's, and the last axis of the batch tensor.
+        vocab_size: 32
+        pad_token_id: 0 # skipped as an attention key and left out of the mean; null for no padding
+        d_model: 64
+        num_heads: 4
+        num_layers: 2
+        pooling: mean # mean | cls
+        # positional_encoding: sinusoidal (any length) | learned (needs max_length)
+        #
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: text_transformer_decoder_v1
+      kwargs:
+        vocab_size: 32
+        # output_length must match configs/data/text.yaml's sequence_length.text. It is data-dependent,
+        # so it is never filled in for you. The padding token is a token like another: the decoder
+        # predicts it, which is how it learns the length of a text.
+        output_length: 8
+        d_model: 64
+        num_heads: 4
+        num_layers: 2
+        # softmax gives probabilities, which the `mse` and `bce` of a YAML file compare with the
+        # one-hot target. null gives raw scores, for a cross-entropy written in Python.
+        output_activation: softmax
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

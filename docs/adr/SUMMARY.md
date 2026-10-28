@@ -39,3 +39,4 @@
 - [0038: Paired-data evaluation](0038-paired-data-evaluation.md)
 - [0039: The tabular modality](0039-tabular-modality.md)
 - [0040: The audio modality](0040-audio-modality.md)
+- [0041: The text modality](0041-text-modality.md)

@@ -573,6 +573,44 @@ versioning follows [Semantic Versioning](https://semver.org/).
   stays the loader's choice. Each is flagged in ADR 0040. The 1D classes were not enough for a waveform (the
   decoder must reach `output_length` exactly, no bounded output, one dilation per stage), which is why the pair
   exists; they are unchanged.
+- Text modality (roadmap P3-8, spec §6 and §10, ADR 0041), added through the registries only, with no change to
+  `models/`, `latent/`, `losses/`, `training/`, `evaluation/`, `config/` or `data/`, and none to the existing
+  transformer classes. A text is a one-hot float tensor `(batch, length, vocab_size)` made by the caller, because the
+  loss refuses a reconstruction and a target of different shapes. `TextTransformerEncoder`
+  (`text_transformer_encoder_v1`) embeds the tokens (ids or one-hot rows, with identical output), adds sinusoidal or
+  learned positions, runs a pre-norm transformer stack and pools with a masked mean or a `[CLS]` token; with
+  `pad_token_id` set, padded positions are skipped as attention keys and left out of the mean, so a text padded to a
+  longer length gives the same `(mu, logvar)`, and an empty text stays finite (`minimal_input_length` is `1`).
+  `TextTransformerDecoder` (`text_transformer_decoder_v1`) writes the whole text in one pass from the latent vector (a
+  position vector plus a projection of it per token, no autoregression), with an `output_activation` of `softmax`
+  (default) or `null` for raw scores.
+- `utils/text_blocks.py` (`TokenEmbedding`, `computePaddingMask`, `computeMaskedMean`, and `computeTokenCrossEntropy`,
+  the exact negative log-likelihood of a text for `Trainer(reconstruction_loss_fn=...)`, built on the unchanged
+  `SeriesPositions`, `buildTransformerStack` and `buildPoolingHead`).
+- `configs/model/text_transformer_single_latent.yaml` (a vocabulary of 32, 8 tokens, two layers each side, a latent of
+  16, no fusion), `configs/data/text.yaml` (the contract of the `text` batch key, an empty transform list, and
+  `sequence_length.text`) and `configs/experiment/text_vae.yaml`, which sets `bce` with the `sum` reduction and weight
+  2.0: on a synthetic language every `mean` reduction left the latent vector unused, `bce` at 1.0 gave 87% of the tokens
+  and at 2.0 99.3% (an exact cross-entropy gave 99.6%), so the weight is the lever (numbers in the file and in the ADR,
+  not a tuned value).
+- Tests: `tests/unit/test_text_transformer_backbone.py` (registration, the embedding, the padding mask, the masked mean,
+  the cross-entropy, ids and one-hot rows agreeing, padding invariance, an empty text, positions, validation, gradient
+  flow, a tiny model learning to copy texts) and `tests/integration/test_text_model_configs.py` (a test that no core
+  package names the new classes or the `text` key, the model and the experiment built from YAML, ids through the whole
+  model, a vocabulary mismatch, the loss arithmetic, the Bernoulli loss never below the categorical one, two runs that
+  learn a synthetic grammar, evaluation and figures, the data contract, and a `scripts/train.py` run).
+  `_train_script_fixtures.py` gains `buildDummyTextDataloaders`, and `tests/integration/_text_corpus.py` is the
+  synthetic grammar.
+- Docs: `docs/adr/0041-text-modality.md`, `docs/how-to/train-on-text.md` (with a `loader_factory` that tokenizes,
+  pads and one-hot encodes, and the exact-loss recipe), a section in `docs/how-to/add-a-modality.md`,
+  `docs/how-to/train.md`, the README, the roadmap status of P3-8 and the status notes of `configs/experiment/` and
+  `configs/data/`.
+- **Findings, not fixed.** The loss table has no cross-entropy and a target must have the shape of the reconstruction, so
+  ids cannot be targets and a one-hot batch costs `batch * length * vocab_size` floats (a large vocabulary does not
+  fit); the exact loss is a Python function, since a YAML file cannot name it. The latent is one vector per text.
+  `DataConfig` has no field for the vocabulary size. Each is flagged in ADR 0041. The 1D transformer classes reached
+  62 to 65% of the tokens on the same language where the new pair reached 87 to 99%; the padding mask explains about
+  three points of that gap, and the cause of the rest was not isolated.
 
 ### Changed
 

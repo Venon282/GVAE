@@ -47,6 +47,20 @@ modality whose most common alternative needs no class at all: a spectrogram is a
 audio](train-on-audio.md) shows the `loader_factory` that cuts clips to one length and keeps them within
 `[-1, 1]`.
 
+## A worked example where the batch layout is the hard part: text
+
+Text is a sequence of categorical tokens, and the first thing to settle for it is not the network but the
+shape of the tensors. A decoder's reconstruction and its target (the batch tensor of the same name) must have
+one shape, so a decoder that gives a distribution over the vocabulary at every position needs a one-hot
+target, `(batch, length, vocab_size)`, and the encoder reads that same tensor. The text modality
+([ADR 0041](../adr/0041-text-modality.md)) adds `encoders/text_transformer_encoder.py` and
+`decoders/text_transformer_decoder.py`, built from the pieces of the transformer backbones
+(`utils/transformer_blocks.py`) and a few of its own (`utils/text_blocks.py`: the token embedding, which
+takes ids or one-hot rows, and the padding mask). It is the example of a modality whose loss the YAML cannot
+name exactly (a cross-entropy is not in the loss table), and of how far a registered class and a Python loss
+function get without touching the core. [Train on text](train-on-text.md) shows the `loader_factory` that
+tokenizes, builds the vocabulary, pads and one-hot encodes.
+
 ## One encoder or decoder for several modalities
 
 The steps above give each modality its own encoder and decoder (`EN-*` and `*-DN` in spec §2.1).

@@ -10,6 +10,7 @@ root (not just `tests/integration/`) on `PYTHONPATH` in the subprocess.
 """
 
 import torch
+import torch.nn.functional as functional
 
 from global_vae.config.data import DataConfig, DataloaderBundle
 
@@ -17,6 +18,8 @@ BATCH_SIZE = 4
 IMAGE_SIZE = 64
 TABULAR_FEATURES = 16
 AUDIO_SAMPLES = 2048
+TEXT_LENGTH = 8
+TEXT_VOCAB = 32
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
@@ -131,5 +134,35 @@ def buildDummyAudioDataloaders(config: DataConfig) -> DataloaderBundle:
 
     def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
         return [{"audio": torch.tanh(torch.randn(BATCH_SIZE, length))} for _ in range(num_batches)]
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummyTextDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the text model (`experiment/text_vae.yaml`).
+
+    The batches carry one key, `text`, a one-hot tensor of shape `(batch, 8, 32)`: the data
+    contract of `configs/data/text.yaml`, whose `sequence_length.text` is the `output_length` of
+    `configs/model/text_transformer_single_latent.yaml` and whose `32` is its `vocab_size`. Each
+    text has between three and eight real tokens (ids `1` to `31`) and the padding token (id `0`)
+    after them. Like the other builders of this module, it never touches disk.
+
+    Args:
+        config: The data config; `seed` and `sequence_length["text"]` are read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+    length = (config.sequence_length or {}).get("text", TEXT_LENGTH)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        batches = []
+        for _ in range(num_batches):
+            ids = torch.randint(1, TEXT_VOCAB, (BATCH_SIZE, length))
+            real = torch.randint(min(3, length), length + 1, (BATCH_SIZE, 1))
+            ids = torch.where(torch.arange(length) < real, ids, torch.zeros_like(ids))
+            batches.append({"text": functional.one_hot(ids, TEXT_VOCAB).float()})
+        return batches
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))

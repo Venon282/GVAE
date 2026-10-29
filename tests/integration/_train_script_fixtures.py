@@ -20,6 +20,8 @@ TABULAR_FEATURES = 16
 AUDIO_SAMPLES = 2048
 TEXT_LENGTH = 8
 TEXT_VOCAB = 32
+SERIES_LENGTH = 96
+SERIES_CHANNELS = 3
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
@@ -164,5 +166,35 @@ def buildDummyTextDataloaders(config: DataConfig) -> DataloaderBundle:
             ids = torch.where(torch.arange(length) < real, ids, torch.zeros_like(ids))
             batches.append({"text": functional.one_hot(ids, TEXT_VOCAB).float()})
         return batches
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummyTimeSeriesDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the time series model.
+
+    It serves `experiment/time_series_vae.yaml`.
+
+    The batches carry one key, `time_series`, of shape `(batch, 3, 96)`: the data contract of
+    `configs/data/time_series.yaml`, whose `sequence_length.time_series` is the `output_length` of
+    `configs/model/time_series_single_latent.yaml` and whose `3` is its `in_channels`. The series
+    are complete (no `NaN`), because the loss of the experiment is a plain mean squared error, which
+    a gap would turn into `NaN` (ADR 0042). Like the other builders of this module, it never touches
+    disk.
+
+    Args:
+        config: The data config; `seed` and `sequence_length["time_series"]` are read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+    length = (config.sequence_length or {}).get("time_series", SERIES_LENGTH)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        return [
+            {"time_series": torch.randn(BATCH_SIZE, SERIES_CHANNELS, length)}
+            for _ in range(num_batches)
+        ]
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))

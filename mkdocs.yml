@@ -39,6 +39,7 @@ nav:
       - Train on a table (tabular modality): how-to/train-on-a-table.md
       - Train on audio (waveform modality): how-to/train-on-audio.md
       - Train on text (token modality): how-to/train-on-text.md
+      - Train on time series (series with gaps): how-to/train-on-time-series.md
       - Choose beta and the loss scale: how-to/choose-beta.md
       - Evaluate and visualize a checkpoint: how-to/evaluate.md
   - Architecture Decisions: adr/  # literate-nav: expands adr/SUMMARY.md, one sidebar entry per ADR

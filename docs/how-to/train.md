@@ -68,9 +68,16 @@ the length, the channels and the stack.
 
 `experiment/text_vae` (ADR 0041) is the single-modality VAE of a text: it reads `configs/data/text.yaml`, so
 the batches carry a `text` tensor, one-hot, of shape `(batch, 8, 32)`: a length of 8 tokens over a vocabulary of
-32. It sets the `bce` loss with the `sum` reduction and weight 1.0, since the decoder returns probabilities. The
+32. It sets the `bce` loss with the `sum` reduction and weight 2.0, since the decoder returns probabilities. The
 length is written in the data file and in the decoder's `output_length`, and the vocabulary size in the encoder
 and the decoder. [Train on text](train-on-text.md) has a loader and says how to change them.
+
+`experiment/time_series_vae` (ADR 0042) is the single-modality VAE of a window of several channels: it reads
+`configs/data/time_series.yaml`, so the batches carry a `time_series` tensor of shape `(batch, 3, 96)`, where a `NaN` is a
+value that was not observed. It sets the `mse` loss with the `sum` reduction and weight 50, which is for complete series:
+the `mse` of a YAML file is `NaN` on a gap, so series with gaps train through Python with the masked loss. The length is
+written in the data file and in the decoder's `output_length`, and the channels in the encoder and the decoder.
+[Train on time series](train-on-time-series.md) has a loader and the Python route.
 
 ## Train on paired signal and image data
 

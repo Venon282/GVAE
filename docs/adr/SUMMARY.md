@@ -40,3 +40,4 @@
 - [0039: The tabular modality](0039-tabular-modality.md)
 - [0040: The audio modality](0040-audio-modality.md)
 - [0041: The text modality](0041-text-modality.md)
+- [0042: The time series modality](0042-time-series-modality.md)

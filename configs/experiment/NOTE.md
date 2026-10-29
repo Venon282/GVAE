@@ -60,11 +60,23 @@ data file and the `output_length` of the decoder, which have to agree.
 `text_vae.yaml` (roadmap P3-8, ADR 0041) is the single-modality VAE of a text, `text -> z -> text`, composing
 `configs/model/text_transformer_single_latent.yaml`, the data contract `configs/data/text.yaml` and
 `configs/training/default.yaml`. It trains through `scripts/train.py` (`tests/integration/test_text_model_configs.py`)
-and sets `training.reconstruction_loss: bce` with `reconstruction_reduction: sum` and `reconstruction_weight: 1.0`,
+and sets `training.reconstruction_loss: bce` with `reconstruction_reduction: sum` and `reconstruction_weight: 2.0`,
 not the `mse` of the others: the decoder returns probabilities over the vocabulary, and the numbers in the comment of
 the file say why `bce` and not `mse`. The length is the `data.sequence_length.text` of the data file and the
 `output_length` of the decoder, and the vocabulary size is the `vocab_size` of the encoder and of the decoder, which
 all have to agree with the loader.
+
+`time_series_vae.yaml` (roadmap P3-7 and P3-8, ADR 0042) is the single-modality VAE of a window of one or several channels,
+`time_series -> z -> time_series`, composing `configs/model/time_series_single_latent.yaml`, the data contract
+`configs/data/time_series.yaml` and `configs/training/default.yaml`. It trains through `scripts/train.py`
+(`tests/integration/test_time_series_model_configs.py`) and sets `training.reconstruction_loss: mse` with
+`reconstruction_reduction: sum` and `reconstruction_weight: 50.0`, for complete series: the `mse` of a YAML file is `NaN` as
+soon as one value of a batch is a `NaN`, so series with gaps or padding train through Python with
+`computeMaskedSquaredError` (`docs/how-to/train-on-time-series.md`). The weight is the lever (a weight `w` is a `beta` of
+`1 / w`) and scales as `0.5 / sigma^2` for a noise `sigma` after standardization, with the numbers in the comment of the
+file. The length is the `data.sequence_length.time_series` of the data file and the `output_length` of the decoder (whose
+`seed_length`, `kernel_sizes` and `paddings` have to land on it exactly), and the number of channels is the encoder's
+`in_channels` and the decoder's `out_channels`, which all have to agree with the loader.
 
 # Still open
 

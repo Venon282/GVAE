@@ -1,0 +1,57 @@
+# Single-modality time series VAE (spec §6, roadmap P3-7 and P3-8): `time_series -> z -> time_series`,
+# no fusion strategy since exactly one encoder feeds the single latent space (spec §4). Validated
+# against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+#
+# A batch key `time_series` holds a float tensor `(batch, channels, length)`, or `(batch, length)`
+# for one channel. A `NaN` is a value that was not observed: a gap in the middle of a recording, or
+# the padding of a short series at its end. The encoder reads the mask from the NaN, so a series
+# padded with NaN to a longer length keeps the same latent vector, and the loss of the Python route
+# (`computeMaskedSquaredError`, docs/how-to/train-on-time-series.md) counts the observed values only.
+# Cutting windows out of a recording, filling the batch up to one length with NaN and putting the
+# observations on a regular time grid are the caller's `loader_factory` (spec §6.2).
+#
+# The encoder is a small transformer over patches of 8 steps, with the patches that hold no value
+# skipped. The decoder is the existing 1D CNN decoder, which measured clearly better here than the
+# 1D transformer decoder (ADR 0042), so there is no time series decoder class. It reconstructs
+# every channel at the full length, whatever was observed.
+name: global_vae_time_series_single_latent
+latent_mode: single
+
+modalities:
+  time_series:
+    encoder:
+      name: time_series_encoder_v1
+      kwargs:
+        # in_channels is data-dependent, so it is never filled in for you. It must equal the decoder's
+        # out_channels and the second axis of the batch tensor.
+        in_channels: 3
+        patch_size: 8 # time steps per token; a longer series wants a larger one (attention is quadratic)
+        d_model: 64
+        num_heads: 4
+        num_layers: 3
+        pooling: mean # mean | cls
+        # positional_encoding: sinusoidal (any length) | learned (needs max_length)
+        #
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: 1d_cnn_decoder_v1
+      kwargs:
+        # output_length must match configs/data/time_series.yaml's sequence_length.time_series. It is
+        # data-dependent, so it is never filled in for you. This class checks the exact length and
+        # never resizes: seed_length 12 with the three default upsampling stages (each doubles, and a
+        # kernel of 5 with padding 2 keeps the length) gives 12 -> 24 -> 48 -> 96. Use
+        # OneDCnnDecoder.computeOutputLength(...) to find a configuration for another length.
+        output_length: 96
+        out_channels: 3
+        seed_length: 12
+        kernel_sizes: 5
+        paddings: 2
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

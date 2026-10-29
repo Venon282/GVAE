@@ -61,6 +61,20 @@ name exactly (a cross-entropy is not in the loss table), and of how far a regist
 function get without touching the core. [Train on text](train-on-text.md) shows the `loader_factory` that
 tokenizes, builds the vocabulary, pads and one-hot encodes.
 
+## A worked example where the decoder already exists: time series
+
+A multichannel series of any length is already covered by the registered 1D classes, so the useful question for the
+time series modality ([ADR 0042](../adr/0042-time-series-modality.md)) was what they leave out: values that were not
+observed. The answer is one encoder, `encoders/time_series_encoder.py`, and one utility module, `utils/series_blocks.py`,
+with the decoder left as `1d_cnn_decoder_v1`: the checklist asks for a decoder, and it was met by an existing one because it
+measured clearly better than the alternative. Where a mask travels is the part to copy. The loss sees only a
+reconstruction and the batch tensor, so a `NaN` in that tensor is the mask for the encoder and, through
+`computeMaskedSquaredError`, for the loss, with no second tensor and no change to the core. It is also the example of a
+modality whose YAML experiment is only half of the story (the `mse` of a YAML file is `NaN` on a gap, so series with gaps train
+through a Python `Trainer`), and of a measurement that went against the first guess: the new encoder matched a zero-filled
+one on what was observed and led only on the padded tail. [Train on time series](train-on-time-series.md) shows the
+`loader_factory` that cuts windows and standardizes per channel, and the Python route.
+
 ## One encoder or decoder for several modalities
 
 The steps above give each modality its own encoder and decoder (`EN-*` and `*-DN` in spec §2.1).

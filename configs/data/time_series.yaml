@@ -1,0 +1,39 @@
+# Data contract for the time series VAE (spec §6, roadmap P3-7 and P3-8). Framework-agnostic on
+# purpose: no dataset code is written for one specific recording anywhere in this framework
+# (data/NOTE.md); `loader_factory` must point at your own "module.path:function_name" returning a
+# global_vae.config.data.DataloaderBundle whose batches carry one key, `time_series`, of shape
+# `(batch, channels, length)`, float, with `length` equal to `sequence_length.time_series` below and
+# `channels` equal to the `in_channels` of configs/model/time_series_single_latent.yaml. A value
+# that was not observed is `NaN`: a gap, or the padding of a series shorter than `length`.
+# `train_path`/`loader_factory` are left as required (`???`, Hydra's MISSING marker): fill them in,
+# or override them on the command line (e.g. `data.train_path=... data.loader_factory=
+# my_project.data:buildTimeSeriesDataloaders`).
+loader_factory: ??? # e.g. "my_project.data:buildTimeSeriesDataloaders"
+train_path: ???      # e.g. "data/raw/sensors_train.csv"
+val_path: null
+test_path: null
+
+batch_size: 64
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing (spec §6.2), per modality (ADR 0015). Empty on purpose. The
+# standardization a series needs is a per-channel one, and a YAML file can only write a single
+# number for `standardize`; build `StandardizeTransform(mean=..., std=...)` from tensors of shape
+# `(channels, 1)` in your loader instead (docs/how-to/train-on-time-series.md). It leaves a `NaN`
+# a `NaN`, so a gap survives it. What the loss of the experiment assumes is data of a scale of
+# about one: its weight is chosen for that (configs/experiment/time_series_vae.yaml).
+transforms:
+  time_series: []
+
+# Number of time steps of a series after the loader's cutting and padding. It must match
+# configs/model/time_series_single_latent.yaml's decoder.kwargs.output_length, which is never
+# filled in for you. The number of channels is not part of this contract (there is no field for it
+# in `DataConfig`): it is the second axis of the batch tensor, the encoder's `in_channels` and the
+# decoder's `out_channels`.
+sequence_length:
+  time_series: 96
+
+seed: 0

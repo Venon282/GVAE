@@ -1,0 +1,37 @@
+# @package _global_
+# Full experiment for a single-modality time series VAE (spec §6, roadmap P3-7 and P3-8): assembles
+# model + data + training into one composed, validated global_vae.config.experiment.ExperimentConfig.
+# The time series counterpart of signal_vae.yaml, image_vae.yaml, tabular_vae.yaml, audio_vae.yaml
+# and text_vae.yaml. Run with:
+#   python scripts/train.py --config-name experiment/time_series_vae \
+#       data.train_path=/path/to/series data.loader_factory=my_project.data:buildTimeSeriesDataloaders
+# The batches carry one key, `time_series`, both the encoder input and its decoder's target. For
+# another length or number of channels, set it in every place it is written: the data file's
+# `sequence_length.time_series`, the decoder's `output_length` (and `seed_length`, `kernel_sizes` and
+# `paddings`, which have to land on it exactly) and `out_channels`, and the encoder's `in_channels`.
+defaults:
+  - /model: time_series_single_latent
+  - /data: time_series
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/time_series_vae
+
+# Loss (docs/adr/0029-loss-scale-convention.md, docs/adr/0042-time-series-modality.md, docs/how-to/choose-beta.md).
+# A mean squared error summed over the values of a series, like the KL term, is the reconstruction
+# term of a Gaussian decoder, and its weight w is a beta of 1 / w on the KL (roadmap decision D-6):
+# 0.5 is a Gaussian of variance one, so it is only right for data whose noise is of that size. On
+# synthetic series of unit scale with a noise of 0.05 (3,000 series of 3 channels and 96 steps, 60
+# epochs), the share of the variance recovered was 0.50 at weight 0.5, 0.79 at 5, 0.80 at 50 and 0.80
+# at 500, and the weight is the lever: 50 is a middle setting measured on synthetic data, not a tuned
+# one, and the right one scales as 0.5 / sigma^2 for a noise of sigma after standardization.
+#
+# This file is for complete series. The `mse` of a YAML file returns `NaN` as soon as one value of
+# the batch is a `NaN`, so a loader that leaves gaps or pads short series with `NaN` trains through
+# Python with `computeMaskedSquaredError` instead (docs/how-to/train-on-time-series.md).
+training:
+  reconstruction_loss: mse
+  reconstruction_reduction: sum
+  reconstruction_weight: 50.0

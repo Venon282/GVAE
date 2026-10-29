@@ -59,6 +59,17 @@ not a quantity). Tokenizing, the vocabulary, cutting or padding to a length and 
 loader's (`docs/how-to/train-on-text.md`). The vocabulary size is not a field of `DataConfig`: it is the last axis
 of the tensor and the `vocab_size` of the encoder and the decoder.
 
+`configs/data/time_series.yaml` is the contract of the time series model (`configs/experiment/time_series_vae.yaml`,
+roadmap P3-7 and P3-8): a `loader_factory` of your own whose batches carry one key, `time_series`, a float tensor
+`(batch, channels, length)` (or `(batch, length)` for one channel), with `length` equal to `sequence_length.time_series`.
+A `NaN` is a value that was not observed: a gap, or the padding of a series shorter than `length`. The encoder reads the
+mask from it, and the masked loss of the Python route counts the observed values only. Its `transforms` entry for
+`time_series` is empty, because the standardization is per channel and a YAML file can write only one number for
+`standardize`: the loader builds a `StandardizeTransform` from tensors of shape `(channels, 1)`, which leaves a `NaN` a
+`NaN` (`docs/how-to/train-on-time-series.md`). Cutting windows, padding them to one length and putting the observations on a
+regular grid are the loader's too. The number of channels is not a field of `DataConfig`: it is the second axis of the
+tensor, the encoder's `in_channels` and the decoder's `out_channels`.
+
 # Still deferred / permanent scope boundary
 
 No dataset/pairing/splitting *code* exists in this framework, and none is planned:

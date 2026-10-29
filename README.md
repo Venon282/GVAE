@@ -254,7 +254,11 @@ fixes the sample rate and the clip length (`docs/how-to/train-on-audio.md`). A s
 since it is an image to the 2D ones. Text follows (`text_transformer_encoder_v1` and `text_transformer_decoder_v1`,
 `docs/adr/0041-text-modality.md`, `configs/experiment/text_vae.yaml`): token ids as a one-hot tensor
 `(batch, length, vocab_size)`, which the loss needs to be the shape of the reconstruction, from a loader that
-tokenizes and fixes the vocabulary and the length (`docs/how-to/train-on-text.md`).
+tokenizes and fixes the vocabulary and the length (`docs/how-to/train-on-text.md`). Time series comes next
+(`time_series_encoder_v1`, with the existing 1D CNN decoder, `docs/adr/0042-time-series-modality.md`,
+`configs/experiment/time_series_vae.yaml`): a window of one or several channels where a `NaN` is a value that was not
+observed, a gap or the padding of a short series, from a loader that cuts windows and standardizes per channel
+(`docs/how-to/train-on-time-series.md`).
 
 Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
 `docs/adr/0001-phase1-default-configuration.md`.

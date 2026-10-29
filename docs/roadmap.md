@@ -727,14 +727,22 @@ written next to `results.json`. Tests: `tests/unit/test_streaming_metrics.py`,
 `output_length`. Confirm that variable length is a real requirement before designing padding, masks
 and a mask-aware loss.
 
+**P3-7 status.** The model side now exists without a core change ([ADR 0042](adr/0042-time-series-modality.md)): a `NaN` in
+the batch tensor is a value that was not observed, `time_series_encoder_v1` reads it with a mask and gives the same latent
+vector for a series padded with `NaN`, and `computeMaskedSquaredError` is a loss that counts the observed values, passed to
+a `Trainer` from Python. The requirement itself is still unconfirmed by a named dataset, and what only a core change could
+give stays open: a masked loss that a YAML file can name (`config/training.py`), and metrics over the observed values in
+`evaluate`.
+
 **P3-8. Further modalities.** Audio, tabular, text, time series, graphs, point clouds, each through
 the checklist and only once a dataset is named. Tabular data is the cheapest way to prove the
 genericity claim a second time.
 
 **P3-8 status.** Tabular ([ADR 0039](adr/0039-tabular-modality.md)), audio
-([ADR 0040](adr/0040-audio-modality.md), below the tabular findings) and text
-([ADR 0041](adr/0041-text-modality.md), below the audio findings) are done, each with no core change; the
-other modalities (time series, graphs, point clouds) are open and wait for a named dataset. No table was named, so the proof is on a
+([ADR 0040](adr/0040-audio-modality.md), below the tabular findings), text
+([ADR 0041](adr/0041-text-modality.md), below the audio findings) and time series
+([ADR 0042](adr/0042-time-series-modality.md), below the text findings) are done, each with no core change; the
+other modalities (graphs, point clouds) are open and wait for a named dataset. No table was named, so the proof is on a
 synthetic one. The checklist of spec §10 in full: `TabularMlpEncoder` and `TabularMlpDecoder`
 (`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, registered by the imports of
 `encoders/__init__.py` and `decoders/__init__.py`, with `utils/mlp_blocks.py` for the shared stack),
@@ -832,6 +840,42 @@ modalities checks that no core package names the new classes or the `text` key. 
   the `vocab_size` of the encoder and the decoder.
 - Not done: a tokenizer or a vocabulary builder (`docs/how-to/train-on-text.md` has a `loader_factory` sketch), pretrained
   embeddings, and the spec §6 and §8 text, which is unchanged.
+
+**P3-8 time series.** Done, with no core change ([ADR 0042](adr/0042-time-series-modality.md)); no recording was named, so
+the proof is on synthetic series. `TimeSeriesEncoder` (`time_series_encoder_v1`, registered by the import of
+`encoders/__init__.py`, with `utils/series_blocks.py`) and the existing `1d_cnn_decoder_v1`,
+`configs/model/time_series_single_latent.yaml`, `configs/data/time_series.yaml` and `configs/experiment/time_series_vae.yaml`,
+and `tests/unit/test_time_series_backbone.py` and `tests/integration/test_time_series_model_configs.py` (with a
+`scripts/train.py` run). The same kind of test as for the other modalities checks that no core package names the new class
+or the `time_series` key. **Findings:**
+
+- **A `NaN` is a value that was not observed.** The loss compares a reconstruction with the batch tensor and nothing else, so
+  the mask has to travel in that tensor. The encoder reads values and the observed mask together and skips empty patches, so a
+  series padded with `NaN` has the same latent vector; the decoder still reconstructs every step, so a gap is filled in.
+- **No new decoder, by measurement.** On synthetic series (3 channels of 96 steps, 17% of the values unobserved, 60 epochs,
+  weight 50) `1d_cnn_decoder_v1` recovered 0.80 of the variance of the complete series on the observed values and 0.71 on the
+  gaps, and `1d_transformer_decoder_v1` 0.53 and 0.42 (0.59 and 0.48 at twice the width and a layer more, three times slower).
+  Why was not isolated. The CNN decoder checks the exact length, so its seed, kernel and padding have to land on it.
+- **The new encoder is not better than a zero-filled one on what was seen.** With the CNN decoder and three seeds,
+  `time_series_encoder_v1` gave 0.82 on observed values and 0.74 on gaps, a zero-filled `1d_cnn_encoder_v1` 0.81 and 0.74, inside
+  the spread between seeds. It was ahead by about 0.20 on the steps after a short recording ends (0.54 against 0.34), and
+  the padding invariance is what the tests pin. With the weaker transformer decoder it had led on every slice, so that lead came
+  from the decoder.
+- **No mask in the loss table (flagged, not fixed: a change to `config/training.py`).** The `mse` of a YAML file is `NaN` on a
+  gap, so `experiment/time_series_vae` (`mse`, `sum`, weight 50) is for complete series, and series with gaps train through
+  `Trainer(reconstruction_loss_fn=computeMaskedSquaredError)` in Python.
+- **The evaluation metrics know no mask (flagged, not fixed: a change to `evaluation/`).** `mse`, `rmse`, `mae`, `r2` and
+  `pearson_r` of the modality are `NaN` on series with gaps; the total loss with a masked loss and the figures work.
+- **The weight is the lever, and D-6 again.** The share recovered was 0.50 at weight 0.5, 0.79 at 5, 0.80 at 50 and 0.80 at
+  500 (with the transformer decoder 0.35, 0.45 and 0.53 at 0.5, 5 and 50). A weight `w` is a `beta` of `1 / w`, and the right
+  one scales as `0.5 / sigma^2` for a noise `sigma` after standardization: a middle setting on synthetic data, not a tuned value.
+- **One latent per window (flagged, not fixed: a core change).** The latent holds what the window contains and not when. A
+  sequence of latents is the single-tensor decoder item of P4-0.
+- **No per-window normalization, and per-channel statistics need code (flagged, not fixed: a `data/transforms` change).** A
+  window's scale and offset spend latent capacity, and `standardize` takes a float or a tensor but a YAML list fails (as for
+  tabular), so the loader builds the per-channel transform.
+- Not done: a reference `loader_factory` for a real recording (`docs/how-to/train-on-time-series.md` has a sketch), irregular
+  sampling (the grid is regular), forecasting, and the spec §6 and §8 text, which is unchanged.
 
 ### Phase 4: long-term research (spec §7)
 

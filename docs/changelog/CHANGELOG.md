@@ -611,6 +611,50 @@ versioning follows [Semantic Versioning](https://semver.org/).
   `DataConfig` has no field for the vocabulary size. Each is flagged in ADR 0041. The 1D transformer classes reached
   62 to 65% of the tokens on the same language where the new pair reached 87 to 99%; the padding mask explains about
   three points of that gap, and the cause of the rest was not isolated.
+- Time series modality (roadmap P3-7 and P3-8, spec §6 and §10, ADR 0042), added through the registries only, with no
+  change to `models/`, `latent/`, `losses/`, `training/`, `evaluation/`, `config/` or `data/`, and no new decoder.
+  A `NaN` in the batch tensor is a value that was not observed (a gap, a dropped value, or the padding of a short
+  series), because the batch tensor is the one thing both the encoder and the loss read. `TimeSeriesEncoder`
+  (`time_series_encoder_v1`) cuts a series `(batch, channels, length)`, or `(batch, length)`, into patches, stacks the
+  values and the observed mask as channels so that a gap is not mistaken for a zero, skips the patches that hold no
+  observed value as attention keys and in the mean, and pools with a masked mean or a `[CLS]` token; a series padded
+  with `NaN` to a longer length gives the same `(mu, logvar)`, and a series observed nowhere stays finite
+  (`minimal_input_length` is `1`). The decoder is the existing `1d_cnn_decoder_v1`, which recovered 0.80 of the
+  variance against 0.53 for the 1D transformer decoder on the same synthetic series.
+- `utils/series_blocks.py` (`splitObservations`, `computeEmptyPatchMask`, `ObservedPatchEmbed`, and
+  `computeMaskedSquaredError`, a squared error over the observed values for `Trainer(reconstruction_loss_fn=...)`, equal
+  to the `sum` reduction of `mse` on a series with no gap, built on the unchanged `PatchEmbed1d`, `SeriesPositions`,
+  `buildTransformerStack` and `buildPoolingHead`).
+- `configs/model/time_series_single_latent.yaml` (3 channels of 96 steps, patches of 8, three layers, a latent of 16, the
+  CNN decoder, no fusion), `configs/data/time_series.yaml` (the contract of the `time_series` batch key, an empty
+  transform list because the standardization is per channel, and `sequence_length.time_series`) and
+  `configs/experiment/time_series_vae.yaml`, which sets `mse` with the `sum` reduction and weight 50 for complete series:
+  on synthetic series the share of the variance recovered was 0.50 at weight 0.5 and about 0.80 from 5 to 500 (numbers
+  in the file and in the ADR, not a tuned value). Series with gaps train through Python with the masked loss.
+- Tests: `tests/unit/test_time_series_backbone.py` (registration, the observation split, the empty-patch mask, the
+  embedding, the masked loss and its gradient, padding invariance for both poolings, a series observed nowhere, a zero
+  that is not a gap, gradient flow, validation) and `tests/integration/test_time_series_model_configs.py` (a test that
+  no core package names the new class or the `time_series` key, the model and the experiment built from YAML, a series
+  padded with `NaN` through the whole model, the YAML `mse` being `NaN` on a gap, the masked loss equal to the `sum`
+  reduction on complete series, two runs that learn series with and without gaps against the best constant answer, the
+  figures on gaps, the `NaN` metrics of `evaluate`, the per-channel standardization, and a `scripts/train.py` run).
+  `_train_script_fixtures.py` gains `buildDummyTimeSeriesDataloaders`, and `tests/integration/_time_series_corpus.py` is
+  the synthetic series.
+- Docs: `docs/adr/0042-time-series-modality.md`, `docs/how-to/train-on-time-series.md` (with a `loader_factory` that cuts
+  windows and standardizes per channel, the Python route with the masked loss, and a way to score hidden values), a
+  section in `docs/how-to/add-a-modality.md`, `docs/how-to/train.md`, the README, the roadmap status of P3-7 and P3-8 and
+  the status notes of `configs/experiment/` and `configs/data/`.
+- **Findings, not fixed.** The loss table has no mask, so the `mse` of a YAML file is `NaN` on a gap and
+  `scripts/train.py` trains complete series only. The per-modality metrics of `evaluate` are `NaN` on series with gaps.
+  The latent is one vector per window, there is no per-window normalization, and `standardize` cannot take per-channel
+  statistics from YAML. Each is flagged in ADR 0042. The new encoder matched a zero-filled `1d_cnn_encoder_v1` on
+  observed values and on gaps (0.82 and 0.74 against 0.81 and 0.74, three seeds) and was ahead by about 0.20 on the
+  steps after a short recording ends, which is the property the tests pin.
+
+### Fixed
+
+- `docs/how-to/train.md` and `configs/experiment/NOTE.md` said that `experiment/text_vae` sets weight 1.0; it sets 2.0, as
+  the file and ADR 0041 say.
 
 ### Changed
 

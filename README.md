@@ -258,7 +258,10 @@ tokenizes and fixes the vocabulary and the length (`docs/how-to/train-on-text.md
 (`time_series_encoder_v1`, with the existing 1D CNN decoder, `docs/adr/0042-time-series-modality.md`,
 `configs/experiment/time_series_vae.yaml`): a window of one or several channels where a `NaN` is a value that was not
 observed, a gap or the padding of a short series, from a loader that cuts windows and standardizes per channel
-(`docs/how-to/train-on-time-series.md`).
+(`docs/how-to/train-on-time-series.md`). Graphs follow (the existing `2d_cnn_encoder_v1` with `graph_cnn_decoder_v1`,
+`docs/adr/0043-graph-modality.md`, `configs/experiment/graph_vae.yaml`): a dense adjacency matrix `(batch, N, N)` padded
+with isolated nodes, from a loader that puts the nodes in a meaningful order, since the model compares matrices position
+by position (`docs/how-to/train-on-graphs.md`).
 
 Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
 `docs/adr/0001-phase1-default-configuration.md`.

@@ -650,9 +650,49 @@ versioning follows [Semantic Versioning](https://semver.org/).
   statistics from YAML. Each is flagged in ADR 0042. The new encoder matched a zero-filled `1d_cnn_encoder_v1` on
   observed values and on gaps (0.82 and 0.74 against 0.81 and 0.74, three seeds) and was ahead by about 0.20 on the
   steps after a short recording ends, which is the property the tests pin.
+- Graph modality (roadmap P3-8, spec §6 and §10, ADR 0043), added through the registries only, with no change to
+  `models/`, `latent/`, `losses/`, `training/`, `evaluation/`, `config/` or `data/`, and no new encoder. A graph is a dense
+  adjacency matrix `(batch, N, N)` (or `(batch, C, N, N)` for `C` kinds of edge), padded with isolated nodes (zeros, not
+  `NaN`, which the registered 2D CNN encoder turns into a `NaN` latent vector). The encoder is the existing
+  `2d_cnn_encoder_v1`. `GraphCnnDecoder` (`graph_cnn_decoder_v1`) is a thin subclass of `TwoDCnnDecoder` that averages the
+  output with its transpose (`symmetric`), applies a sigmoid, and zeroes the diagonal (`zero_diagonal`), so it returns the
+  probability of each edge and the `bce` of a YAML file can be used; its reason to exist is the loss, since the raw 2D
+  decoder refuses `bce`, and its reconstruction is that of its parent within the noise of the measurements.
+- `utils/graph_metrics.py` (`computeAuc`, a tie-aware area under the ROC curve, and `computeEdgeScores`, the binary
+  cross-entropy, AUC, F1 and density of the edges over the pairs of real nodes only, for undirected or directed graphs and
+  with the number of nodes of each padded graph).
+- `configs/model/graph_cnn_single_latent.yaml` (graphs of 16 nodes, a latent of 16, no fusion), `configs/data/graph.yaml`
+  (the contract of the `graph` batch key, an empty transform list, and `sequence_length.graph`) and
+  `configs/experiment/graph_vae.yaml`, which sets `bce` with the `sum` reduction and weight 4.0: on synthetic graphs the area
+  under the ROC curve of the edges was 0.916 at weight 1 and 0.929 at 4 and at 16, against 0.70 for the best answer that
+  ignores the graph (numbers in the file and in the ADR, not a tuned value).
+- Tests: `tests/unit/test_graph_cnn_decoder.py` (registration, a symmetric output with an exactly zero diagonal in `[0, 1]`,
+  equality with the sigmoid of the symmetrized parent output, directed graphs, self-loops, several kinds of edge, argument
+  validation, gradients from the Bernoulli loss), `tests/unit/test_graph_metrics.py` (the AUC against its definition with
+  ties, the pairs counted, padding excluded, thresholds, error cases) and `tests/integration/test_graph_model_configs.py`
+  (a test that no core package names the new class or the `graph` key, the model and the experiment built from YAML, the
+  shapes a YAML value produces, padding, the `NaN` and node-order behaviour of the encoder pinned, `bce` refusing the raw
+  2D decoder, two runs that learn graphs against the best constant answer and that show shuffled nodes scoring clearly
+  worse, evaluation and figures, and a `scripts/train.py` run). `_train_script_fixtures.py` gains
+  `buildDummyGraphDataloaders`, and `tests/integration/_graph_corpus.py` is the synthetic graphs.
+- Docs: `docs/adr/0043-graph-modality.md`, `docs/how-to/train-on-graphs.md` (with a `loader_factory` that orders and pads the
+  nodes, how to score the edges, and how to sample graphs from the prior), a section in `docs/how-to/add-a-modality.md`,
+  `docs/how-to/train.md`, the README, the roadmap status of P3-8 and the status notes of `configs/experiment/` and
+  `configs/data/`.
+- **Findings, not fixed.** The model compares matrices position by position, so the order of the nodes is part of the data:
+  shuffling the nodes took the area under the curve from 0.936 to 0.836 (0.903 to 0.743 at weight 1), sorting by degree
+  recovered about half, and an order-invariant encoder did not escape it because the loss still has no matching, which is a
+  change to `losses/`. The loss table has no logits form of `bce`, so the raw 2D decoder can use `mse` only. The metrics
+  of `evaluate` are entry-wise over the whole matrix, padding included, not edge scores. The decoder generates no number of
+  nodes, node features are not covered, a dense matrix does not scale to large graphs, and the latent is one vector per
+  graph. Each is flagged in ADR 0043. Every graph-specific encoder and decoder measured (message passing, one token per
+  node, an MLP) was worse than the registered 2D CNN pair, at weight 1 and at weight 4.
 
 ### Fixed
 
+- The eight deprecation shims of the CamelCase module paths (`encoders/OneDCnnEncoder.py` and the seven like it, ADR 0023)
+  were missing from the tree, although this changelog, ADR 0023 and `tests/unit/test_deprecated_module_paths.py` (33 tests)
+  require them. Commit `9304d5f` had deleted them; they are restored byte for byte from its parent.
 - `docs/how-to/train.md` and `configs/experiment/NOTE.md` said that `experiment/text_vae` sets weight 1.0; it sets 2.0, as
   the file and ADR 0041 say.
 

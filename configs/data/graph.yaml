@@ -1,0 +1,38 @@
+# Data contract for the graph VAE (spec §6, roadmap P3-8). Framework-agnostic on purpose: no dataset
+# code is written for one specific collection of graphs anywhere in this framework (data/NOTE.md);
+# `loader_factory` must point at your own "module.path:function_name" returning a
+# global_vae.config.data.DataloaderBundle whose batches carry one key, `graph`, of shape
+# `(batch, N, N)`, float, with `N` equal to `sequence_length.graph` below. Each matrix is the
+# adjacency matrix of a graph, `1` for an edge and `0` for none, padded with isolated nodes (rows and
+# columns of zeros) up to `N`, with the nodes in a meaningful order (docs/how-to/train-on-graphs.md).
+# A `NaN` is not a padding value here: the registered 2D convolutions turn one into `NaN` everywhere.
+# `train_path`/`loader_factory` are left as required (`???`, Hydra's MISSING marker): fill them in,
+# or override them on the command line (e.g. `data.train_path=... data.loader_factory=
+# my_project.data:buildGraphDataloaders`).
+loader_factory: ??? # e.g. "my_project.data:buildGraphDataloaders"
+train_path: ???      # e.g. "data/raw/molecules_train"
+val_path: null
+test_path: null
+
+batch_size: 64
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing (spec §6.2), per modality (ADR 0015). Empty on purpose, and it
+# has to stay empty: every transform of this framework acts on numbers, and an adjacency matrix is
+# not a quantity (a `standardize` would turn the edges into z-scores, a `resample` would break the
+# node order). Everything graphs need is the loader's: reading the files, building the matrices,
+# padding, ordering the nodes and keeping the number of nodes of each graph.
+transforms:
+  graph: []
+
+# Padded number of nodes `N`: the side of the adjacency matrices after the loader's padding. It must
+# match configs/model/graph_cnn_single_latent.yaml's decoder.kwargs.output_shape, which is `[N, N]`
+# and is never filled in for you. A graph with more nodes than `N` has to be cut or left out by the
+# loader.
+sequence_length:
+  graph: 16
+
+seed: 0

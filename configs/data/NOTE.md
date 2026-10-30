@@ -70,6 +70,15 @@ mask from it, and the masked loss of the Python route counts the observed values
 regular grid are the loader's too. The number of channels is not a field of `DataConfig`: it is the second axis of the
 tensor, the encoder's `in_channels` and the decoder's `out_channels`.
 
+`configs/data/graph.yaml` is the contract of the graph model (`configs/experiment/graph_vae.yaml`, roadmap P3-8): a
+`loader_factory` of your own whose batches carry one key, `graph`, a float tensor `(batch, N, N)` (or `(batch, C, N, N)`
+for several kinds of edge): the 0/1 adjacency matrix of each graph, padded with isolated nodes (rows and columns of zeros,
+not `NaN`) up to `N`, which is `sequence_length.graph`. The nodes have to come in a meaningful order, because the model
+reconstructs the matrix position by position: ordering them is the loader's, and a number of nodes per graph can ride
+in another key (`num_nodes`), which the trainer and `evaluate` ignore (ADR 0019). Its `transforms` entry for `graph` is empty, because an adjacency
+matrix is not a quantity to standardize (`docs/how-to/train-on-graphs.md`). The padded size is not a field of `DataConfig`
+beyond `sequence_length`: it is also the decoder's `output_shape`, which has to agree with it.
+
 # Still deferred / permanent scope boundary
 
 No dataset/pairing/splitting *code* exists in this framework, and none is planned:

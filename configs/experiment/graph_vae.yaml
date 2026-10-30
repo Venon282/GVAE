@@ -1,0 +1,37 @@
+# @package _global_
+# Full experiment for a single-modality graph VAE (spec §6, roadmap P3-8): assembles model + data +
+# training into one composed, validated global_vae.config.experiment.ExperimentConfig. The graph
+# counterpart of signal_vae.yaml, image_vae.yaml, tabular_vae.yaml, audio_vae.yaml, text_vae.yaml and
+# time_series_vae.yaml. Run with:
+#   python scripts/train.py --config-name experiment/graph_vae \
+#       data.train_path=/path/to/graphs data.loader_factory=my_project.data:buildGraphDataloaders
+# The batches carry one key, `graph`, both the encoder input and its decoder's target. For another
+# padded size, set it in every place it is written: the data file's `sequence_length.graph`, and the
+# decoder's `output_shape` (and `seed_shape`, `kernel_sizes` and `paddings`, which have to land on
+# it exactly), for example
+#   data.sequence_length.graph=32 model.modalities.graph.decoder.kwargs.output_shape=[32,32] \
+#       model.modalities.graph.decoder.kwargs.seed_shape=[8,8]
+defaults:
+  - /model: graph_cnn_single_latent
+  - /data: graph
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/graph_vae
+
+# Loss (docs/adr/0029-loss-scale-convention.md, docs/adr/0043-graph-modality.md, docs/how-to/choose-beta.md).
+# The decoder returns the probability of each edge, so `bce` against the 0/1 adjacency matrix is the
+# Bernoulli likelihood of the graph, and `sum` makes it a per-graph sum like the KL term. On synthetic
+# graphs of 8 to 16 nodes (4,000 training graphs, 40 epochs, this file as it is), the area under the ROC
+# curve of the edges, from the mean of the posterior, was 0.916 at weight 1.0 (two seeds), 0.929 at
+# weight 4.0 (three seeds) and 0.929 at 16.0 (one seed); the best answer that ignores the graph scores
+# 0.70. The weight is the lever (a weight of w on the reconstruction is a beta
+# of 1 / w on the KL, roadmap decision D-6), so 4.0 is a middle setting measured on synthetic data,
+# not a tuned one. Delete the `training` block to go back to `mean`, which has not been measured for
+# graphs and collapsed every other modality at beta 1.
+training:
+  reconstruction_loss: bce
+  reconstruction_reduction: sum
+  reconstruction_weight: 4.0

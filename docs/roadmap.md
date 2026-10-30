@@ -740,9 +740,10 @@ genericity claim a second time.
 
 **P3-8 status.** Tabular ([ADR 0039](adr/0039-tabular-modality.md)), audio
 ([ADR 0040](adr/0040-audio-modality.md), below the tabular findings), text
-([ADR 0041](adr/0041-text-modality.md), below the audio findings) and time series
-([ADR 0042](adr/0042-time-series-modality.md), below the text findings) are done, each with no core change; the
-other modalities (graphs, point clouds) are open and wait for a named dataset. No table was named, so the proof is on a
+([ADR 0041](adr/0041-text-modality.md), below the audio findings), time series
+([ADR 0042](adr/0042-time-series-modality.md), below the text findings) and graphs
+([ADR 0043](adr/0043-graph-modality.md), below the time series findings) are done, each with no core change; the
+other modality (point clouds) is open and waits for a named dataset. No table was named, so the proof is on a
 synthetic one. The checklist of spec §10 in full: `TabularMlpEncoder` and `TabularMlpDecoder`
 (`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, registered by the imports of
 `encoders/__init__.py` and `decoders/__init__.py`, with `utils/mlp_blocks.py` for the shared stack),
@@ -876,6 +877,40 @@ or the `time_series` key. **Findings:**
   tabular), so the loader builds the per-channel transform.
 - Not done: a reference `loader_factory` for a real recording (`docs/how-to/train-on-time-series.md` has a sketch), irregular
   sampling (the grid is regular), forecasting, and the spec §6 and §8 text, which is unchanged.
+
+**P3-8 graphs.** Done, with no core change and no new encoder ([ADR 0043](adr/0043-graph-modality.md)); no graph collection
+was named, so the proof is on synthetic graphs. A graph is a dense adjacency matrix `(batch, N, N)` padded with isolated nodes,
+which is an image to the 2D classes. The encoder is the existing `2d_cnn_encoder_v1`. `GraphCnnDecoder`
+(`graph_cnn_decoder_v1`, registered by the import of `decoders/__init__.py`) is a thin subclass of `TwoDCnnDecoder`, with
+`utils/graph_metrics.py` for edge scores, `configs/model/graph_cnn_single_latent.yaml`, `configs/data/graph.yaml` and
+`configs/experiment/graph_vae.yaml`, and `tests/unit/test_graph_cnn_decoder.py`, `tests/unit/test_graph_metrics.py` and
+`tests/integration/test_graph_model_configs.py` (with a `scripts/train.py` run). The same kind of test as for the other
+modalities checks that no core package names the new class or the `graph` key. **Findings:**
+
+- **The registered pair is the answer, by measurement.** On synthetic graphs (four families, 8 to 16 nodes padded to 16, 4,000
+  training graphs, 40 epochs, weight 1) the 2D CNN encoder with the 2D CNN decoder reached an AUC of 0.903 on the edges,
+  against 0.880 to 0.893 for a transformer over the nodes or an MLP decoder and 0.838 to 0.841 for an order-invariant
+  message-passing encoder (three seeds for the three designs that were repeated, and the same ranking at weight 4). No graph-specific
+  encoder is added. The decoder class exists for the loss: the raw 2D decoder cannot use the `bce` of a YAML file, and `bce`
+  measured about 0.01 of AUC ahead of its `mse`, on complete and on padded graphs.
+- **Node order dominates (flagged, not fixed: a matching loss is a change to `losses/`).** The model compares matrices position
+  by position, so the same graph in another order is another target. Shuffling the nodes took the AUC from 0.936 to 0.836
+  (0.903 to 0.743 at weight 1), sorting by degree recovered about half (and hurt rings), and an order-invariant encoder did
+  not escape it. The order is the loader's job, and it is at least as large as every choice made inside the model.
+- **Zero padding, not `NaN`.** The registered encoder turns a `NaN` into a `NaN` latent vector, and a loss that reads the
+  padding as a target of `0` lost about 0.005 of AUC against one that skips it.
+- **The loss table has no logits form (flagged, not fixed: a change to `config/training.py`).** `graph_cnn_decoder_v1` stands
+  in for it for this modality.
+- **The evaluation metrics are entry-wise (flagged, not fixed: a change to `evaluation/`).** `mse`, `r2` and `pearson_r` of the
+  modality average over padding and the diagonal; `computeEdgeScores` scores the edges over the real pairs.
+- **The weight is the lever, and D-6 again.** Through the shipped experiment the AUC was 0.916 at weight 1 and 0.929 at 4 and at
+  16, against 0.70 for the best answer that ignores the graph: a middle setting on synthetic data, not a tuned value.
+- **No number of nodes, no node features, no large graphs, one latent per graph (flagged, not fixed).** The decoder writes an
+  `N` by `N` matrix and the size of a generated graph is chosen outside it; attributes of nodes would be a second modality;
+  a dense matrix does not scale past a few hundred nodes; a latent per node is the single-tensor decoder item of P4-0.
+- Not done: a reference `loader_factory` for a real collection (`docs/how-to/train-on-graphs.md` has a sketch with a degree
+  order), node and edge attributes, sparse or sequential graph representations, and the spec §6 and §8 text, which is
+  unchanged. Point clouds, the last modality of P3-8, stay open.
 
 ### Phase 4: long-term research (spec §7)
 

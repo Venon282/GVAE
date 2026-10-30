@@ -79,6 +79,13 @@ the `mse` of a YAML file is `NaN` on a gap, so series with gaps train through Py
 written in the data file and in the decoder's `output_length`, and the channels in the encoder and the decoder.
 [Train on time series](train-on-time-series.md) has a loader and the Python route.
 
+`experiment/graph_vae` (ADR 0043) is the single-modality VAE of a graph: it reads `configs/data/graph.yaml`, so the
+batches carry a `graph` tensor of shape `(batch, 16, 16)`, the 0/1 adjacency matrix of each graph padded with isolated
+nodes up to 16. It sets the `bce` loss with the `sum` reduction and weight 4.0, since the decoder returns the
+probability of each edge. The padded size is written in the data file and in the decoder's `output_shape`, and the nodes
+have to come in a meaningful order, which is the loader's job. [Train on graphs](train-on-graphs.md) has a loader and
+scores the edges.
+
 ## Train on paired signal and image data
 
 Pairing a signal with its image is your `loader_factory`'s job like the rest of the data

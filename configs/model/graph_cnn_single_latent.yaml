@@ -1,0 +1,51 @@
+# Single-modality graph VAE (spec §6, roadmap P3-8): `graph -> z -> graph`, no fusion strategy since
+# exactly one encoder feeds the single latent space (spec §4). Validated against
+# global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+#
+# A batch key `graph` holds a float tensor `(batch, N, N)`: the adjacency matrix of each graph, `1`
+# for an edge and `0` for none, padded with isolated nodes up to the largest graph (a padded node is a
+# row and a column of zeros). A dense adjacency matrix is an image to the 2D convolutions, so the
+# encoder is the registered `2d_cnn_encoder_v1` itself. The decoder is `graph_cnn_decoder_v1`, the
+# 2D CNN decoder with a sigmoid, a symmetric output and a zero diagonal, so that it gives the
+# probability of each edge and the loss `bce` of a YAML file can be used (ADR 0043). Reading files,
+# padding, ordering the nodes and carrying the number of nodes are the caller's `loader_factory`
+# (spec §6.2, docs/how-to/train-on-graphs.md). Nodes have to come in a meaningful order: this model
+# reconstructs the matrix position by position, so the same graph in two orders is two inputs.
+name: global_vae_graph_cnn_single_latent
+latent_mode: single
+
+modalities:
+  graph:
+    encoder:
+      name: 2d_cnn_encoder_v1
+      kwargs:
+        # in_channels is 1 for one kind of edge. For C kinds of edge, give the batch `(batch, C, N, N)`
+        # and set it to C here and out_channels to C in the decoder.
+        in_channels: 1
+        hidden_channels: [16, 32, 64]
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: graph_cnn_decoder_v1
+      kwargs:
+        # output_shape must be (N, N), with N the padded number of nodes of
+        # configs/data/graph.yaml's sequence_length.graph. It is data-dependent, so it is never
+        # filled in for you. This class checks the exact shape and never resizes: a seed of 4 by 4
+        # with the two doubling stages of hidden_channels (a kernel of 3 with padding 1 keeps the
+        # size) gives 4 -> 8 -> 16. Use TwoDCnnDecoder.computeOutputShape(...) to find a
+        # configuration for another N. Padding the graphs up to 16, 32 or 64 costs nothing.
+        output_shape: [16, 16]
+        hidden_channels: [64, 32]
+        seed_shape: [4, 4]
+        kernel_sizes: 3
+        paddings: 1
+        # symmetric: true       # an undirected graph; false keeps a directed one
+        # zero_diagonal: true   # no self-loops; false allows them
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

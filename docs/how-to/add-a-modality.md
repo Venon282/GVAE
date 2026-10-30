@@ -75,6 +75,21 @@ through a Python `Trainer`), and of a measurement that went against the first gu
 one on what was observed and led only on the padded tail. [Train on time series](train-on-time-series.md) shows the
 `loader_factory` that cuts windows and standardizes per channel, and the Python route.
 
+## A worked example where the family already fits: graphs
+
+A graph of at most `N` nodes is a dense adjacency matrix `(batch, N, N)`, which is an image to the 2D convolutions,
+so the first thing to do for the graph modality ([ADR 0043](../adr/0043-graph-modality.md)) was to measure what the
+registered 2D classes already do, and to try graph-specific encoders and decoders against them. None beat the
+registered pair, so the encoder is `2d_cnn_encoder_v1` as it is, and the one class added is
+`decoders/graph_cnn_decoder.py`, a thin subclass of `TwoDCnnDecoder` that symmetrizes, applies a sigmoid and zeroes the
+diagonal. That class is justified by the loss and not by the accuracy: the raw decoder cannot use the `bce` of a YAML
+file, which measured better than its `mse`. It is the example to copy when an existing family nearly fits: measure the
+existing classes first, add only what the measurements ask for, and say plainly where the result departs from the
+checklist (here, no new encoder). It is also the example of a property no class can supply: the model compares matrices
+position by position, so the order of the nodes matters as much as the whole choice of architecture, and that order is
+the loader's job. [Train on graphs](train-on-graphs.md) shows the `loader_factory` that orders and pads the nodes, and
+how to score the edges.
+
 ## One encoder or decoder for several modalities
 
 The steps above give each modality its own encoder and decoder (`EN-*` and `*-DN` in spec §2.1).

@@ -78,6 +78,17 @@ file. The length is the `data.sequence_length.time_series` of the data file and 
 `seed_length`, `kernel_sizes` and `paddings` have to land on it exactly), and the number of channels is the encoder's
 `in_channels` and the decoder's `out_channels`, which all have to agree with the loader.
 
+`graph_vae.yaml` (roadmap P3-8, ADR 0043) is the single-modality VAE of a graph as a dense adjacency matrix,
+`graph -> z -> graph`, composing `configs/model/graph_cnn_single_latent.yaml`, the data contract `configs/data/graph.yaml`
+and `configs/training/default.yaml`. It trains through `scripts/train.py` (`tests/integration/test_graph_model_configs.py`)
+and sets `training.reconstruction_loss: bce` with `reconstruction_reduction: sum` and `reconstruction_weight: 4.0`: the
+decoder (`graph_cnn_decoder_v1`) returns the probability of each edge, so `bce` is the Bernoulli likelihood of the graph,
+and the weight is the lever (a weight `w` is a `beta` of `1 / w`), with the numbers in the comment of the file. The padded
+number of nodes is the `data.sequence_length.graph` of the data file and the `output_shape` of the decoder (whose
+`seed_shape`, `kernel_sizes` and `paddings` have to land on it exactly), which have to agree with the loader. The nodes
+have to come in a meaningful order: the model compares matrices position by position, and ordering them is the loader's
+(`docs/how-to/train-on-graphs.md`).
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a

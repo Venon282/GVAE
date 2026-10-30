@@ -22,6 +22,7 @@ TEXT_LENGTH = 8
 TEXT_VOCAB = 32
 SERIES_LENGTH = 96
 SERIES_CHANNELS = 3
+GRAPH_NODES = 16
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
@@ -196,5 +197,37 @@ def buildDummyTimeSeriesDataloaders(config: DataConfig) -> DataloaderBundle:
             {"time_series": torch.randn(BATCH_SIZE, SERIES_CHANNELS, length)}
             for _ in range(num_batches)
         ]
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummyGraphDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the graph model (`experiment/graph_vae.yaml`).
+
+    The batches carry one key, `graph`, of shape `(batch, 16, 16)`: the data contract of
+    `configs/data/graph.yaml`, whose `sequence_length.graph` is the side of the `output_shape` of
+    `configs/model/graph_cnn_single_latent.yaml`. Each matrix is a random undirected graph with a
+    zero diagonal, of 8 to 16 nodes, padded with isolated nodes. Like the other builders of this
+    module, it never touches disk.
+
+    Args:
+        config: The data config; `seed` and `sequence_length["graph"]` are read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+    size = (config.sequence_length or {}).get("graph", GRAPH_NODES)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        batches = []
+        for _ in range(num_batches):
+            upper = torch.triu((torch.rand(BATCH_SIZE, size, size) < 0.3).float(), diagonal=1)
+            nodes = torch.randint(min(8, size), size + 1, (BATCH_SIZE, 1))
+            exists = torch.arange(size)[None, :] < nodes
+            adjacency = upper + upper.transpose(1, 2)
+            adjacency = adjacency * (exists[:, :, None] & exists[:, None, :]).float()
+            batches.append({"graph": adjacency})
+        return batches
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))

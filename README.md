@@ -2,20 +2,38 @@
 
 [![CI](https://github.com/Venon282/GVAE/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/Venon282/GVAE/actions/workflows/ci.yaml)
 
-## Documentation
-https://venon282.github.io/GVAE/
+A modular multimodal Variational Autoencoder framework. It is not a model for two fixed kinds of
+data: it is an architecture where **adding a modality never requires touching the core**. You write
+an encoder and a decoder, register them by name, point a YAML file at them, and train.
 
-## Setup
+- **Documentation:** <https://venon282.github.io/GVAE/>
+- **Specification:** [`docs/global-vae-project-specification.md`](docs/global-vae-project-specification.md)
+- **Roadmap:** [`docs/roadmap.md`](docs/roadmap.md)
+
+## Contents
+
+- [Quick start](#quick-start)
+- [Supported modalities](#supported-modalities)
+- [Model topologies](#model-topologies)
+- [Training and evaluation features](#training-and-evaluation-features)
+- [Extending the framework](#extending-the-framework)
+- [Development](#development)
+- [Releasing](#releasing)
+- [Conventions](#conventions)
+
+## Quick start
+
+### 1. Install
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev,docs]"
 ```
 
-The `docs` extra is needed by the test that builds the documentation site; without it that
-test is skipped.
+The `docs` extra is needed by the test that builds the documentation site. Without it, that test is
+skipped.
 
-## Running the signal-VAE milestone (spec §6.1 milestone 1)
+### 2. Train
 
 ```bash
 python scripts/train.py \
@@ -23,18 +41,15 @@ python scripts/train.py \
     data.loader_factory=my_project.data:buildSignalDataloaders
 ```
 
-`data.loader_factory` must point at your own `(DataConfig) -> DataloaderBundle`
-callable (spec: data loading stays your own responsibility). See
-`configs/experiment/signal_vae.yaml` for the full default config and
-`global_vae/config/data.py` for the exact contract, including the generic
-per-modality `transforms` pipeline (`log`/`standardize`/`resample`, spec §6.2,
-keyed by modality name so a second signal dataset never has to share the
-first's steps/statistics) your own `loader_factory` can call via
-`buildTransformPipeline(config.data)` if it wants to. Override any
-hyperparameter from the command line, e.g.
-`training.num_epochs=50 training.optimizer.kwargs.lr=0.0003`.
+Data loading is **your** code: `data.loader_factory` points at a `(DataConfig) -> DataloaderBundle`
+function (spec §6.2). The contract is in `global_vae/config/data.py`, and the full default config is
+`configs/experiment/signal_vae.yaml`. Any value can be overridden from the command line:
 
-Inspect the result once trained:
+```bash
+python scripts/train.py training.num_epochs=50 training.optimizer.kwargs.lr=0.0003
+```
+
+### 3. Inspect and evaluate
 
 ```bash
 python scripts/visualize_latent.py \
@@ -49,45 +64,116 @@ python scripts/evaluate.py \
     --output-dir results/
 ```
 
-`visualize_latent.py` writes `loss_curves.png`, and also `lr_curve.png` when a callback acted on
-the learning rate during the run (for example `reduce_lr_on_plateau`). That callback also adds
-`train/lr` to the per-epoch metrics shown in the training logs, the loggers and the checkpoint
-history (`docs/how-to/train.md`, `docs/adr/0028-learning-rate-in-the-metrics.md`).
+`visualize_latent.py` writes the loss curves (and a learning-rate curve when a callback changed the
+rate). `evaluate.py` writes a per-modality metrics table (`metrics_table.md` and `.csv`) and, per
+latent space, the KL of each dimension and the number of active units. More in
+[Evaluate and visualize a checkpoint](docs/how-to/evaluate.md).
 
-For a model with several modalities, `evaluate.py --paired` adds cross-modal retrieval and
-alignment between the posterior means each modality gives on its own (recall@k, ranks, cosine and
-distance comparisons with mismatched samples: `paired_results.json`), `--streaming` computes the
-reconstruction metrics batch by batch for a test set too large to pool, and `--output-dir` always
-writes the per-modality table as `metrics_table.md` and `metrics_table.csv`
-(`docs/how-to/evaluate.md`, `docs/adr/0038-paired-data-evaluation.md`).
+## Supported modalities
 
-`evaluate.py` also reports, per latent space, the KL of every latent dimension and the number of
-active units. The reconstruction term is a per-element mean by default while the KL is a sum over
-the latent dimensions, so `beta = 1` is not the usual ELBO; `training.reconstruction_reduction`
-(`mean`, the default, or `sum`, per modality) chooses the scale, and `--reconstruction-reduction`
-passes the same choice to the report (`docs/how-to/choose-beta.md`,
-`docs/adr/0029-loss-scale-convention.md`). `training.reconstruction_loss` and
-`training.reconstruction_weight` take one value or a decoder -> value mapping, and
-`--reconstruction-loss` and `--reconstruction-weight` do the same for the report
-(`docs/adr/0030-per-modality-reconstruction-loss-and-weight.md`).
+Every modality below went through the same checklist and was added **with no change to the core**.
+Each has a ready-made experiment you can run with `scripts/train.py --config-name experiment/<name>`
+and a how-to that shows the part that is yours: the `loader_factory`.
 
-The trainer has opt-in capabilities, all off by default: `training.mixed_precision` (`bf16` or
-`fp16`), `training.accumulate_grad_batches` and `training.compile_model`
-(`docs/adr/0031-mixed-precision-gradient-accumulation-and-compile.md`); `training.resume_from`, where
-`training.num_epochs` is the total of the run, so that an interrupted run continues and a resumed
-deterministic run reproduces the uninterrupted loss curve
-(`docs/adr/0032-resume-from-the-training-script.md`); the callbacks `top_k_checkpoint`,
-`linear_warmup_lr` and `cosine_lr`
-(`docs/adr/0033-top-k-checkpoints-and-learning-rate-schedules.md`). Checkpoints are read with
-`torch.load(weights_only=True)` by default; a file from an earlier version needs
-`upgradeCheckpoint` or `--trust-checkpoint` (`docs/adr/0034-safe-checkpoint-loading-by-default.md`).
+| Modality | Batch tensor | Experiment | Guide |
+|---|---|---|---|
+| 1D signal | `(batch, length)` | `signal_vae`, `signal_resnet_vae`, `signal_transformer_vae` | [Train a model](docs/how-to/train.md) |
+| Image | `(batch, H, W)` | `image_vae`, `image_resnet_vae`, `image_vit_vae` | [Train a model](docs/how-to/train.md) |
+| Table | `(batch, num_features)` | `tabular_vae` | [Train on a table](docs/how-to/train-on-a-table.md) |
+| Audio waveform | `(batch, samples)` in `[-1, 1]` | `audio_vae` | [Train on audio](docs/how-to/train-on-audio.md) |
+| Text | one-hot `(batch, length, vocab)` | `text_vae` | [Train on text](docs/how-to/train-on-text.md) |
+| Time series | `(batch, channels, length)`, `NaN` = not observed | `time_series_vae` | [Train on time series](docs/how-to/train-on-time-series.md) |
+| Graph | adjacency `(batch, N, N)` | `graph_vae` | [Train on graphs](docs/how-to/train-on-graphs.md) |
+| Point cloud | `(batch, N, 3)`, `NaN` row = no point | `point_cloud_vae` | [Train on point clouds](docs/how-to/train-on-point-clouds.md) |
 
-Experiment loggers are chosen by name in `training.loggers`: `csv`, `tensorboard` and `mlflow`. MLflow
-is an optional extra (`pip install -e ".[mlflow]"`) that needs no server: a `sqlite:///` tracking URI
-keeps the runs in a local file, and `mlflow ui --backend-store-uri sqlite:///...` shows them
-(`docs/how-to/train.md`, `docs/adr/0035-mlflow-experiment-logger.md`).
+A few things worth knowing before you pick one:
 
-## Running checks
+- **A spectrogram needs no new class.** It is an image, so the 2D classes read it.
+- **Two modalities have a loss a YAML file cannot name.** Time series with gaps and point clouds
+  train through Python with a custom loss function (a masked error and the Chamfer distance).
+  Their how-tos show how. The experiment file of a point cloud says so in its header.
+- **Each modality has an ADR** with the measurements behind its design
+  ([0039](docs/adr/0039-tabular-modality.md) to [0044](docs/adr/0044-point-cloud-modality.md)).
+
+## Model topologies
+
+The routing-graph machinery (`latent/`) supports any encoder -> latent -> decoder topology, and
+config files can describe all of it. All 8 configurations of spec §2.1 are built.
+
+| Pattern | What it is | Example config |
+|---|---|---|
+| One latent space | The default, `EN-L1-DN`: one encoder per modality, fused into one latent space | `configs/model/signal_image_to_image.yaml` |
+| Independent latent spaces | One latent space per modality | `configs/model/signal_image_independent_latents.yaml` |
+| Shared plus private | A shared latent space and one private space per modality | `configs/model/signal_image_shared_private.yaml` |
+| Shared encoder | One encoder over several modalities (`E1-*` rows) | `configs/model/signal_image_shared_transformer.yaml` |
+| Shared decoder | One decoder reconstructing several modalities (`*-D1` rows) | see [add a modality](docs/how-to/add-a-modality.md) |
+
+Details: [configure latent spaces](docs/how-to/configure-latent-spaces.md),
+[choose a fusion strategy](docs/how-to/choose-a-fusion-strategy.md) and ADRs
+[0002](docs/adr/0002-generalize-global-vae-to-routing-graph.md),
+[0024](docs/adr/0024-encoder-fan-out-through-latent-heads.md),
+[0025](docs/adr/0025-config-schema-for-several-latent-spaces.md) and
+[0027](docs/adr/0027-shared-encoders-and-decoders.md).
+
+## Training and evaluation features
+
+Everything in the second table is off by default, so a run that sets none of it is unchanged.
+
+| Topic | Setting | Where to read more |
+|---|---|---|
+| Reconstruction scale | `training.reconstruction_reduction` (`mean` or `sum`, per modality) | [Choose beta](docs/how-to/choose-beta.md), [ADR 0029](docs/adr/0029-loss-scale-convention.md) |
+| Loss and weight per modality | `training.reconstruction_loss`, `training.reconstruction_weight` | [Train a model](docs/how-to/train.md), [ADR 0030](docs/adr/0030-per-modality-reconstruction-loss-and-weight.md) |
+| Paired evaluation | `evaluate.py --paired` (cross-modal retrieval and alignment) | [Evaluate](docs/how-to/evaluate.md), [ADR 0038](docs/adr/0038-paired-data-evaluation.md) |
+| Streaming metrics | `evaluate.py --streaming` for a test set too large to pool | [Evaluate](docs/how-to/evaluate.md) |
+
+| Opt-in capability | Setting | ADR |
+|---|---|---|
+| Mixed precision | `training.mixed_precision` (`bf16` or `fp16`) | [0031](docs/adr/0031-mixed-precision-gradient-accumulation-and-compile.md) |
+| Gradient accumulation | `training.accumulate_grad_batches` | [0031](docs/adr/0031-mixed-precision-gradient-accumulation-and-compile.md) |
+| `torch.compile` | `training.compile_model` | [0031](docs/adr/0031-mixed-precision-gradient-accumulation-and-compile.md) |
+| Resume a run | `training.resume_from` (`num_epochs` is the total) | [0032](docs/adr/0032-resume-from-the-training-script.md) |
+| Best K checkpoints | callback `top_k_checkpoint` | [0033](docs/adr/0033-top-k-checkpoints-and-learning-rate-schedules.md) |
+| Learning-rate schedules | callbacks `linear_warmup_lr`, `cosine_lr` | [0033](docs/adr/0033-top-k-checkpoints-and-learning-rate-schedules.md) |
+| Learning rate in the logs | automatic with `reduce_lr_on_plateau` | [0028](docs/adr/0028-learning-rate-in-the-metrics.md) |
+| Experiment tracking | `training.loggers`: `csv`, `tensorboard`, `mlflow` | [0035](docs/adr/0035-mlflow-experiment-logger.md) |
+
+Two things to keep in mind:
+
+- **`beta = 1` is not the usual ELBO.** The reconstruction term is a per-element mean by default,
+  while the KL is a sum over latent dimensions. Pick the scale with `reconstruction_reduction`.
+- **Checkpoints load with `weights_only=True`** ([ADR 0034](docs/adr/0034-safe-checkpoint-loading-by-default.md)).
+  A file written by a version before 2.0 needs `upgradeCheckpoint` or `--trust-checkpoint`.
+
+MLflow is an optional extra (`pip install -e ".[mlflow]"`) and needs no server.
+
+## Extending the framework
+
+### A new modality (spec §10 checklist)
+
+1. Subclass `AbstractEncoder` in `encoders/` and decorate it with `@registerEncoder("your_encoder")`.
+2. Subclass `AbstractDecoder` in `decoders/` and decorate it with `@registerDecoder("your_decoder")`.
+3. Add both imports to `encoders/__init__.py` and `decoders/__init__.py`, so the decorators run.
+4. Add a model config that names the two registered classes (start from
+   `configs/model/signal_single_latent.yaml`).
+5. Add a unit test for the shapes and gradients, and an integration test for the wiring.
+
+> **No core file should need to change.** If one does, the registry pattern is being bypassed
+> somewhere: flag it instead of special-casing your modality into `GlobalVae`.
+
+For one encoder over several modalities, or one decoder reconstructing several, subclass
+`AbstractSharedEncoder` or `AbstractSharedDecoder` instead. The full guide, with worked examples
+for every modality above, is [Add a new modality](docs/how-to/add-a-modality.md).
+
+### A new fusion, assembler or data transform
+
+Same pattern: subclass `AbstractFusion` (`fusion/`), `AbstractAssembler` (`assemblers/`) or
+`AbstractTransform` (`data/transforms/`) and register it with `@registerFusion`,
+`@registerAssembler` or `@registerTransform`. A transform must stay generic across dimensionality
+(spec §6.2): no per-modality or per-dataset logic. See [add a strategy](docs/how-to/add-a-strategy.md).
+
+## Development
+
+### Checks
 
 ```bash
 ruff check .
@@ -96,44 +182,41 @@ mypy
 pytest --cov=global_vae --cov-fail-under=95
 ```
 
-`mypy` with no arguments checks `src/`, `scripts/`, `examples/` and `tests/` in strict mode
-(`[tool.mypy]` in `pyproject.toml`). A test function may carry no annotations at all, but a
-function with some annotated and some unannotated parameters is an error: write
-`tmp_path: Path`, not a bare `tmp_path`. Run it on Python 3.11, the version `python_version`
-names and the one CI uses. On Python 3.12 or newer pip installs numpy 2.5, whose stubs make mypy
-report errors that are not in the code. On a newer interpreter, pass `--python-version` (for
-example `mypy --python-version 3.13`) for a local check; CI stays the reference.
+CI (`.github/workflows/ci.yaml`) runs the same three blocking jobs on every push and pull request:
+`lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest`, Python 3.11 and 3.13). The
+coverage floor is 95%, one point below the measured value.
+
+> **About `mypy`.** With no arguments it checks `src/`, `scripts/`, `examples/` and `tests/` in
+> strict mode. Run it on Python 3.11, the version CI uses: on 3.12 or newer, pip installs numpy 2.5
+> and its stubs make `mypy` report errors that are not in the code. On a newer interpreter, pass
+> `--python-version` (for example `mypy --python-version 3.13`) and treat CI as the reference. A
+> function with some annotated and some unannotated parameters is an error: write
+> `tmp_path: Path`, not a bare `tmp_path`.
 
 ### Test layout and fast loops
 
-`tests/unit/` holds the tests of one component at a time (a class, a function, a registry),
-built from hand-made tensors: no training loop, no files on disk, no subprocess.
-`tests/integration/` holds everything that wires several components together: a model
-assembled from the registries, a `Trainer` run, a config composed through Hydra, a script or an
-example, the docs build. A module that mixes both levels stays in `tests/integration/`.
+| Folder | Holds |
+|---|---|
+| `tests/unit/` | One component at a time (a class, a function, a registry), from hand-made tensors: no training loop, no files, no subprocess |
+| `tests/integration/` | Everything that wires components together: a model from the registries, a `Trainer` run, a Hydra config, a script, an example, the docs build |
 
-The `slow` marker tags the tests that run a script or an example in a subprocess, build the
-docs site or run UMAP. Two fast loops for day-to-day work:
+A test module that mixes both levels lives in `tests/integration/`. The `slow` marker tags the
+tests that run a subprocess, build the docs site or run UMAP. Markers are strict: an unregistered
+one is an error.
 
 ```bash
 pytest tests/unit        # the unit tests only
-pytest -m "not slow"     # every test except the slow ones
+pytest -m "not slow"     # everything except the slow tests
 ```
-
-Markers are strict (`--strict-markers` in `pyproject.toml`): a marker that is not registered
-there is an error, not a warning. CI runs the whole suite, slow tests included.
-
-GitHub Actions (`.github/workflows/ci.yaml`) runs the same checks on every push and pull
-request: `lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest` on Python 3.11
-and 3.13). The tests fail under a coverage floor of 95%, set one point below the measured
-value; raise it as coverage improves. All three jobs are blocking.
 
 ## Releasing
 
-The version is written in one place, `__version__` in `src/global_vae/__init__.py`.
-`pyproject.toml` declares it `dynamic` and reads it from there (`[tool.setuptools.dynamic]`), so
-the package metadata, `global_vae.__version__` and the `global_vae_version` stored in every
-checkpoint cannot drift apart. Release checklist:
+The version is written in one place, `__version__` in `src/global_vae/__init__.py`. `pyproject.toml`
+reads it from there, so the package metadata, `global_vae.__version__` and the `global_vae_version`
+stored in every checkpoint cannot drift apart.
+
+<details>
+<summary>Release checklist</summary>
 
 1. Pick the next version with semantic versioning (breaking change: major, new feature: minor,
    fix: patch).
@@ -145,132 +228,34 @@ checkpoint cannot drift apart. Release checklist:
 4. Check that the tag, `pyproject.toml` and the changelog agree: the tag is `v<x.y.z>`, the
    `__version__` that `pyproject.toml` reads is `<x.y.z>`, and the newest changelog file is
    `CHANGELOG_<x.y.z>_<date>.md`. `tests/unit/test_packaging.py` checks the last two.
-5. Run the checks of the previous section, then in a fresh virtual environment:
-   `pip install .`, `python -c "import global_vae.config, global_vae; print(global_vae.__version__)"`
-   and `pip check`. The printed version must equal the tag without its `v`.
+5. Run the checks above, then in a fresh virtual environment: `pip install .`,
+   `python -c "import global_vae.config, global_vae; print(global_vae.__version__)"` and
+   `pip check`. The printed version must equal the tag without its `v`.
 6. Tag the commit (`git tag v<x.y.z>`) and push the tag.
 
-`src/global_vae/py.typed` marks the package as typed (PEP 561), so a downstream `mypy` uses its
-type hints. It is declared as package data in `pyproject.toml`. The licence is MIT (`LICENSE`).
+</details>
+
+The package is typed (`py.typed`, PEP 561) and the licence is MIT (`LICENSE`).
+
+## Conventions
+
+Naming deviates from PEP 8 on purpose. Read this before contributing.
+
+| What | Style | Example |
+|---|---|---|
+| Classes | `CamelCase` | `GlobalVae`, `OneDCnnEncoder` |
+| Variables | `snake_case` | `latent_dim`, `batch_size` |
+| Modules and packages | `snake_case`, named after their class | `one_d_cnn_encoder.py` holds `OneDCnnEncoder` |
+| Functions and methods | **`camelCase`** | `registerEncoder`, `computeRegularizationLoss` |
+
+- `ruff`'s `N999` is on, so a CamelCase module name fails the lint job.
+- `camelCase` functions are intentional (spec §10). The `N802`, `N803` and `N806` rules are disabled
+  in `pyproject.toml` so the linter does not "fix" them back. Methods that PyTorch or Python
+  require (`forward`, `__init__`, dunder names) keep the name the base class defines.
+- Spec §10 also bans em dashes and unicode arrows in code, comments and docs (a test checks it).
 
 ## Repository structure
 
-See spec §8 for the target layout; `src/global_vae/` mirrors it.
-
-## Naming convention (deviates from PEP8: read this before contributing)
-
-- Classes -> `CamelCase` (e.g. `GlobalVae`, `OneDCnnEncoder`).
-- Variables -> `snake_case` (e.g. `latent_dim`, `batch_size`).
-- Modules (files) and packages -> `snake_case`, named after the class they hold
-  (`one_d_cnn_encoder.py` holds `OneDCnnEncoder`). `ruff`'s `N999` is on, so a CamelCase
-  module name fails the lint job. The old CamelCase import paths of the eight CNN encoder
-  and decoder modules (`global_vae.encoders.OneDCnnEncoder`) still work and emit a
-  `DeprecationWarning` until 2.0 (ADR 0023): import from the snake_case module instead.
-- **Functions and methods -> `camelCase`** (e.g. `registerEncoder`,
-  `computeRegularizationLoss`), not PEP8's usual `snake_case`. This is intentional
-  (spec §10). `ruff`'s `N802`/`N803`/`N806` naming rules are disabled
-  in `pyproject.toml` specifically so linting doesn't silently "fix"
-  this back to snake_case. Framework-mandated overrides
-  (`forward`, `__init__`, and other PyTorch/Python dunder or
-  base-class-required names) are the only exception: leave those as
-  the base class defines them.
-
-## Adding a new modality (spec §10 checklist)
-
-1. Subclass `AbstractEncoder` in `encoders/`, decorate it with
-   `@registerEncoder("your_encoder_name")`.
-2. Subclass `AbstractDecoder` in `decoders/`, decorate it with
-   `@registerDecoder("your_decoder_name")`.
-3. Register both (the decorator does this: nothing else to wire up).
-4. Add a config entry referencing the two registry names (see
-   `configs/model/default.yaml` for a two-modality example,
-   `configs/model/signal_single_latent.yaml` or `configs/model/image_single_latent.yaml` for a
-   single-modality one and
-   `docs/how-to/configure-latent-spaces.md` for several latent spaces).
-5. Add a test: a unit test for the encoder/decoder shapes (in `tests/unit/`), and
-   ideally an entry in the relevant integration test (in `tests/integration/`).
-
-For one encoder over several modalities, or one decoder reconstructing
-several, subclass `AbstractSharedEncoder` / `AbstractSharedDecoder` instead
-and name them under `encoders` / `decoders` (see
-`docs/how-to/add-a-modality.md`).
-
-No core framework file should need to change. If it does, that's a
-signal the registry pattern is being bypassed somewhere. Flag it
-rather than special-casing the new modality into `GlobalVae`.
-
-## Adding a new fusion, assembler, or data transform strategy
-
-Same pattern: subclass `AbstractFusion` (`fusion/`), `AbstractAssembler`
-(`assemblers/`), or `AbstractTransform` (`data/transforms/`), register with
-`@registerFusion("name")` / `@registerAssembler("name")` /
-`@registerTransform("name")`. A new transform must stay fully generic
-across dimensionality (spec §6.2): no per-modality or per-dataset logic.
-
-## Extending beyond `EN-L1-DN`
-
-The routing-graph machinery (`latent/base.py`, `latent/routing_graph_builders/`)
-supports arbitrary encoder-latent-decoder topologies, including multiple
-independent latent spaces, and `GlobalVae` accepts an explicit `RoutingGraph`
-(`docs/adr/0002-generalize-global-vae-to-routing-graph.md`). Two presets are
-provided: `buildSingleLatentRoutingGraph` (`EN-L1-DN`, what
-`GlobalVae.createSingleLatent` and `configs/model/` build) and
-`buildSharedPrivateRoutingGraph` (a shared plus per-modality private latent
-space, with a latent head on each encoder -> latent edge). An encoder may feed
-several latent spaces through latent heads (`identity`, `linear`;
-`docs/adr/0024-encoder-fan-out-through-latent-heads.md`). Config files can
-describe all of it (`docs/adr/0025-config-schema-for-several-latent-spaces.md`):
-`latent_mode: several` with `latent.spaces` and `latent.decoders_consume`, a
-`head` on each `fed_by` edge, and separate `encoders` and `decoders` sections
-for names that are not modality names. `configs/model/` has one file per
-pattern of spec §9 (`signal_image_independent_latents.yaml`,
-`signal_image_shared_private.yaml`) and the model of example 03
-(`signal_image_to_image.yaml`), and `configs/experiment/` an experiment for
-each, runnable with `scripts/train.py`.
-
-All 8 configurations of spec §2.1 are built. The four `EN-*` rows (one encoder
-per modality) include the shared plus private topology, which can be trained
-and evaluated, from Python or from a config file. The four `E1-*` rows (one
-shared encoder over several modalities) and the `*-D1` rows (one shared decoder
-reconstructing several) use `AbstractSharedEncoder` and `AbstractSharedDecoder`
-(`docs/adr/0027-shared-encoders-and-decoders.md`): a shared encoder declares
-the modalities it ingests and receives them as a `dict[str, Tensor]`, a shared
-decoder returns one, and `GlobalVae` flattens it into `"reconstructions"` by
-modality, so the losses, the evaluation and the figures are unchanged. The
-first concrete shared backbone is `shared_transformer_encoder_v1` and
-`shared_transformer_decoder_v1` (`docs/adr/0037-transformer-and-vit-backbones.md`,
-`configs/model/signal_image_shared_transformer.yaml`): one transformer over the
-patch tokens of a series and an image. The four `E1-*` rows are also built with
-small dummy modules in the tests, and `docs/how-to/add-a-modality.md` says what
-to implement for your own.
-
-A table is the first modality added after the core was written, through the registries only
-(`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, `docs/adr/0039-tabular-modality.md`,
-`configs/experiment/tabular_vae.yaml`): a row is a flat float vector, numeric columns first and one-hot
-blocks after, built by your `loader_factory` (`docs/how-to/train-on-a-table.md`). Audio is the next one
-(`audio_waveform_encoder_v1` and `audio_waveform_decoder_v1`, `docs/adr/0040-audio-modality.md`,
-`configs/experiment/audio_vae.yaml`): a raw waveform, `(batch, samples)` within `[-1, 1]`, from a loader that
-fixes the sample rate and the clip length (`docs/how-to/train-on-audio.md`). A spectrogram needs no new class,
-since it is an image to the 2D ones. Text follows (`text_transformer_encoder_v1` and `text_transformer_decoder_v1`,
-`docs/adr/0041-text-modality.md`, `configs/experiment/text_vae.yaml`): token ids as a one-hot tensor
-`(batch, length, vocab_size)`, which the loss needs to be the shape of the reconstruction, from a loader that
-tokenizes and fixes the vocabulary and the length (`docs/how-to/train-on-text.md`). Time series comes next
-(`time_series_encoder_v1`, with the existing 1D CNN decoder, `docs/adr/0042-time-series-modality.md`,
-`configs/experiment/time_series_vae.yaml`): a window of one or several channels where a `NaN` is a value that was not
-observed, a gap or the padding of a short series, from a loader that cuts windows and standardizes per channel
-(`docs/how-to/train-on-time-series.md`). Graphs follow (the existing `2d_cnn_encoder_v1` with `graph_cnn_decoder_v1`,
-`docs/adr/0043-graph-modality.md`, `configs/experiment/graph_vae.yaml`): a dense adjacency matrix `(batch, N, N)` padded
-with isolated nodes, from a loader that puts the nodes in a meaningful order, since the model compares matrices position
-by position (`docs/how-to/train-on-graphs.md`). Point clouds close the list (`point_cloud_encoder_v1` and
-`point_cloud_decoder_v1`, `docs/adr/0044-point-cloud-modality.md`, `configs/experiment/point_cloud_vae.yaml`): a set of
-points `(batch, N, 3)` where a row of `NaN` is a point that does not exist, from a loader that centers, scales, samples and
-pads each cloud. The loss is the Chamfer distance, a Python function set on the trainer, since no loss a YAML file can name
-is meaningful for a set (`docs/how-to/train-on-point-clouds.md`).
-
-Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
-`docs/adr/0001-phase1-default-configuration.md`.
-
-## Roadmap
-
-[`docs/roadmap.md`](docs/roadmap.md) lists what is done, what is open and the
-decisions waiting on the owner, in priority order.
+See spec §8 for the target layout. `src/global_vae/` mirrors it, and
+[`docs/roadmap.md`](docs/roadmap.md) lists what is done, what is open and the decisions waiting on
+the owner.

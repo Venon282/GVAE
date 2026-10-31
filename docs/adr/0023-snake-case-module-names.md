@@ -60,3 +60,9 @@ change that would need 2.0.
   describe the repository as it was, and the old paths still import.
 - A downstream user who turns `DeprecationWarning` into an error finds out at import time, which
   is the point. The fix is one line: replace the CamelCase module name by its snake_case one.
+
+## Update: removed in 2.0.0
+
+The eight shims, `tests/unit/test_deprecated_module_paths.py` and the `_isDeprecatedAlias` skip in
+`scripts/gen_ref_pages.py` were deleted in release 2.0.0, as announced above. The old import paths now raise
+`ModuleNotFoundError`; the fix is the one line the Consequences describe. The text above is left as written.

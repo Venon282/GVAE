@@ -1,12 +1,24 @@
 # Train a model
 
-Training is Hydra-driven: `scripts/train.py` composes
-`configs/model/*.yaml` + `configs/data/*.yaml` + `configs/training/*.yaml`
-(via a `configs/experiment/*.yaml` file's own `defaults` list) into one
-validated `ExperimentConfig`, then builds a real model, trainer, and
-dataloaders from it.
+Training is Hydra-driven. `scripts/train.py` composes a model file, a data file and a training file
+(through the `defaults` list of one `configs/experiment/*.yaml` file) into one validated
+`ExperimentConfig`, then builds the model, the trainer and the dataloaders from it.
 
-## Basic usage
+**On this page**
+
+- [Quick start](#quick-start)
+- [The experiments that ship](#the-experiments-that-ship)
+- [Train on paired signal and image data](#train-on-paired-signal-and-image-data)
+- [Watch the learning rate](#watch-the-learning-rate) and [learning-rate schedules](#learning-rate-schedules)
+- [Mixed precision, gradient accumulation and `torch.compile`](#mixed-precision-gradient-accumulation-and-torchcompile)
+- [Keep the best K checkpoints](#keep-the-best-k-checkpoints) and [resume an interrupted run](#resume-an-interrupted-run)
+- [Track a run with MLflow](#track-a-run-with-mlflow)
+- [Checkpoint files and loading them safely](#checkpoint-files-and-loading-them-safely)
+- [Choose the reconstruction reduction](#choose-the-reconstruction-reduction) and
+  [set the loss and weight per modality](#set-the-loss-and-weight-per-modality)
+- [Loading a config programmatically](#loading-a-config-programmatically)
+
+## Quick start
 
 ```bash
 python scripts/train.py \
@@ -14,14 +26,11 @@ python scripts/train.py \
     data.loader_factory=my_project.data:buildSignalDataloaders
 ```
 
-`data.loader_factory` must point at your own
-`(DataConfig) -> DataloaderBundle` callable: dataset loading, pairing, and
-splitting stay entirely your own responsibility: a permanent boundary, not
-a gap (project specification, §6.2).
+`data.loader_factory` must point at your own `(DataConfig) -> DataloaderBundle` function. Loading,
+pairing and splitting the data stay entirely your responsibility: a permanent boundary of the
+framework, not a gap (project specification, §6.2).
 
-## Overriding hyperparameters
-
-Any field is overridable from the command line with Hydra's dotlist syntax:
+Any field can be overridden from the command line with Hydra's dotlist syntax:
 
 ```bash
 python scripts/train.py \
@@ -29,79 +38,82 @@ python scripts/train.py \
     training.optimizer.kwargs.lr=0.0003
 ```
 
-## Running a different experiment file
+To run another experiment, name its file:
 
 ```bash
 python scripts/train.py --config-name experiment/signal_resnet_vae
 ```
 
-Experiment files ship for each pattern of the model schema: `experiment/signal_vae`
-(one signal, one latent space), `experiment/signal_image_vae` (signal and image, one latent
-space), `experiment/signal_image_independent_latents` and `experiment/signal_image_shared_private`
-(several latent spaces). The last three read the data contract `configs/data/signal_image.yaml`, so
-your `loader_factory` yields `signal` and `image` batches (plus `image_out` for the independent
-latent spaces model). `experiment/image_vae` and `experiment/image_resnet_vae` are the image-only
-counterparts of the two signal experiments (the plain and the residual 2D pair): they read
-`configs/data/image.yaml`, so the batches carry an `image` of shape `(batch, 64, 64)`, and the
-paired loader below serves them too. They train on the `sum` reconstruction loss with weight 0.5,
-since the default `mean` collapsed an image model on synthetic data; see
-[choose beta](choose-beta.md#choose-a-reduction).
+## The experiments that ship
 
-The transformer backbones (ADR 0037) have their own experiments: `experiment/signal_transformer_vae`
-and `experiment/image_vit_vae` (the same single-modality contracts as the CNN ones, with a small
-transformer over the series and a ViT over the image), `experiment/signal_image_transformer_vae`
-(both, fused by `cross_attention`) and `experiment/signal_image_shared_transformer_vae` (both,
-through one shared transformer, no fusion). All four set the `sum` loss with weight 0.5 and read
-the data contracts above. How the models are written is in
-[configure encoders, decoders and latent spaces](configure-latent-spaces.md).
+Each file in `configs/experiment/` is a ready-to-run recipe: a model file, a data contract and a
+training setup. All of them read your data through a `loader_factory`.
 
-`experiment/tabular_vae` (ADR 0039) is the single-modality VAE of a table: it reads
-`configs/data/tabular.yaml`, so the batches carry a `tabular` tensor of shape `(batch, num_features)`,
-and it sets the `sum` loss with weight 0.5 like the image and transformer ones. [Train on a
-table](train-on-a-table.md) says how to build the rows and set `num_features`.
+### Signals and images
 
-`experiment/audio_vae` (ADR 0040) is the single-modality VAE of a raw waveform: it reads
-`configs/data/audio.yaml`, so the batches carry an `audio` tensor of shape `(batch, 2048)` within
-`[-1, 1]`, and it sets the `sum` loss with weight 0.5 too. The clip length is written in the data file and
-in the decoder's `output_length`. [Train on audio](train-on-audio.md) has a loader and says how to change
-the length, the channels and the stack.
+| Experiment | What it trains | Batch keys | Loss |
+|---|---|---|---|
+| `signal_vae` | One signal, one latent space (1D CNN) | `signal` | `mse`, mean |
+| `signal_resnet_vae` | The residual 1D pair | `signal` | `mse`, mean |
+| `signal_transformer_vae` | A small transformer over the series | `signal` | `mse`, sum, weight 0.5 |
+| `image_vae` | One image (2D CNN) | `image` `(batch, 64, 64)` | `mse`, sum, weight 0.5 |
+| `image_resnet_vae` | The residual 2D pair | `image` | `mse`, sum, weight 0.5 |
+| `image_vit_vae` | A ViT over the image | `image` | `mse`, sum, weight 0.5 |
+| `signal_image_vae` | Signal and image, one latent space | `signal`, `image` | `mse`, mean |
+| `signal_image_independent_latents` | One latent space per modality | `signal`, `image`, `image_out` | `mse`, mean |
+| `signal_image_shared_private` | A shared plus private latent spaces | `signal`, `image` | `mse`, mean |
+| `signal_image_transformer_vae` | Both, fused by `cross_attention` | `signal`, `image` | `mse`, sum, weight 0.5 |
+| `signal_image_shared_transformer_vae` | Both, through one shared transformer, no fusion | `signal`, `image` | `mse`, sum, weight 0.5 |
 
-`experiment/text_vae` (ADR 0041) is the single-modality VAE of a text: it reads `configs/data/text.yaml`, so
-the batches carry a `text` tensor, one-hot, of shape `(batch, 8, 32)`: a length of 8 tokens over a vocabulary of
-32. It sets the `bce` loss with the `sum` reduction and weight 2.0, since the decoder returns probabilities. The
-length is written in the data file and in the decoder's `output_length`, and the vocabulary size in the encoder
-and the decoder. [Train on text](train-on-text.md) has a loader and says how to change them.
+- The `sum` reduction with weight 0.5 is there because the default `mean` collapsed an image model on
+  synthetic data. See [choose beta](choose-beta.md#choose-a-reduction).
+- The four transformer experiments are described in ADR 0037. How the models are written is in
+  [configure encoders, decoders and latent spaces](configure-latent-spaces.md).
+- The paired loader below serves the signal and image experiments.
 
-`experiment/time_series_vae` (ADR 0042) is the single-modality VAE of a window of several channels: it reads
-`configs/data/time_series.yaml`, so the batches carry a `time_series` tensor of shape `(batch, 3, 96)`, where a `NaN` is a
-value that was not observed. It sets the `mse` loss with the `sum` reduction and weight 50, which is for complete series:
-the `mse` of a YAML file is `NaN` on a gap, so series with gaps train through Python with the masked loss. The length is
-written in the data file and in the decoder's `output_length`, and the channels in the encoder and the decoder.
-[Train on time series](train-on-time-series.md) has a loader and the Python route.
+### The other modalities
 
-`experiment/graph_vae` (ADR 0043) is the single-modality VAE of a graph: it reads `configs/data/graph.yaml`, so the
-batches carry a `graph` tensor of shape `(batch, 16, 16)`, the 0/1 adjacency matrix of each graph padded with isolated
-nodes up to 16. It sets the `bce` loss with the `sum` reduction and weight 4.0, since the decoder returns the
-probability of each edge. The padded size is written in the data file and in the decoder's `output_shape`, and the nodes
-have to come in a meaningful order, which is the loader's job. [Train on graphs](train-on-graphs.md) has a loader and
-scores the edges.
+| Experiment | Modality | Batch tensor | Loss | Guide |
+|---|---|---|---|---|
+| `tabular_vae` | Table (ADR 0039) | `tabular` `(batch, num_features)` | `mse`, sum, weight 0.5 | [Train on a table](train-on-a-table.md) |
+| `audio_vae` | Raw waveform (ADR 0040) | `audio` `(batch, 2048)` in `[-1, 1]` | `mse`, sum, weight 0.5 | [Train on audio](train-on-audio.md) |
+| `text_vae` | Text (ADR 0041) | `text` one-hot `(batch, 8, 32)` | `bce`, sum, weight 2.0 | [Train on text](train-on-text.md) |
+| `time_series_vae` | Time series (ADR 0042) | `time_series` `(batch, 3, 96)` | `mse`, sum, weight 50 | [Train on time series](train-on-time-series.md) |
+| `graph_vae` | Graph (ADR 0043) | `graph` `(batch, 16, 16)` | `bce`, sum, weight 4.0 | [Train on graphs](train-on-graphs.md) |
+| `point_cloud_vae` | Point cloud (ADR 0044) | `point_cloud` `(batch, 64, 3)` | placeholder, see below | [Train on point clouds](train-on-point-clouds.md) |
 
-`experiment/point_cloud_vae` (ADR 0044) is the single-modality VAE of a point cloud: it reads `configs/data/point_cloud.yaml`,
-so the batches carry a `point_cloud` tensor of shape `(batch, 64, 3)`, one row per point in no particular order, with a row of
-`NaN` for a point that does not exist. **Do not train it through `scripts/train.py`.** Its `training` block (`mse`, `sum`, weight
-100.0) is a placeholder, because a YAML file cannot name the Chamfer distance and every loss it can name pairs unrelated
-points of a set. Build the trainer from the file and set `trainer.reconstruction_loss_fn` to `computeChamferDistance` and the
-reduction to `"mean"`. The number of points is written in the data file and in the decoder's `num_points`, which have to be
-equal. [Train on point clouds](train-on-point-clouds.md) has a loader that normalizes, samples and pads, the Python route and the
-scores.
+What each one asks of your data and your files:
+
+- **Table.** `num_features` is set in the data file and in the model.
+- **Audio.** The clip length is written in the data file and in the decoder's `output_length`.
+- **Text.** The length is written in the data file and in the decoder's `output_length`. The
+  vocabulary size is written in the encoder and the decoder. The decoder returns probabilities, which
+  is why the loss is `bce`.
+- **Time series.** A `NaN` is a value that was not observed. The `mse` of a YAML file is `NaN` on a
+  gap, so the YAML loss is for complete series, and series with gaps train through Python with a
+  masked loss. The length is written in the data file and in the decoder's `output_length`, and the
+  channels in the encoder and the decoder.
+- **Graph.** The adjacency matrices are padded with isolated nodes up to the size written in the data
+  file and in the decoder's `output_shape`. The nodes have to come in a meaningful order, which is
+  the loader's job. The decoder returns the probability of each edge, hence `bce`.
+
+!!! warning "Do not train `point_cloud_vae` through `scripts/train.py`"
+    Its `training` block (`mse`, `sum`, weight 100.0) is a placeholder. A YAML file cannot name the
+    Chamfer distance, and every loss it can name pairs unrelated points of a set. Build the trainer
+    from the file and set `trainer.reconstruction_loss_fn` to `computeChamferDistance` and the
+    reduction to `"mean"`. The number of points is written in the data file and in the decoder's
+    `num_points`, and the two have to be equal.
+    [Train on point clouds](train-on-point-clouds.md) has a loader and the Python route.
 
 ## Train on paired signal and image data
 
-Pairing a signal with its image is your `loader_factory`'s job like the rest of the data
-pipeline (spec §6.2). `examples/04_paired_loader.py` is a reference you can copy and adapt: it
-pairs two folders of files by sample ID, leaves out the samples that have only one modality,
-splits the pairs by sample ID with `data.seed`, runs `data.transforms` and checks the signal
-length against `data.sequence_length`.
+Pairing a signal with its image is your `loader_factory`'s job like the rest of the data pipeline
+(spec §6.2). `examples/04_paired_loader.py` is a reference you can copy and adapt. It:
+
+- pairs two folders of files by sample ID, and leaves out the samples that have only one modality;
+- splits the pairs by sample ID with `data.seed`;
+- runs `data.transforms`;
+- checks the signal length against `data.sequence_length`.
 
 ```bash
 PYTHONPATH=. python scripts/train.py --config-name experiment/signal_image_vae \
@@ -109,12 +121,14 @@ PYTHONPATH=. python scripts/train.py --config-name experiment/signal_image_vae \
     data.train_path=/path/to/dataset
 ```
 
-The dataset folder holds `signal/<sample_id>.npy` and `image/<sample_id>.npy`. To read another
-layout or format, change the three adaptation points at the top of the example
-(`sampleIdFromPath`, `loadSignal`, `loadImage`). If your signals do not have
-`data.sequence_length.signal` points, add a `resample` step to `data.transforms.signal` instead
-of changing the model. `python examples/04_paired_loader.py --train` writes a synthetic dataset
-in that layout and trains on it, end to end.
+The dataset folder holds `signal/<sample_id>.npy` and `image/<sample_id>.npy`.
+
+- **Another layout or format:** change the three adaptation points at the top of the example
+  (`sampleIdFromPath`, `loadSignal`, `loadImage`).
+- **Signals of another length:** if your signals do not have `data.sequence_length.signal` points,
+  add a `resample` step to `data.transforms.signal` instead of changing the model.
+- **Try it end to end:** `python examples/04_paired_loader.py --train` writes a synthetic dataset in
+  that layout and trains on it.
 
 ## Watch the learning rate
 

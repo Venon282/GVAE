@@ -1016,7 +1016,7 @@ Each item needs an explicit go-ahead and an ADR before any code.
 | Config schema churn (D-1) | every YAML file and example changes | keep `latent_mode: single` and `modalities` valid; ADR before code; schema tests on every shipped YAML file |
 | Everything is validated on synthetic data | design choices and hyperparameters untested on real SAXS or paired data | run P3-1 early, in parallel with Phase 1 |
 | Tool drift (`ruff>=0.4`, unpinned `torch` and numpy) | a red CI with no code change; the counts in this file shift | pin ruff and mypy, run one scheduled dependency bump |
-| Renaming modules (D-9) | breaks downstream imports | shims with a `DeprecationWarning`, removal at 2.0 |
+| Renaming modules (D-9) | breaks downstream imports | shims with a `DeprecationWarning`, removed in 2.0.0 |
 
 ## 10. Definition of done
 

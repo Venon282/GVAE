@@ -222,7 +222,7 @@ This is the layout of the repository as built. Entries marked `(planned)` do not
 tracked in `docs/roadmap.md`; everything else is present. Encoder and decoder modules are named after
 the class they hold, in snake_case (`one_d_cnn_encoder.py` for `OneDCnnEncoder`, registered as
 `1d_cnn_encoder_v1`), one class per file (§10). The pre-1.3 CamelCase paths (`OneDCnnEncoder.py`)
-remain as deprecation shims until 2.0 and are left out of the tree below (ADR 0023).
+were deprecation shims and were removed in 2.0.0 (ADR 0023).
 
 ```
 global-vae/

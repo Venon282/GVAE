@@ -1,0 +1,46 @@
+# Single-modality point cloud VAE (spec §6, roadmap P3-8): `point_cloud -> z -> point_cloud`, no
+# fusion strategy since exactly one encoder feeds the single latent space (spec §4). Validated
+# against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+#
+# A batch key `point_cloud` holds a float tensor `(batch, N, 3)`: N points of a cloud, one row per
+# point, in no particular order. A row of `NaN` is a point that does not exist, so a cloud with fewer
+# than N points is padded with rows of `NaN` (the encoder leaves them out, and the Chamfer loss of
+# utils/point_cloud_metrics.py does too). The encoder reads the points as a set, so it does not
+# depend on their order or on the padding, and the decoder writes N points from one latent vector.
+# Reading files, sampling N points, centering and scaling every cloud are the caller's
+# `loader_factory` (spec §6.2, docs/how-to/train-on-point-clouds.md). The loss that does not depend
+# on the order of the points is a Python function, not a name a YAML file can write (ADR 0044).
+name: global_vae_point_cloud_single_latent
+latent_mode: single
+
+modalities:
+  point_cloud:
+    encoder:
+      name: point_cloud_encoder_v1
+      kwargs:
+        # in_dim is 3 for coordinates. For points that carry normals or colors, give the batch
+        # `(batch, N, 3 + k)` and set it here and out_dim in the decoder to 3 + k.
+        in_dim: 3
+        point_dims: [64, 128, 256]
+        head_hidden_dims: [256]
+        pooling: max_mean # max_mean | max | mean
+        # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
+        # single_latent.dim below, so it only has to be set in one place.
+    decoder:
+      name: point_cloud_decoder_v1
+      kwargs:
+        # num_points must be the N of configs/data/point_cloud.yaml's sequence_length.point_cloud:
+        # the decoder always writes this many points. It is data-dependent, so it is never filled in
+        # for you, and any positive integer works (nothing has to land on a size).
+        num_points: 64
+        out_dim: 3
+        code_dim: 32
+        hidden_dims: [256, 256]
+
+single_latent:
+  dim: 16
+  name: z_fused
+  # fusion: omitted on purpose. A single encoder needs no Fusion strategy at all
+  # (spec §4); GlobalVae.createSingleLatent already treats this as optional.
+  regularizer:
+    strategy: kl_standard_normal

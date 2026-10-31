@@ -687,6 +687,54 @@ versioning follows [Semantic Versioning](https://semver.org/).
   nodes, node features are not covered, a dense matrix does not scale to large graphs, and the latent is one vector per
   graph. Each is flagged in ADR 0043. Every graph-specific encoder and decoder measured (message passing, one token per
   node, an MLP) was worse than the registered 2D CNN pair, at weight 1 and at weight 4.
+- Point cloud modality (roadmap P3-8, spec §6 and §10, ADR 0044), added through the registries and `utils/` only, with no
+  change to `models/`, `latent/`, `losses/`, `training/`, `evaluation/`, `config/` or `data/`. A point cloud is a set: a
+  tensor `(batch, N, 3)` (or `(batch, N, 3 + k)` for points with normals or colors) whose rows are in no particular order,
+  where a row of `NaN` is a point that does not exist. `PointCloudEncoder` (`point_cloud_encoder_v1`) is a PointNet-style
+  encoder (a shared MLP per point, a pooling that skips the `NaN` rows, `max_mean` by default, `max` or `mean`, and a head to
+  `(mu, logvar)`), exactly invariant to the order of the points and to padding, linear in `N`, and it refuses batch
+  normalization, which would mix the points of different clouds. `PointCloudDecoder` (`point_cloud_decoder_v1`) is a folding
+  of a learned template (learned per-point codes concatenated with the latent vector and mapped by one shared MLP), for any
+  `num_points`. Both are registered by the imports of `encoders/__init__.py` and `decoders/__init__.py`, and are built from
+  `utils/mlp_blocks.buildMlp` and `utils/transformer_blocks.buildPoolingHead`.
+- `utils/point_cloud_blocks.py` (`splitPoints`, `poolPoints`) and `utils/point_cloud_metrics.py`: `computeChamferDistance`,
+  the order-free loss (the squared distance of each point to the nearest point of the other cloud, in both directions,
+  summed over points and averaged over clouds, rows of `NaN` in the target left out, any two numbers of points), usable as
+  `Trainer(reconstruction_loss_fn=...)`; and `computeCloudScores`, the per-point Chamfer distance, the precision, recall and
+  F score at a threshold, over the real points only.
+- `configs/model/point_cloud_single_latent.yaml` (64 points, a latent of 16, no fusion), `configs/data/point_cloud.yaml` (the
+  contract of the `point_cloud` batch key, an empty transform list, and `sequence_length.point_cloud`) and
+  `configs/experiment/point_cloud_vae.yaml`, a composed config whose `training` block is a placeholder (`mse`, `sum`,
+  weight 100.0, the only things a YAML file can say), with a header that says so and gives the Python route: build the trainer
+  from the file, then set `reconstruction_loss_fn` to the Chamfer distance and the reduction to `mean`. On synthetic clouds
+  the Chamfer distance per point was 0.086 at weight 1, 0.071 at 10, 0.059 at 100 and 0.058 at 1,000, against 0.105 for the
+  best cloud that ignores its input (numbers in the file and in the ADR, not a tuned value).
+- Tests: `tests/unit/test_point_cloud_metrics.py` (the Chamfer distance against its definition written out point by point,
+  order and padding, symmetry, gradients, error cases, the scores), `tests/unit/test_point_cloud_backbone.py`
+  (registration, shapes, exact invariance to the order, to `NaN` rows anywhere and to a mixed-size batch, an empty cloud,
+  gradients, argument validation) and `tests/integration/test_point_cloud_model_configs.py` (a test that no core package
+  names the new classes or the `point_cloud` key, the model and the experiment built from YAML, the shapes a YAML value
+  produces, the loss of the file pinned against the Chamfer route, two runs that learn clouds against the best constant
+  cloud and show the loss of a YAML file ending far worse, evaluation and figures, and a `scripts/train.py` run).
+  `_train_script_fixtures.py` gains `buildDummyPointCloudDataloaders`, and `tests/integration/_point_cloud_corpus.py` is the
+  synthetic clouds.
+- Docs: `docs/adr/0044-point-cloud-modality.md`, `docs/how-to/train-on-point-clouds.md` (with a `loader_factory` that
+  normalizes, samples and pads each cloud, the Python route with the Chamfer loss, how to score a reconstruction and how to
+  sample clouds from the prior), a section in `docs/how-to/add-a-modality.md`, `docs/how-to/train.md`, the README, the roadmap
+  status of P3-8 (every modality of the list is now done) and the status notes of `configs/experiment/` and `configs/data/`.
+- **Findings, not fixed.** The loss table of `config/training.py` has no set loss, so the experiment file cannot name the
+  loss that works: the `mse` of a YAML file pairs unrelated points, and the model it trains ended with a Chamfer distance of
+  0.81 (clouds in a random order) or 0.39 to 0.45 (points sorted) against 0.10 for a cloud that ignores its input, and it is
+  `NaN` on a padded cloud; the Chamfer loss is a Python function, set on the trainer. The trainer refuses a reconstruction
+  whose shape differs from its target's before it calls any loss, so the number of points the decoder writes has to equal
+  the one of the data, although the Chamfer distance accepts two different numbers. The metrics of `evaluate` are position by
+  position, so they mean nothing for a set and are `NaN` on a padded cloud (the total loss is right with the Chamfer loss;
+  use `computeCloudScores`). The Chamfer loss is quadratic in the number of points (877 ms in a batch of 32 at 1,024 points).
+  The registered 1D transformer encoder and 1D CNN decoder, on `NaN` rows replaced by zero and trained with the same loss,
+  scored within 4 percent of the new classes at 64 points and equal at 128, so the classes are justified by exact invariance,
+  the `NaN` convention, the layout and the cost (3 to 12 times faster than the attention encoder from 64 to 1,024 points), not
+  by a large gain. The number of points, normals and colors weighed with the coordinates, large clouds, local structure and a
+  latent per region are not covered. Each is flagged in ADR 0044.
 
 ### Fixed
 

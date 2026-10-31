@@ -89,6 +89,18 @@ number of nodes is the `data.sequence_length.graph` of the data file and the `ou
 have to come in a meaningful order: the model compares matrices position by position, and ordering them is the loader's
 (`docs/how-to/train-on-graphs.md`).
 
+`point_cloud_vae.yaml` (roadmap P3-8, ADR 0044) is the single-modality VAE of a point cloud, `point_cloud -> z -> point_cloud`,
+composing `configs/model/point_cloud_single_latent.yaml`, the data contract `configs/data/point_cloud.yaml` and
+`configs/training/default.yaml`. **Its `training` block is a placeholder.** A YAML file can name only `mse`, `l1`, `bce` and
+`smooth_l1`, each of which pairs point `i` of a reconstruction with point `i` of the target, which for a set is an unrelated
+point, and on synthetic clouds the model `scripts/train.py` trains that way ended farther from the clouds than one that ignores
+its input (`tests/integration/test_point_cloud_model_configs.py` pins it, and pins `NaN` on a padded cloud). The loss that works
+is the Chamfer distance of `global_vae.utils.point_cloud_metrics`, a Python function: build the trainer from this file (the
+optimizer, the beta schedule and the weight `100.0`, a `beta` of `1 / w`) and set `trainer.reconstruction_loss_fn` to it and
+`trainer.reconstruction_reduction` to `"mean"`, since it is already a sum over points. The number of points is the
+`data.sequence_length.point_cloud` of the data file and the `num_points` of the decoder, which have to be equal
+(`docs/how-to/train-on-point-clouds.md`).
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a

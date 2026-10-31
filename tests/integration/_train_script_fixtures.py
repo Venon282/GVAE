@@ -23,6 +23,7 @@ TEXT_VOCAB = 32
 SERIES_LENGTH = 96
 SERIES_CHANNELS = 3
 GRAPH_NODES = 16
+POINT_CLOUD_POINTS = 64
 
 
 def buildDummyDataloaders(config: DataConfig) -> DataloaderBundle:
@@ -228,6 +229,35 @@ def buildDummyGraphDataloaders(config: DataConfig) -> DataloaderBundle:
             adjacency = upper + upper.transpose(1, 2)
             adjacency = adjacency * (exists[:, :, None] & exists[:, None, :]).float()
             batches.append({"graph": adjacency})
+        return batches
+
+    return DataloaderBundle(train=make(3), val=make(1), test=make(1))
+
+
+def buildDummyPointCloudDataloaders(config: DataConfig) -> DataloaderBundle:
+    """Build tiny in-memory dataloaders for the point cloud models.
+
+    Serves `configs/experiment/point_cloud_vae.yaml` with batches of one key, `point_cloud`, of
+    shape `(batch, num_points, 3)`: random points in the unit ball, in no particular order. Every
+    cloud is complete, with no row of `NaN`, because the position-by-position loss of a YAML file
+    is `NaN` on one. The number of points is read from `sequence_length["point_cloud"]`. Like
+    `buildDummyDataloaders`, it never touches disk.
+
+    Args:
+        config: The data config; `seed` and `sequence_length["point_cloud"]` are read.
+
+    Returns:
+        A `DataloaderBundle` of 3 train, 1 validation and 1 test batches.
+    """
+    torch.manual_seed(config.seed)
+    points = (config.sequence_length or {}).get("point_cloud", POINT_CLOUD_POINTS)
+
+    def make(num_batches: int) -> list[dict[str, torch.Tensor]]:
+        batches = []
+        for _ in range(num_batches):
+            clouds = torch.randn(BATCH_SIZE, points, 3)
+            clouds = clouds / clouds.norm(dim=-1, keepdim=True).clamp_min(1.0)
+            batches.append({"point_cloud": clouds})
         return batches
 
     return DataloaderBundle(train=make(3), val=make(1), test=make(1))

@@ -261,7 +261,11 @@ observed, a gap or the padding of a short series, from a loader that cuts window
 (`docs/how-to/train-on-time-series.md`). Graphs follow (the existing `2d_cnn_encoder_v1` with `graph_cnn_decoder_v1`,
 `docs/adr/0043-graph-modality.md`, `configs/experiment/graph_vae.yaml`): a dense adjacency matrix `(batch, N, N)` padded
 with isolated nodes, from a loader that puts the nodes in a meaningful order, since the model compares matrices position
-by position (`docs/how-to/train-on-graphs.md`).
+by position (`docs/how-to/train-on-graphs.md`). Point clouds close the list (`point_cloud_encoder_v1` and
+`point_cloud_decoder_v1`, `docs/adr/0044-point-cloud-modality.md`, `configs/experiment/point_cloud_vae.yaml`): a set of
+points `(batch, N, 3)` where a row of `NaN` is a point that does not exist, from a loader that centers, scales, samples and
+pads each cloud. The loss is the Chamfer distance, a Python function set on the trainer, since no loss a YAML file can name
+is meaningful for a set (`docs/how-to/train-on-point-clouds.md`).
 
 Remaining gaps are tracked in the [roadmap](docs/roadmap.md). See also
 `docs/adr/0001-phase1-default-configuration.md`.

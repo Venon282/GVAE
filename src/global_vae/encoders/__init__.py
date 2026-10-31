@@ -4,7 +4,8 @@ Importing this package registers every built-in encoder implementation
 (`audio_waveform_encoder_v1`, `1d_cnn_encoder_v1`, `1d_cnn_resnet_encoder_v1`, `2d_cnn_encoder_v1`,
 `2d_cnn_resnet_encoder_v1`, `1d_transformer_encoder_v1`, `2d_vit_encoder_v1`,
 `shared_transformer_encoder_v1`, `tabular_mlp_encoder_v1`, `text_transformer_encoder_v1`,
-`time_series_encoder_v1`) via each module's own `@registerEncoder` decorator. A `@registerX(...)`
+`time_series_encoder_v1`, `point_cloud_encoder_v1`) via each module's own `@registerEncoder`
+decorator. A `@registerX(...)`
 decorator only runs once its module is imported; without these imports,
 `getEncoderClass(...)` would raise `KeyError` even though the corresponding file exists on
 disk. This mirrors
@@ -19,6 +20,7 @@ import global_vae.encoders.audio_waveform_encoder  # noqa: F401
 import global_vae.encoders.one_d_cnn_encoder  # noqa: F401
 import global_vae.encoders.one_d_cnn_residual_encoder  # noqa: F401
 import global_vae.encoders.one_d_transformer_encoder  # noqa: F401
+import global_vae.encoders.point_cloud_encoder  # noqa: F401
 import global_vae.encoders.shared_transformer_encoder  # noqa: F401
 import global_vae.encoders.tabular_mlp_encoder  # noqa: F401
 import global_vae.encoders.text_transformer_encoder  # noqa: F401

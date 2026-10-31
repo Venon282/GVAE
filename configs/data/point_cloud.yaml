@@ -1,0 +1,37 @@
+# Data contract for the point cloud VAE (spec §6, roadmap P3-8). Framework-agnostic on purpose: no
+# dataset code is written for one specific collection of point clouds anywhere in this framework
+# (data/NOTE.md); `loader_factory` must point at your own "module.path:function_name" returning a
+# global_vae.config.data.DataloaderBundle whose batches carry one key, `point_cloud`, of shape
+# `(batch, N, 3)`, float, with `N` equal to `sequence_length.point_cloud` below. Each row is one
+# point, in no particular order. A cloud with fewer than N points is padded with rows of `NaN` (a
+# point that does not exist), and every cloud is centered and scaled by the loader, since the model
+# reads coordinates as they are (docs/how-to/train-on-point-clouds.md).
+# `train_path`/`loader_factory` are left as required (`???`, Hydra's MISSING marker): fill them in,
+# or override them on the command line (e.g. `data.train_path=... data.loader_factory=
+# my_project.data:buildPointCloudDataloaders`).
+loader_factory: ??? # e.g. "my_project.data:buildPointCloudDataloaders"
+train_path: ???      # e.g. "data/raw/shapes_train"
+val_path: null
+test_path: null
+
+batch_size: 64
+num_workers: 0
+val_split: 0.1
+test_split: 0.1
+shuffle_train: true
+
+# Generic, invertible preprocessing (spec §6.2), per modality (ADR 0015). Empty on purpose: the
+# transforms of this framework standardize with one mean and one scale for a whole dataset, where a
+# point cloud is centered and scaled one cloud at a time, and `resample` or a `NaN`-unaware
+# transform would break the set. Everything point clouds need is the loader's: reading the files,
+# sampling N points, centering, scaling, and padding with rows of `NaN`.
+transforms:
+  point_cloud: []
+
+# Number of points `N` per cloud: the number of rows of the batch tensor after the loader's sampling
+# or padding. It must match configs/model/point_cloud_single_latent.yaml's decoder.kwargs.num_points,
+# which is never filled in for you.
+sequence_length:
+  point_cloud: 64
+
+seed: 0

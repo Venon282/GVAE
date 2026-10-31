@@ -42,3 +42,4 @@
 - [0041: The text modality](0041-text-modality.md)
 - [0042: The time series modality](0042-time-series-modality.md)
 - [0043: The graph modality](0043-graph-modality.md)
+- [0044: The point cloud modality](0044-point-cloud-modality.md)

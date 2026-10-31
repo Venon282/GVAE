@@ -79,6 +79,16 @@ in another key (`num_nodes`), which the trainer and `evaluate` ignore (ADR 0019)
 matrix is not a quantity to standardize (`docs/how-to/train-on-graphs.md`). The padded size is not a field of `DataConfig`
 beyond `sequence_length`: it is also the decoder's `output_shape`, which has to agree with it.
 
+`configs/data/point_cloud.yaml` is the contract of the point cloud model (`configs/experiment/point_cloud_vae.yaml`, roadmap
+P3-8): a `loader_factory` of your own whose batches carry one key, `point_cloud`, a float tensor `(batch, N, 3)` (or
+`(batch, N, 3 + k)` for points with normals or colors): one row per point, in no particular order, with a row of `NaN` for a
+point that does not exist (a cloud with fewer than `N` points is padded with them, not with zeros, since the origin is a
+point). `N` is `sequence_length.point_cloud`, which is also the decoder's `num_points` and has to equal it, since the trainer
+refuses a reconstruction of another shape. Every cloud is centered and scaled by the loader, so its `transforms` entry for
+`point_cloud` is empty: the transforms of this framework use one mean and one scale for the whole dataset, and a cloud is
+normalized one at a time. A number of points per cloud can ride in another key, which the trainer and `evaluate` ignore
+(ADR 0019). Sampling, normalization and padding are the loader's (`docs/how-to/train-on-point-clouds.md`).
+
 # Still deferred / permanent scope boundary
 
 No dataset/pairing/splitting *code* exists in this framework, and none is planned:

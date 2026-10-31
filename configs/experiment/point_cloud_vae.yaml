@@ -1,0 +1,50 @@
+# @package _global_
+# Full experiment for a single-modality point cloud VAE (spec §6, roadmap P3-8): assembles model +
+# data + training into one composed, validated global_vae.config.experiment.ExperimentConfig. The
+# point cloud counterpart of signal_vae.yaml, image_vae.yaml, tabular_vae.yaml, audio_vae.yaml,
+# text_vae.yaml, time_series_vae.yaml and graph_vae.yaml.
+#
+# READ THIS BEFORE TRAINING. A point cloud is a set, and every loss a YAML file can name (`mse`,
+# `l1`, `bce`, `smooth_l1`) compares a point with whichever point sits at the same index, so none of
+# them is meaningful here. On synthetic clouds the model that `scripts/train.py` trains with `mse`
+# was worse than a cloud that ignores its input: a Chamfer distance of 0.81 on clouds in a random
+# order and 0.39 with the points sorted, against 0.10 (docs/adr/0044-point-cloud-modality.md). The
+# loss that works is the Chamfer distance of global_vae.utils.point_cloud_metrics, a plain Python
+# function, so the model is trained through Python (docs/how-to/train-on-point-clouds.md), reading its
+# model, data, optimizer and weight from this file. The `training` block below is what a command line
+# run would use, and it is here so that the file composes and `scripts/train.py` wires up; it is not
+# a recommendation.
+#
+# Python route (the optimizer, the beta schedule and the weight still come from this file):
+#   config = loadExperimentConfig("experiment/point_cloud_vae", overrides=[...])
+#   model = buildModelFromConfig(config.model)
+#   trainer = buildTrainerFromConfig(model, config.training)
+#   trainer.reconstruction_loss_fn = computeChamferDistance
+#   trainer.reconstruction_reduction = "mean"  # the Chamfer distance is already a sum over points
+# For another number of points, set it in every place it is written: the data file's
+# `sequence_length.point_cloud` and the decoder's `num_points`, for example
+#   data.sequence_length.point_cloud=256 model.modalities.point_cloud.decoder.kwargs.num_points=256
+# The two must be equal: the trainer refuses a reconstruction whose shape differs from its target's.
+defaults:
+  - /model: point_cloud_single_latent
+  - /data: point_cloud
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/point_cloud_vae
+
+# Weight (docs/adr/0029-loss-scale-convention.md, docs/adr/0044-point-cloud-modality.md,
+# docs/how-to/choose-beta.md). The Chamfer distance of the Python route is summed over points, so it
+# has the scale of a summed squared error (which is why that route keeps the "mean" reduction: "sum"
+# would multiply it by the number of values of a cloud once more), and a weight of w on it is a beta
+# of 1 / w on the KL term (roadmap decision D-6). On synthetic clouds of 40 to 64 points the Chamfer distance per point of
+# the reconstruction was 0.086 at weight 1, 0.071 at 10, 0.059 at 100 and 0.058 at 1,000 (the best
+# cloud that ignores its input scores 0.105), so 100 is the start of the plateau and not a tuned
+# value. The `mse` and `sum` below are what a YAML file can say, and they are not meaningful for
+# sets (see above).
+training:
+  reconstruction_loss: mse
+  reconstruction_reduction: sum
+  reconstruction_weight: 100.0

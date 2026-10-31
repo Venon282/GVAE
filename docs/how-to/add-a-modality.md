@@ -90,6 +90,23 @@ position by position, so the order of the nodes matters as much as the whole cho
 the loader's job. [Train on graphs](train-on-graphs.md) shows the `loader_factory` that orders and pads the nodes, and
 how to score the edges.
 
+## A worked example where the loss is the hard part: point clouds
+
+A point cloud is a set of `N` points, so `(batch, N, 3)` fits the one-tensor-per-modality contract and the comparison does
+not: every loss a YAML file can name pairs row `i` of the reconstruction with row `i` of the target, and for a set those are
+unrelated points ([ADR 0044](../adr/0044-point-cloud-modality.md)). The first thing to do was to measure that, and the model
+trained with the loss of a YAML file ended farther from the clouds than one that ignores its input. So the modality has two
+registered classes, `encoders/point_cloud_encoder.py` (a pooling over the points that leaves out the rows of `NaN`, exactly
+invariant to their order) and `decoders/point_cloud_decoder.py` (a learned template folded by the latent vector), built from
+`utils/mlp_blocks.py` and `utils/transformer_blocks.py`, and one function that is not a class,
+`utils/point_cloud_metrics.computeChamferDistance`. The trainer takes any Python function as its reconstruction loss, so the
+core did not change, and the file of the experiment only composes the model, the data and the optimizer, with a header that
+says its own loss is a placeholder. It is the example to copy when the hard part is the loss and not the network: measure
+what the loss of a YAML file does before building anything, put the loss in `utils/` as a function with its tests, flag the
+missing table entry instead of editing the core, and compare the new classes with the registered ones honestly, since here
+the registered 1D pair came within a few percent and the new classes are justified by the invariance, the `NaN` convention and
+the cost. [Train on point clouds](train-on-point-clouds.md) shows the `loader_factory` and the Python route.
+
 ## One encoder or decoder for several modalities
 
 The steps above give each modality its own encoder and decoder (`EN-*` and `*-DN` in spec §2.1).

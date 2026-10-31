@@ -741,9 +741,10 @@ genericity claim a second time.
 **P3-8 status.** Tabular ([ADR 0039](adr/0039-tabular-modality.md)), audio
 ([ADR 0040](adr/0040-audio-modality.md), below the tabular findings), text
 ([ADR 0041](adr/0041-text-modality.md), below the audio findings), time series
-([ADR 0042](adr/0042-time-series-modality.md), below the text findings) and graphs
-([ADR 0043](adr/0043-graph-modality.md), below the time series findings) are done, each with no core change; the
-other modality (point clouds) is open and waits for a named dataset. No table was named, so the proof is on a
+([ADR 0042](adr/0042-time-series-modality.md), below the text findings), graphs
+([ADR 0043](adr/0043-graph-modality.md), below the time series findings) and point clouds
+([ADR 0044](adr/0044-point-cloud-modality.md), below the graph findings) are done, each with no core change, so every
+modality of the list is done; each still waits for a named dataset to be tuned. No table was named, so the proof is on a
 synthetic one. The checklist of spec §10 in full: `TabularMlpEncoder` and `TabularMlpDecoder`
 (`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, registered by the imports of
 `encoders/__init__.py` and `decoders/__init__.py`, with `utils/mlp_blocks.py` for the shared stack),
@@ -910,7 +911,51 @@ modalities checks that no core package names the new class or the `graph` key. *
   a dense matrix does not scale past a few hundred nodes; a latent per node is the single-tensor decoder item of P4-0.
 - Not done: a reference `loader_factory` for a real collection (`docs/how-to/train-on-graphs.md` has a sketch with a degree
   order), node and edge attributes, sparse or sequential graph representations, and the spec §6 and §8 text, which is
-  unchanged. Point clouds, the last modality of P3-8, stay open.
+  unchanged.
+
+**P3-8 point clouds.** Done, with no core change ([ADR 0044](adr/0044-point-cloud-modality.md)); no collection was named,
+so the proof is on synthetic clouds (an ellipsoid, a torus, a cylinder and a box). A point cloud is a set: `(batch, N, 3)`,
+rows in no particular order, a row of `NaN` a point that does not exist. `PointCloudEncoder` (`point_cloud_encoder_v1`, a
+PointNet-style encoder that is exactly invariant to the order and the padding) and `PointCloudDecoder`
+(`point_cloud_decoder_v1`, a folding of a learned template) are registered by the imports of `encoders/__init__.py` and
+`decoders/__init__.py`, with `utils/point_cloud_blocks.py`, `utils/point_cloud_metrics.py` (the Chamfer distance and the
+cloud scores), `configs/model/point_cloud_single_latent.yaml`, `configs/data/point_cloud.yaml` and
+`configs/experiment/point_cloud_vae.yaml`, and `tests/unit/test_point_cloud_metrics.py`,
+`tests/unit/test_point_cloud_backbone.py` and `tests/integration/test_point_cloud_model_configs.py` (with a
+`scripts/train.py` run). The same kind of test as for the other modalities checks that no core package names the new classes
+or the `point_cloud` key. **Findings:**
+
+- **No set loss in the table (flagged, not fixed: a change to `config/training.py`).** Every loss a YAML file can name pairs
+  point `i` with point `i`, which for a set is an unrelated point. The model trained that way (2,000 complete clouds of 64
+  points, 40 epochs) ended at a Chamfer distance per point of 0.81 on clouds in a random order and 0.38 to 0.45 with the
+  points sorted, against 0.10 for the best cloud that ignores its input, and it is `NaN` on a padded cloud. The Chamfer
+  distance is a Python function and `Trainer` accepts it, so the route is to build the trainer from the experiment file and
+  set `reconstruction_loss_fn` and a `mean` reduction (the loss is already a sum over points). The experiment file composes
+  and `scripts/train.py` wires up, with a placeholder loss and a header that says so; it trains the wrong objective.
+- **The registered classes are within a few percent (by measurement).** The 1D transformer encoder (`patch_size=1`) and the
+  1D CNN decoder, on `NaN` rows replaced by zero and the same Chamfer loss, scored 0.0616 against 0.0593 at 64 points (three
+  seeds) and 0.0329 against 0.0331 at 128, and the flattened tabular MLPs 0.089 to 0.096 (0.105 for no input). The new
+  classes are justified by an exact invariance (the latent vector of an order-aware encoder moved by 0.16 to 0.42 when the
+  rows were reshuffled), a `NaN` that means "no point", the layout and the cost (the encoder is 3, 7 and 12 times faster than
+  the attention one at 64, 256 and 1,024 points), and not by a large gain: a project that wants fewer classes can use the
+  registered pair and lose a few percent.
+- **The trainer refuses different numbers of points (flagged, not fixed: a change to `losses/reconstruction.py`).** The
+  Chamfer distance takes any two sizes, and the shape check of `computeTotalReconstructionLoss` refuses before the loss is
+  called, so `num_points` equals the `N` of the data.
+- **The evaluation metrics are position by position (flagged, not fixed: a change to `evaluation/`).** `mse`, `r2` and
+  `pearson_r` of the modality mean nothing for a set and are `NaN` on a padded cloud; with the Chamfer loss the total
+  reconstruction loss is right, and `computeCloudScores` gives the Chamfer distance, precision, recall and F score.
+- **The weight is the lever, and D-6 again.** The Chamfer distance per point was 0.086 at weight 1, 0.071 at 10, 0.059 at 100
+  and 0.058 at 1,000: 100 is the start of a plateau on synthetic data, not a tuned value. The pooling `max` (0.0584) equalled
+  `max_mean` (0.0590) and the mean alone was worse (0.0677).
+- **The Chamfer loss is quadratic in `N` (not fixed).** A batch of 32 took 2 ms at 64 points, 22 ms at 256 and 877 ms at 1,024,
+  more than the encoder and the decoder together, so large clouds are sampled to a few hundred points by the loader.
+- **No number of points, extra channels weighed with the coordinates, one latent per cloud (flagged, not fixed).** The decoder
+  writes exactly `num_points` points; normals and colors enter the distance as part of one vector; the encoder pools to one
+  vector with no neighbourhoods, so a latent per region is the single-tensor decoder item of P4-0.
+- Not done: a reference `loader_factory` for a real collection (`docs/how-to/train-on-point-clouds.md` has a sketch that
+  normalizes, samples and pads), rotation augmentation, a loss in the table, and the spec §6 and §8 text, which is unchanged.
+  With this modality the list of P3-8 is complete.
 
 ### Phase 4: long-term research (spec §7)
 

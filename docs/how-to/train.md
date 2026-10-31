@@ -86,6 +86,15 @@ probability of each edge. The padded size is written in the data file and in the
 have to come in a meaningful order, which is the loader's job. [Train on graphs](train-on-graphs.md) has a loader and
 scores the edges.
 
+`experiment/point_cloud_vae` (ADR 0044) is the single-modality VAE of a point cloud: it reads `configs/data/point_cloud.yaml`,
+so the batches carry a `point_cloud` tensor of shape `(batch, 64, 3)`, one row per point in no particular order, with a row of
+`NaN` for a point that does not exist. **Do not train it through `scripts/train.py`.** Its `training` block (`mse`, `sum`, weight
+100.0) is a placeholder, because a YAML file cannot name the Chamfer distance and every loss it can name pairs unrelated
+points of a set. Build the trainer from the file and set `trainer.reconstruction_loss_fn` to `computeChamferDistance` and the
+reduction to `"mean"`. The number of points is written in the data file and in the decoder's `num_points`, which have to be
+equal. [Train on point clouds](train-on-point-clouds.md) has a loader that normalizes, samples and pads, the Python route and the
+scores.
+
 ## Train on paired signal and image data
 
 Pairing a signal with its image is your `loader_factory`'s job like the rest of the data

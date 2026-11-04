@@ -402,7 +402,7 @@ scale, for every modality or per decoder:
 training:
   reconstruction_reduction: mean              # the default: nothing changes
   # reconstruction_reduction: sum             # the per-sample sum, the scale of the KL
-  # reconstruction_reduction: {signal: sum, image: mean}   # a decoder left out keeps mean
+  # reconstruction_reduction: {signal: sum, image: mean}   # a reconstruction left out keeps mean
 ```
 
 ```bash
@@ -417,16 +417,26 @@ training loss. Pass the same one to `scripts/evaluate.py --reconstruction-reduct
 ## Set the loss and weight per modality
 
 `training.reconstruction_loss` and `training.reconstruction_weight` are one value for every modality,
-or a mapping from a decoder name to a value ([ADR 0030](../adr/0030-per-modality-reconstruction-loss-and-weight.md)). Use a mapping when the modalities
+or a mapping from a reconstruction name to a value ([ADR 0030](../adr/0030-per-modality-reconstruction-loss-and-weight.md), [ADR 0045](../adr/0045-settings-keyed-by-reconstruction-name.md)). A reconstruction name is the name of a decoder that handles one modality, or one modality of a decoder shared by several (`signal` and `image` of a `shared_transformer` model, whatever the decoder is called). Use a mapping when the modalities
 need different treatment: a binary target next to a continuous one, or a modality that should count
 for more or for less in the reconstruction term.
 
 ```yaml
 training:
   reconstruction_loss: mse                          # the default, for every modality
-  # reconstruction_loss: {signal: mse, mask: bce}     # a decoder left out keeps mse
+  # reconstruction_loss: {signal: mse, mask: bce}     # a reconstruction left out keeps mse
   reconstruction_weight: 1.0                        # the default, for every modality
-  # reconstruction_weight: {signal: 0.5, mask: 0.2}   # a decoder left out keeps 1.0
+  # reconstruction_weight: {signal: 0.5, mask: 0.2}   # a reconstruction left out keeps 1.0
+```
+
+A decoder shared by several modalities takes the same mappings, keyed by its modalities. Keying by the
+name of the shared decoder is refused, and the error lists the reconstruction names and the decoder
+names. This is what balances a signal against an image in `signal_image_shared_transformer`:
+
+```yaml
+training:
+  reconstruction_reduction: {signal: sum, image: sum}
+  reconstruction_weight: {signal: 0.5, image: 2.0}   # one weight per modality of the shared decoder
 ```
 
 ```bash

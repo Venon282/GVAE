@@ -43,3 +43,4 @@
 - [0042: The time series modality](0042-time-series-modality.md)
 - [0043: The graph modality](0043-graph-modality.md)
 - [0044: The point cloud modality](0044-point-cloud-modality.md)
+- [0045: Loss settings are keyed by reconstruction name](0045-settings-keyed-by-reconstruction-name.md)

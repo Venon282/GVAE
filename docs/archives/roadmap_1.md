@@ -2,7 +2,7 @@
 
 **Status:** living document, v0.1. Refresh the baseline (section 2) at each release.
 **Baseline:** release `v1.2.0` (commit `6fed310`), measured on 2026-10-04.
-**Authority:** the [project specification](global-vae-project-specification.md) is the ground
+**Authority:** the [project specification](../global-vae-project-specification.md) is the ground
 truth. When this file and the spec disagree, the spec wins, and the disagreement is a bug to fix
 in one of the two files. Open questions from spec §11 are asked, never guessed (spec §12): every
 item that depends on one says `needs D-n`, and section 7 lists them all.
@@ -71,7 +71,7 @@ tests?). Each decision has a proposed default in section 7, so Phase 0 can begin
 | `EN-L1-DN` | Complete. Buildable from YAML. Tested with dummy and with real modules. | `test_en_l1_dn_default.py`, `test_signal_vae_milestone.py` |
 | `EN-L1-D1` | Buildable through an explicit `RoutingGraph` (example 03 has one decoder whose target is not an input). No dedicated test. | `examples/03_signal_image_to_image.py` |
 | `EN-LN-DN` and `EN-LN-D1`, one latent per encoder | Buildable and correct: checked by hand with real 1D and 2D modules and the `concat`, `sum` and `average` assemblers (right shapes, every parameter receives a gradient). No test executes it: the assembler call in `GlobalVae.forward` and every assembler `forward` are uncovered. | coverage report, audit script |
-| `EN-LN-*` with encoder fan-out (shared plus private) | Not implemented. `GlobalVae.__init__` raises `NotImplementedError`, and the `shared_private` preset is 0% covered. | [ADR 0002](adr/0002-generalize-global-vae-to-routing-graph.md) |
+| `EN-LN-*` with encoder fan-out (shared plus private) | Not implemented. `GlobalVae.__init__` raises `NotImplementedError`, and the `shared_private` preset is 0% covered. | [ADR 0002](../adr/0002-generalize-global-vae-to-routing-graph.md) |
 | `E1-L1-D1`, `E1-L1-DN`, `E1-LN-D1`, `E1-LN-DN` | Not implemented. `AbstractEncoder.forward` takes one tensor and `GlobalVae` feeds `inputs[name]` to `encoders[name]`: nothing builds a shared encoder's input from several modalities, or splits a shared decoder's output back into modalities. | D-2 |
 
 ### 2.3 What exists
@@ -106,7 +106,7 @@ tests?). Each decision has a proposed default in section 7, so Phase 0 can begin
 | §10 typography | no em dashes, no unicode arrows | 95 em dashes in 33 files, 4 arrows in 2 files (README and the spec itself) | P0-3 |
 | §10 testing | unit tests for every registry, a `tests/unit/` tree, one test over the 8 configurations | encoders, decoders and assemblers have no registry-path tests; `tests/unit/` is empty; one row tested | P0-4, P0-5, P1-6 |
 | §10 versioning | semantic versions, maintained changelog | `pyproject.toml` and `__version__` say 0.1.0, the tags say 1.2.0 | P0-6 |
-| §10 tracking | Weights & Biases or MLflow | CSV and TensorBoard shipped ([ADR 0008](adr/0008-experiment-loggers.md)) | D-8, P2-4 |
+| §10 tracking | Weights & Biases or MLflow | CSV and TensorBoard shipped ([ADR 0008](../adr/0008-experiment-loggers.md)) | D-8, P2-4 |
 | §10 logging | no bare `print` | none in `src/`; 9 calls in `scripts/` and `examples/` | D-11 |
 | §10 typing | type hints everywhere | `src/` is strict clean; tests, scripts and examples are outside mypy | P0-8 |
 | §8 layout | repository structure | drifted: preset paths, encoder and decoder file names, new `callbacks/`, `loggers/` and `beta_schedules/` trees | P0-7 |
@@ -244,7 +244,7 @@ documented.
 
 **Do.**
 - Declare `numpy` in `dependencies`, or make its import in `resample.py` lazy.
-- Remove `pydantic` (no import anywhere; [ADR 0011](adr/0011-hydra-config-layer.md) chose
+- Remove `pydantic` (no import anywhere; [ADR 0011](../adr/0011-hydra-config-layer.md) chose
   dataclasses), or record why it stays.
 - Single-source the version: bump to 1.2.0 now, read it from one place (`global_vae.__version__`
   through `[tool.setuptools.dynamic]`, or from package metadata), and add "tag, `pyproject.toml`
@@ -262,7 +262,7 @@ clean, `global_vae.__version__` equals the tag, and `LICENSE` exists.
 **Do.**
 - Refresh stale notes: `src/global_vae/losses/NOTE.md` (says the reconstruction and KL modules are
   deferred and cites `computeKlLoss`), `data/NOTE.md` (describes `DataConfig.transforms` as a list;
-  it has been a per-modality mapping since [ADR 0015](adr/0015-per-modality-data-transforms.md)),
+  it has been a per-modality mapping since [ADR 0015](../adr/0015-per-modality-data-transforms.md)),
   `visualization/NOTE.md` (says no image decoder exists) and `configs/experiment/NOTE.md` (cites a
   README section that no longer exists).
 - Fix `configs/model/default.yaml`, which still names `resnet_encoder_v1` and says no image encoder
@@ -328,7 +328,7 @@ in `heads/__init__.py`, one class per file. Add the new registry to the contract
 **Spec.** §2.2 and §12 ("encoder fan-out goes through a Latent Head, never by giving
 `AbstractEncoder` multiple output heads").
 **Do.** Write a new ADR that supersedes the fan-out guard of
-[ADR 0002](adr/0002-generalize-global-vae-to-routing-graph.md) (ADR 0002 itself stays unedited).
+[ADR 0002](../adr/0002-generalize-global-vae-to-routing-graph.md) (ADR 0002 itself stays unedited).
 Extend `RoutingGraph` with a head per (encoder, latent) edge. `GlobalVae` builds one head module per
 edge and applies it before fusion; graphs without heads run exactly as today. Extend
 `validateRoutingGraph` with two rules: a head's output dimension must equal the target latent's
@@ -393,13 +393,13 @@ lives inside the concrete shared module, which is where transformer backbones (P
 matrix test with dummy shared modules, and modality dropout and cross-modal reports work with a
 shared encoder.
 **Depends on.** D-2, P1-2 (the `E1-LN` rows need fan-out), P1-3.
-**Delivered.** [ADR 0027](adr/0027-shared-encoders-and-decoders.md), taking option A of D-2 as the
+**Delivered.** [ADR 0027](../adr/0027-shared-encoders-and-decoders.md), taking option A of D-2 as the
 default (it needs the owner's approval). One departure from the plan: the cross-modal reports, the
 figure export and `scripts/visualize_latent.py` needed a small change, not none. They used the
 encoder names as the modality names, and now use `GlobalVae.input_modalities` and
 `output_modalities`, which are the same sets for every model without a shared module. No concrete
 shared backbone shipped with it; P3-5 wrote the first one
-([ADR 0037](adr/0037-transformer-and-vit-backbones.md)).
+([ADR 0037](../adr/0037-transformer-and-vit-backbones.md)).
 
 ### P1-6. Configuration matrix test (M, three stages)
 **Status:** done
@@ -450,7 +450,7 @@ add a how-to on choosing `beta` with a sweep recipe, and report latent diagnosti
 per-dimension KL) in the evaluation summary. The numbers themselves (D-6) need P3-1.
 
 **P2-1 status.** Done, except for the numbers (D-6), which wait for P3-1:
-[ADR 0029](adr/0029-loss-scale-convention.md), `training.reconstruction_reduction` and
+[ADR 0029](../adr/0029-loss-scale-convention.md), `training.reconstruction_reduction` and
 `Trainer(reconstruction_reduction=...)` (`mean` by default, so nothing changed), the latent
 diagnostics of `evaluate()` and the `how-to/choose-beta.md` sweep recipe. The item listed P2-2 as a
 dependency; the reduction is per modality by itself (a decoder -> name mapping), so it did not need
@@ -462,7 +462,7 @@ a per-modality loss and weight in config, which were P2-2 (below).
 `str | dict[str, str]` and `float | dict[str, float]`, validate the keys against the modalities,
 test, and update `how-to/train.md`.
 
-**P2-2 status.** Done: [ADR 0030](adr/0030-per-modality-reconstruction-loss-and-weight.md).
+**P2-2 status.** Done: [ADR 0030](../adr/0030-per-modality-reconstruction-loss-and-weight.md).
 `reconstruction_loss` and `reconstruction_weight` take one value or a decoder -> value mapping (a
 decoder left out keeps `mse` and `1.0`; the defaults are unchanged, so nothing changed for a run
 that sets neither). `buildTrainerFromConfig` validates them and refuses an unknown loss name, a
@@ -481,7 +481,7 @@ the style of `test_trainer_smoke.py`:
 - resume from `scripts/train.py` through a `training.resume_from` field (`Trainer.loadCheckpoint`
   exists, but the script never calls it; define whether `num_epochs` is a total or an increment);
 - top-K best checkpoints (listed as a natural extension in
-  [ADR 0007](adr/0007-best-checkpoint-callback.md));
+  [ADR 0007](../adr/0007-best-checkpoint-callback.md));
 - LR schedules (cosine, warm-up) as registered callbacks next to `reduce_lr_on_plateau`;
 - optionally `torch.compile`, and a safer default for checkpoint loading (it uses
   `weights_only=False`, with the trust caveat documented).
@@ -489,10 +489,10 @@ the style of `test_trainer_smoke.py`:
 A resumed deterministic run must reproduce the uninterrupted loss curve within a stated tolerance.
 
 **P2-3 status.** Done, each as an opt-in that is off by default
-([ADR 0031](adr/0031-mixed-precision-gradient-accumulation-and-compile.md),
-[0032](adr/0032-resume-from-the-training-script.md),
-[0033](adr/0033-top-k-checkpoints-and-learning-rate-schedules.md),
-[0034](adr/0034-safe-checkpoint-loading-by-default.md)), with a smoke test each
+([ADR 0031](../adr/0031-mixed-precision-gradient-accumulation-and-compile.md),
+[0032](../adr/0032-resume-from-the-training-script.md),
+[0033](../adr/0033-top-k-checkpoints-and-learning-rate-schedules.md),
+[0034](../adr/0034-safe-checkpoint-loading-by-default.md)), with a smoke test each
 (`tests/integration/test_trainer_capabilities.py`, `test_resume.py`, `test_top_k_checkpoint.py`,
 `test_lr_schedules.py`, `test_safe_checkpoint_loading.py`, and a subprocess run of
 `scripts/train.py` in `test_train_script.py`):
@@ -525,7 +525,7 @@ either amend the spec or add one adapter as an optional extra: an `AbstractExper
 subclass registered by name, with the import deferred as for TensorBoard, logging losses, latent
 figures and reconstructions per run, tested in offline mode.
 
-**P2-4 status.** Done: [ADR 0035](adr/0035-mlflow-experiment-logger.md). D-8 was taken at its proposed
+**P2-4 status.** Done: [ADR 0035](../adr/0035-mlflow-experiment-logger.md). D-8 was taken at its proposed
 default (MLflow as an optional extra), so the spec is not amended: it names the two backends as
 examples. `MlflowLogger`, registered as `mlflow` and selected by `training.loggers`, is an
 `AbstractExperimentLogger` with the import deferred as for TensorBoard (the `mlflow` extra,
@@ -543,7 +543,7 @@ is stable and multi-GPU needs are concrete. Record the triggers as a short ADR: 
 and a real dataset or model that needs more than one GPU. Until both hold, no migration. When they
 do, the `TrainerCallback` seam maps onto Lightning callbacks and the config stays as it is.
 
-**P2-5 status.** Done: [ADR 0036](adr/0036-lightning-migration-triggers.md), a document and no code.
+**P2-5 status.** Done: [ADR 0036](../adr/0036-lightning-migration-triggers.md), a document and no code.
 Migrate only when both triggers hold: Phase 1 is complete (met: P1-1 to P1-6 are done and the
 configuration matrix test passes 8 of 8), and one measured run on real data or a real backbone, on
 one GPU with bf16, accumulation and compile already on, shows that the model does not fit or that the
@@ -594,8 +594,8 @@ CPU. `src/global_vae` is untouched and no ADR is needed. It does not serve
 (paired-data evaluation) can reuse the loader, and P3-1 and the owner's real pairs are the first
 real test of the convention.
 
-**P3-3. Milestone 2 configs.** [ADR 0017](adr/0017-2d-cnn-encoder-decoder.md) and
-[ADR 0018](adr/0018-2d-residual-encoder-decoder.md) leave as next steps two model configs
+**P3-3. Milestone 2 configs.** [ADR 0017](../adr/0017-2d-cnn-encoder-decoder.md) and
+[ADR 0018](../adr/0018-2d-residual-encoder-decoder.md) leave as next steps two model configs
 (`image_single_latent.yaml` and `image_resnet_single_latent.yaml`, mirroring the signal ones) and a
 paired signal plus image experiment file. Add those, a signal plus image PoE model config and
 `configs/experiment/signal_image_vae.yaml` (this name is proposed here, by analogy with
@@ -647,7 +647,7 @@ of the registry design: if a core edit looks necessary, flag it. They also give 
 fusion a meaningful scale and are where the tokenisation of P1-5 lives.
 
 **P3-5 status.** Done, with no core change: the registry design held. Six classes, registered by
-the imports of `encoders/__init__.py` and `decoders/__init__.py` ([ADR 0037](adr/0037-transformer-and-vit-backbones.md)):
+the imports of `encoders/__init__.py` and `decoders/__init__.py` ([ADR 0037](../adr/0037-transformer-and-vit-backbones.md)):
 `1d_transformer_*` (a small transformer over the series), `2d_vit_*` and `shared_transformer_*`,
 the first concrete shared encoder and decoder (ADR 0027), whose tokenisation lives in
 `utils/transformer_blocks.py`. Four model files and four experiments in `configs/`, and
@@ -688,7 +688,7 @@ experiment). **Findings:**
 recall@k between modality-specific posterior means), a per-modality metrics table, and streaming
 versions of `mse`, `rmse` and `mae` for very large test sets (noted in `evaluation/NOTE.md`).
 
-**P3-6 status.** Done, with no core change ([ADR 0038](adr/0038-paired-data-evaluation.md)). All of
+**P3-6 status.** Done, with no core change ([ADR 0038](../adr/0038-paired-data-evaluation.md)). All of
 it sits in `evaluation/` and `scripts/evaluate.py`, and is opt-in: `paired_alignment.py`
 (`collectModalityPosteriorMeans`, `computeRetrievalMetrics`, `computeAlignmentMetrics`,
 `evaluatePairedAlignment`), `metrics_table.py` (`MetricsTable`, `buildMetricsTable`) and
@@ -727,7 +727,7 @@ written next to `results.json`. Tests: `tests/unit/test_streaming_metrics.py`,
 `output_length`. Confirm that variable length is a real requirement before designing padding, masks
 and a mask-aware loss.
 
-**P3-7 status.** The model side now exists without a core change ([ADR 0042](adr/0042-time-series-modality.md)): a `NaN` in
+**P3-7 status.** The model side now exists without a core change ([ADR 0042](../adr/0042-time-series-modality.md)): a `NaN` in
 the batch tensor is a value that was not observed, `time_series_encoder_v1` reads it with a mask and gives the same latent
 vector for a series padded with `NaN`, and `computeMaskedSquaredError` is a loss that counts the observed values, passed to
 a `Trainer` from Python. The requirement itself is still unconfirmed by a named dataset, and what only a core change could
@@ -738,12 +738,12 @@ give stays open: a masked loss that a YAML file can name (`config/training.py`),
 the checklist and only once a dataset is named. Tabular data is the cheapest way to prove the
 genericity claim a second time.
 
-**P3-8 status.** Tabular ([ADR 0039](adr/0039-tabular-modality.md)), audio
-([ADR 0040](adr/0040-audio-modality.md), below the tabular findings), text
-([ADR 0041](adr/0041-text-modality.md), below the audio findings), time series
-([ADR 0042](adr/0042-time-series-modality.md), below the text findings), graphs
-([ADR 0043](adr/0043-graph-modality.md), below the time series findings) and point clouds
-([ADR 0044](adr/0044-point-cloud-modality.md), below the graph findings) are done, each with no core change, so every
+**P3-8 status.** Tabular ([ADR 0039](../adr/0039-tabular-modality.md)), audio
+([ADR 0040](../adr/0040-audio-modality.md), below the tabular findings), text
+([ADR 0041](../adr/0041-text-modality.md), below the audio findings), time series
+([ADR 0042](../adr/0042-time-series-modality.md), below the text findings), graphs
+([ADR 0043](../adr/0043-graph-modality.md), below the time series findings) and point clouds
+([ADR 0044](../adr/0044-point-cloud-modality.md), below the graph findings) are done, each with no core change, so every
 modality of the list is done; each still waits for a named dataset to be tuned. No table was named, so the proof is on a
 synthetic one. The checklist of spec §10 in full: `TabularMlpEncoder` and `TabularMlpDecoder`
 (`tabular_mlp_encoder_v1` and `tabular_mlp_decoder_v1`, registered by the imports of
@@ -778,7 +778,7 @@ key. **Findings:**
 - Not done: a reference `loader_factory` for a real table (its imputation and encoding are what a
   named dataset would decide), and the spec §6 and §8 text, which is unchanged.
 
-**P3-8 audio.** Done, with no core change ([ADR 0040](adr/0040-audio-modality.md)); no corpus was named, so the
+**P3-8 audio.** Done, with no core change ([ADR 0040](../adr/0040-audio-modality.md)); no corpus was named, so the
 proof is on synthetic tones. `AudioWaveformEncoder` and `AudioWaveformDecoder` (`audio_waveform_encoder_v1` and
 `audio_waveform_decoder_v1`, registered by the imports of `encoders/__init__.py` and `decoders/__init__.py`, with
 `utils/waveform_blocks.py` and `utils/activations.py`), `configs/model/audio_waveform_single_latent.yaml`,
@@ -808,7 +808,7 @@ tabular checks that no core package names the new classes or the `audio` key. **
 - Not done: a reference `loader_factory` for a real corpus (`docs/how-to/train-on-audio.md` has a sketch), a
   mu-law or pre-emphasis transform, and the spec §6 and §8 text, which is unchanged.
 
-**P3-8 text.** Done, with no core change ([ADR 0041](adr/0041-text-modality.md)); no corpus was named, so the proof
+**P3-8 text.** Done, with no core change ([ADR 0041](../adr/0041-text-modality.md)); no corpus was named, so the proof
 is on a synthetic language. `TextTransformerEncoder` and `TextTransformerDecoder` (`text_transformer_encoder_v1` and
 `text_transformer_decoder_v1`, registered by the imports of `encoders/__init__.py` and `decoders/__init__.py`, with
 `utils/text_blocks.py`), `configs/model/text_transformer_single_latent.yaml`, `configs/data/text.yaml` and
@@ -843,7 +843,7 @@ modalities checks that no core package names the new classes or the `text` key. 
 - Not done: a tokenizer or a vocabulary builder (`docs/how-to/train-on-text.md` has a `loader_factory` sketch), pretrained
   embeddings, and the spec §6 and §8 text, which is unchanged.
 
-**P3-8 time series.** Done, with no core change ([ADR 0042](adr/0042-time-series-modality.md)); no recording was named, so
+**P3-8 time series.** Done, with no core change ([ADR 0042](../adr/0042-time-series-modality.md)); no recording was named, so
 the proof is on synthetic series. `TimeSeriesEncoder` (`time_series_encoder_v1`, registered by the import of
 `encoders/__init__.py`, with `utils/series_blocks.py`) and the existing `1d_cnn_decoder_v1`,
 `configs/model/time_series_single_latent.yaml`, `configs/data/time_series.yaml` and `configs/experiment/time_series_vae.yaml`,
@@ -879,7 +879,7 @@ or the `time_series` key. **Findings:**
 - Not done: a reference `loader_factory` for a real recording (`docs/how-to/train-on-time-series.md` has a sketch), irregular
   sampling (the grid is regular), forecasting, and the spec §6 and §8 text, which is unchanged.
 
-**P3-8 graphs.** Done, with no core change and no new encoder ([ADR 0043](adr/0043-graph-modality.md)); no graph collection
+**P3-8 graphs.** Done, with no core change and no new encoder ([ADR 0043](../adr/0043-graph-modality.md)); no graph collection
 was named, so the proof is on synthetic graphs. A graph is a dense adjacency matrix `(batch, N, N)` padded with isolated nodes,
 which is an image to the 2D classes. The encoder is the existing `2d_cnn_encoder_v1`. `GraphCnnDecoder`
 (`graph_cnn_decoder_v1`, registered by the import of `decoders/__init__.py`) is a thin subclass of `TwoDCnnDecoder`, with
@@ -913,7 +913,7 @@ modalities checks that no core package names the new class or the `graph` key. *
   order), node and edge attributes, sparse or sequential graph representations, and the spec §6 and §8 text, which is
   unchanged.
 
-**P3-8 point clouds.** Done, with no core change ([ADR 0044](adr/0044-point-cloud-modality.md)); no collection was named,
+**P3-8 point clouds.** Done, with no core change ([ADR 0044](../adr/0044-point-cloud-modality.md)); no collection was named,
 so the proof is on synthetic clouds (an ellipsoid, a torus, a cylinder and a box). A point cloud is a set: `(batch, N, 3)`,
 rows in no particular order, a row of `NaN` a point that does not exist. `PointCloudEncoder` (`point_cloud_encoder_v1`, a
 PointNet-style encoder that is exactly invariant to the order and the padding) and `PointCloudDecoder`
@@ -982,10 +982,10 @@ Each item needs an explicit go-ahead and an ADR before any code.
 
 | ID | Question | Options | Proposed | Blocks |
 |---|---|---|---|---|
-| D-1 | **Routing-graph schema in YAML** (spec §11, first bullet). Spec §9 is illustrative and, read against the code, leaves four points open: (a) heads are per edge, yet §9 puts `head:` on the latent space, which is ambiguous when several encoders feed it; (b) decoders need instance names independent of modality names (as `GlobalVae.__init__` already has, [ADR 0019](adr/0019-decouple-encoder-inputs-from-decoder-targets.md) and example 03); (c) beta per latent space already lives in `TrainingConfig.beta_schedules`; (d) the regularizer is already per latent space. | Extend `modalities`; or add separate `encoders`, `decoders` and `latent.spaces` sections | Keep `modalities` for the common case. Add `encoders`, `decoders`, `latent.spaces.<name>.{dim, fed_by, fusion, regularizer}` where `fed_by` is a list of encoder names or a mapping `encoder -> {head, kwargs}`, and `latent.decoders_consume.<decoder>.{spaces, assembler, kwargs}`. Do not duplicate beta. Update the spec §9 examples. | P1-3 |
+| D-1 | **Routing-graph schema in YAML** (spec §11, first bullet). Spec §9 is illustrative and, read against the code, leaves four points open: (a) heads are per edge, yet §9 puts `head:` on the latent space, which is ambiguous when several encoders feed it; (b) decoders need instance names independent of modality names (as `GlobalVae.__init__` already has, [ADR 0019](../adr/0019-decouple-encoder-inputs-from-decoder-targets.md) and example 03); (c) beta per latent space already lives in `TrainingConfig.beta_schedules`; (d) the regularizer is already per latent space. | Extend `modalities`; or add separate `encoders`, `decoders` and `latent.spaces` sections | Keep `modalities` for the common case. Add `encoders`, `decoders`, `latent.spaces.<name>.{dim, fed_by, fusion, regularizer}` where `fed_by` is a list of encoder names or a mapping `encoder -> {head, kwargs}`, and `latent.decoders_consume.<decoder>.{spaces, assembler, kwargs}`. Do not duplicate beta. Update the spec §9 examples. | P1-3 |
 | D-2 | **What a shared encoder or decoder means** for modalities of different shapes (spec §2.1, `E1` rows). Not listed in §11. | A: a shared encoder receives `dict[str, Tensor]`, a shared decoder returns one. B: a stream-adapter registry (`pack` and `unpack`) around one-tensor modules. C: weight tying only, or a caller-packed tensor under one key (possible today, but modality dropout and cross-modal reports cannot see inside the stream). | A. B adds a concept and a registry (and spec §12 asks for no new names for known concepts) for little gain. C stays as the zero-cost fallback. | P1-5, P1-6 stage 3 |
 | D-3 | **Which assembler first** (spec §11, second bullet). | `weighted_sum` or `attention` first | `weighted_sum` (same dimension rule as `sum`, few parameters), then `attention` (needs an output width and a head count) | P1-4 |
-| D-4 | **Further regularizers** (spec §11, third bullet). `free_bits_kl` and `mmd` exist ([ADR 0003](adr/0003-pluggable-latent-regularization.md)). | Keep open, or close | Mark the bullet resolved in the spec and track learned priors as P4-2 | none |
+| D-4 | **Further regularizers** (spec §11, third bullet). `free_bits_kl` and `mmd` exist ([ADR 0003](../adr/0003-pluggable-latent-regularization.md)). | Keep open, or close | Mark the bullet resolved in the spec and track learned priors as P4-2 | none |
 | D-5 | **Pairing mechanism** (spec §11, fourth bullet): which convention pairs a signal with an image (file name, sample ID, a manifest), and what happens to unpaired samples. | per dataset | Pair by sample ID in the caller's `loader_factory`; keep unpaired samples out unless single-modality batches are wanted | P3-2 |
 | D-6 | **Beta hyperparameters** (spec §11, fifth bullet): warm-up length, cyclical period, per-space values. Empirical. | none yet | Decide after P2-1 and the real run of P3-1 | none |
 | D-7 | **Serving target** (spec §11, sixth bullet): API, batch inference or edge. | unknown | Nothing scheduled until answered | P4-4 |
@@ -1002,10 +1002,10 @@ Each item needs an explicit go-ahead and an ADR before any code.
 - `datamodule.py`, and any code in `src/` that loads, pairs or splits datasets (spec §6.2, a
   permanent boundary, not a gap).
 - Modality-specific or dataset-specific transforms, SAXS included (spec §6.2 and §12).
-- U-Net style encoder to decoder skip connections ([ADR 0014](adr/0014-residual-1d-encoder-decoder.md)
+- U-Net style encoder to decoder skip connections ([ADR 0014](../adr/0014-residual-1d-encoder-decoder.md)
   rules them out: they bypass the latent).
 - A Lightning or Fabric migration before the P2-5 triggers hold
-  ([ADR 0036](adr/0036-lightning-migration-triggers.md)).
+  ([ADR 0036](../adr/0036-lightning-migration-triggers.md)).
 - Any component wired into `GlobalVae` by name: every new component goes through its registry.
 
 ## 9. Risks

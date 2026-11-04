@@ -138,7 +138,7 @@ Explicitly desired, but achieved as a **side effect of the fusion strategy choic
 |---|---|---|
 | 1 | 1D signal (generic), first dataset: SAXS (intensity vs. *q*) | Variable-length series. Preprocessing is dataset-specific (e.g. log-scale intensity is standard for SAXS) and must live outside the architecture, in the data pipeline. Candidate encoders: 1D CNN or small transformer over the series. |
 | 2 | Images | Candidate encoders: CNN (ResNet-style) or ViT, depending on resolution/dataset size. |
-| 3+ | Open-ended (audio, tabular, text, time series, graphs, point clouds, ...) | Adding a modality = writing one new `Encoder` + `Decoder` subclass and registering them. Zero changes to core framework code. |
+| 3+ | Open-ended. Delivered in 2.0.0: tabular, audio, text, time series, graphs and point clouds (§6.3). Any further kind follows the same route | Adding a modality = writing one new `Encoder` + `Decoder` subclass and registering them. Zero changes to core framework code. |
 
 ### 6.1 Near-term milestones
  
@@ -202,6 +202,44 @@ architecture-level rule that adding a modality's Encoder/Decoder must never
 require touching the core (§10, §12): here applied to preprocessing instead
 of model architecture.
 
+### 6.3 Data kinds delivered after signals and images
+
+Six further kinds exist since 2.0.0 (roadmap item P3-8, ADR 0039 to 0044). Each one was added through
+the registries alone, by the new-modality checklist of §10, and a test per kind
+(`tests/integration/test_<kind>_model_configs.py`) reads the source of the core packages
+(`assemblers/`, `config/`, `data/`, `evaluation/`, `fusion/`, `heads/`, `latent/`, `losses/`,
+`models/`, `training/` and `visualization/`) to check that none of them names the new classes or the
+batch key. Reading files, tokenizing, padding, ordering and
+pairing stay the caller's `loader_factory` (§6.2): the encoder and the decoder know a tensor, not a
+file format. Where a kind reuses a registered class, the table says so, and no class is added.
+
+| Kind | ADR | Batch key | A batch is | Encoder | Decoder |
+|---|---|---|---|---|---|
+| Tabular | 0039 | `tabular` | one flat float row per sample, `(batch, num_features)`: numeric columns standardized, then one one-hot block per categorical column | `tabular_mlp_encoder_v1` | `tabular_mlp_decoder_v1` |
+| Audio | 0040 | `audio` | a waveform within [-1, 1], `(batch, samples)` or `(batch, channels, samples)`, one length for the dataset | `audio_waveform_encoder_v1` | `audio_waveform_decoder_v1` |
+| Text | 0041 | `text` | one-hot tokens `(batch, length, vocab_size)` (the encoder also reads integer ids `(batch, length)`), one length and one vocabulary for the dataset | `text_transformer_encoder_v1` | `text_transformer_decoder_v1` (a distribution over the vocabulary at each position) |
+| Time series | 0042 | `time_series` | `(batch, channels, length)`, or `(batch, length)` for one channel, `NaN` where a value was not observed | `time_series_encoder_v1` | `1d_cnn_decoder_v1` (existing) |
+| Graph | 0043 | `graph` | a dense, zero-padded adjacency matrix `(batch, N, N)`, or `(batch, C, N, N)` with several kinds of edge | `2d_cnn_encoder_v1` (existing) | `graph_cnn_decoder_v1` |
+| Point cloud | 0044 | `point_cloud` | `(batch, N, 3)`, or `(batch, N, 3 + k)` with extra features, a row of `NaN` is a point that does not exist | `point_cloud_encoder_v1` | `point_cloud_decoder_v1` |
+
+The files of each kind, all present in the repository (§8):
+
+| Kind | Modules (`src/global_vae/`) | Configs (`configs/`) | How-to (`docs/how-to/`) |
+|---|---|---|---|
+| Tabular | `encoders/tabular_mlp_encoder.py`, `decoders/tabular_mlp_decoder.py`, `utils/mlp_blocks.py`, `utils/activations.py` | `model/tabular_single_latent.yaml`, `data/tabular.yaml`, `experiment/tabular_vae.yaml` | `train-on-a-table.md` |
+| Audio | `encoders/audio_waveform_encoder.py`, `decoders/audio_waveform_decoder.py`, `utils/waveform_blocks.py` | `model/audio_waveform_single_latent.yaml`, `data/audio.yaml`, `experiment/audio_vae.yaml` | `train-on-audio.md` |
+| Text | `encoders/text_transformer_encoder.py`, `decoders/text_transformer_decoder.py`, `utils/text_blocks.py` | `model/text_transformer_single_latent.yaml`, `data/text.yaml`, `experiment/text_vae.yaml` | `train-on-text.md` |
+| Time series | `encoders/time_series_encoder.py`, `utils/series_blocks.py` | `model/time_series_single_latent.yaml`, `data/time_series.yaml`, `experiment/time_series_vae.yaml` | `train-on-time-series.md` |
+| Graph | `decoders/graph_cnn_decoder.py`, `utils/graph_metrics.py` | `model/graph_cnn_single_latent.yaml`, `data/graph.yaml`, `experiment/graph_vae.yaml` | `train-on-graphs.md` |
+| Point cloud | `encoders/point_cloud_encoder.py`, `decoders/point_cloud_decoder.py`, `utils/point_cloud_blocks.py`, `utils/point_cloud_metrics.py` | `model/point_cloud_single_latent.yaml`, `data/point_cloud.yaml`, `experiment/point_cloud_vae.yaml` | `train-on-point-clouds.md` |
+
+**Reconstruction losses today.** A YAML file can name `mse`, `l1`, `bce` or `smooth_l1`, a fixed table
+in `config/training.py` (ADR 0030). The shipped experiments name `bce` for text and graphs and `mse`
+for time series. A point cloud is a set, so none of the four names is meaningful for it: its Chamfer
+distance (`utils/point_cloud_metrics.py`) is set on the trainer from Python, and the `mse` of
+`configs/experiment/point_cloud_vae.yaml` is a placeholder that the file says not to use (ADR 0044).
+Making a loss a registered name is planned (roadmap P5-3, not built), see §11.
+
 ---
 
 ## 7. Long-term direction (not built now, but not blocked either)
@@ -210,9 +248,16 @@ Noted so that early interface design doesn't foreclose these later:
 - Hierarchical or sequential/temporal latents (world-model-style state prediction).
 - Discrete/VQ latent codes as an alternative to continuous Gaussian latents.
 - Autoregressive or learned priors over the latent space instead of a fixed standard normal.
-- Scaling toward larger backbones (transformer-heavy encoders/decoders/fusion).
+- Scaling toward larger backbones (transformer-heavy encoders/decoders/fusion). **Delivered in 2.0.0** (ADR 0037): `1d_transformer_*`, `2d_vit_*` and `shared_transformer_*` encoders and decoders, added through the registries with no change to the core. This is the one direction of the four that is no longer open.
 
-These are **future directions**, listed to keep core abstractions (encoder/decoder/fusion interfaces, latent representation) general enough to extend without a rewrite, not a commitment to build them now.
+The other three are **future directions**, listed to keep core abstractions (encoder/decoder/fusion interfaces, latent representation) general enough to extend without a rewrite, not a commitment to build them now.
+
+**What the literature check changed.** The roadmap (`docs/roadmap.md`, section 7, with the survey of section 6.1 checked on 2026-11-02) re-read the three remaining directions against the code and the recent literature. What follows is a set of notes on how a direction could be approached if the owner opens it, not a commitment: each one needs an explicit go-ahead and an ADR before any code.
+
+- **"Not blocked" holds only in part.** A preliminary reading of the code finds that the posterior is a diagonal Gaussian passed as `(mu, logvar)` through encoders, fusion, heads and the model output, that a regularizer receives `(mu, logvar)` and not the sample, that the routing graph is bipartite (encoders, latent spaces, decoders), and that a decoder takes one tensor. Each of these blocks at least one of the three directions. Two more blockers, the lack of a decode-and-sample path and of more than one loss term, are what roadmap Phase 5 plans to remove (P5-5, P5-6, not built yet). An interface audit with no code (P4-0) comes first, to confirm this reading and to propose the smallest generalization.
+- **Discrete latents.** Simpler options than a learned codebook now exist: finite scalar quantization needs no codebook and no extra loss, so it would come first (P4-1). Fusion would happen before quantization, so `poe` and `moe`, which fuse Gaussians, would not apply to a discrete latent.
+- **Learned priors.** A prior fitted after training, on the frozen latents of a trained VAE, changes nothing in the VAE and extends to several latent spaces, so it would come before a prior trained jointly, which needs the regularizer to receive the sample (P4-2).
+- **Hierarchical and sequential latents.** Both make a latent depend on another one, which changes the sentences of §2.2 and §12 that say latent spaces are independent by construction. That change needs the owner's approval before any code (P4-3).
 
 ---
 
@@ -230,10 +275,10 @@ global-vae/
 ├── README.md
 ├── mkdocs.yml
 ├── configs/                     # Hydra/OmegaConf configs, validated against src/global_vae/config/
-│   ├── model/
-│   ├── data/
+│   ├── model/                   # one file per shipped model: signal, image, signal + image, and the six kinds of §6.3
+│   ├── data/                    # one file per data kind: signal, image, signal + image, and the six kinds of §6.3
 │   ├── training/
-│   └── experiment/
+│   └── experiment/              # full experiments (model + data + training), including one per data kind of §6.3
 ├── examples/                     # runnable, self-contained pipeline walkthroughs on
 │   │                             # synthetic data (distinct from scripts/, which need a
 │   │                             # user-supplied factory/config; see examples/README.md)
@@ -245,16 +290,32 @@ global-vae/
 │       │   ├── registry.py
 │       │   ├── one_d_cnn_encoder.py           # 1d_cnn_encoder_v1 (signals, any 1D series)
 │       │   ├── one_d_cnn_residual_encoder.py  # 1d_cnn_resnet_encoder_v1
-│       │   ├── two_d_cnn_encoder.py           # 2d_cnn_encoder_v1 (images, any 2D grid)
-│       │   └── two_d_cnn_residual_encoder.py  # 2d_cnn_resnet_encoder_v1
+│       │   ├── one_d_transformer_encoder.py   # 1d_transformer_encoder_v1 (ADR 0037)
+│       │   ├── two_d_cnn_encoder.py           # 2d_cnn_encoder_v1 (images, any 2D grid; also graphs, ADR 0043)
+│       │   ├── two_d_cnn_residual_encoder.py  # 2d_cnn_resnet_encoder_v1
+│       │   ├── two_d_vit_encoder.py           # 2d_vit_encoder_v1 (ADR 0037)
+│       │   ├── shared_transformer_encoder.py  # shared_transformer_encoder_v1: a series and an image, one stream (ADR 0037)
+│       │   ├── tabular_mlp_encoder.py         # tabular_mlp_encoder_v1 (ADR 0039)
+│       │   ├── audio_waveform_encoder.py      # audio_waveform_encoder_v1 (ADR 0040)
+│       │   ├── text_transformer_encoder.py    # text_transformer_encoder_v1 (ADR 0041)
+│       │   ├── time_series_encoder.py         # time_series_encoder_v1, NaN is a value not observed (ADR 0042)
+│       │   └── point_cloud_encoder.py         # point_cloud_encoder_v1, PointNet design (ADR 0044)
 │       ├── decoders/
 │       │   ├── base.py                    # AbstractDecoder interface (one modality)
 │       │   ├── shared_base.py             # AbstractSharedDecoder interface (several modalities, ADR 0027)
 │       │   ├── registry.py
-│       │   ├── one_d_cnn_decoder.py           # 1d_cnn_decoder_v1
+│       │   ├── one_d_cnn_decoder.py           # 1d_cnn_decoder_v1 (also time series, ADR 0042)
 │       │   ├── one_d_cnn_residual_decoder.py  # 1d_cnn_resnet_decoder_v1
+│       │   ├── one_d_transformer_decoder.py   # 1d_transformer_decoder_v1 (ADR 0037)
 │       │   ├── two_d_cnn_decoder.py           # 2d_cnn_decoder_v1
-│       │   └── two_d_cnn_residual_decoder.py  # 2d_cnn_resnet_decoder_v1
+│       │   ├── two_d_cnn_residual_decoder.py  # 2d_cnn_resnet_decoder_v1
+│       │   ├── two_d_vit_decoder.py           # 2d_vit_decoder_v1 (ADR 0037)
+│       │   ├── shared_transformer_decoder.py  # shared_transformer_decoder_v1: one tensor per modality (ADR 0037)
+│       │   ├── tabular_mlp_decoder.py         # tabular_mlp_decoder_v1 (ADR 0039)
+│       │   ├── audio_waveform_decoder.py      # audio_waveform_decoder_v1 (ADR 0040)
+│       │   ├── text_transformer_decoder.py    # text_transformer_decoder_v1 (ADR 0041)
+│       │   ├── graph_cnn_decoder.py           # graph_cnn_decoder_v1, a thin subclass of the 2D CNN decoder (ADR 0043)
+│       │   └── point_cloud_decoder.py         # point_cloud_decoder_v1 (ADR 0044)
 │       ├── fusion/
 │       │   ├── base.py          # AbstractFusion interface
 │       │   ├── registry.py
@@ -304,15 +365,15 @@ global-vae/
 │       │   ├── callbacks/       # TrainerCallback + registry: checkpoint, best_checkpoint, top_k_checkpoint, early_stopping, reduce_lr_on_plateau, linear_warmup_lr, cosine_lr
 │       │   └── loggers/         # experiment logger interface + registry: csv, tensorboard, mlflow
 │       ├── config/              # structured dataclass schema + builders (data, model, training, experiment); the model schema, its validation and its builder are three modules
-│       ├── evaluation/          # metrics, evaluate(), latent diagnostics (per-dimension KL, active units), cross-modal reports, figure export
+│       ├── evaluation/          # metrics, evaluate(), latent diagnostics (per-dimension KL, active units), cross-modal reports, paired retrieval and alignment, a per-modality metrics table, streaming metrics (ADR 0038), figure export
 │       ├── visualization/       # latent, reconstruction and loss-curve plots (optional `visualization` extra)
-│       └── utils/               # seed, convolution arithmetic and blocks, shared builders
+│       └── utils/               # seed, convolution arithmetic and blocks, shared builders, the building blocks of the backbones (transformer, mlp, waveform, text, series, point cloud) and the scores of graphs and point clouds (§6.3)
 ├── tests/
 │   ├── unit/                     # one component at a time, hand-made tensors
 │   └── integration/              # wiring of several components, scripts, examples, the docs build
 ├── notebooks/
 ├── scripts/                      # train.py, evaluate.py, visualize_latent.py, gen_ref_pages.py
-├── docs/                         # this specification, roadmap.md, adr/, changelog/, how-to/
+├── docs/                         # this specification, roadmap.md, archives/ (superseded roadmaps), adr/, changelog/, how-to/
 └── .github/workflows/            # CI (lint, types, tests) and the docs build
 ```
 
@@ -499,10 +560,10 @@ Every model example above builds, and trains through `scripts/train.py` (`tests/
 
 ## 11. Open questions (deliberately deferred)
 
-- Which regularizer strategies to implement beyond the default `kl_standard_normal` (§2.3) . MMD and free-bits KL are candidates; not needed immediately, but the registry should stay open.
 - Exact pairing mechanism for the first paired signal+image dataset (§6.1) . matching by filename/sample-ID convention is the likely approach, but the concrete scheme isn't decided yet. (Note: this is a *pairing* question, i.e. a `loader_factory` concern, distinct from and not blocking §6.2's generic transforms, which are already implemented and do not depend on how pairing is eventually done.)
 - Precise β schedule hyperparameters (warm-up length, cyclical period, per-space values) . the mechanism supports all of this (§2.3); only the actual numbers are still to be tuned empirically once training starts. The scale `beta` acts on is no longer open (see below), and `docs/how-to/choose-beta.md` gives the sweep to tune it with.
 - Concrete production/serving target (API serving, batch inference, edge deployment, ...) . in scope longer-term (§1), but sequenced after the model is functionally complete; specific requirements aren't known yet.
+- The protocol of staged training and latent alignment between two separately trained models (roadmap Phase 6, not built): the latent distance of the pair stage, what is frozen in the last stage, how the stages are orchestrated, and whether the two latent widths must be equal (decisions D-13 to D-16 of the roadmap, none answered yet). Once the owner answers, the protocol gets its own subsection of §6 or §2.
 
 **Resolved, no longer open:** whether any part of the data pipeline belongs inside the framework (§6.2). Generic, invertible preprocessing (`data/transforms/`) does; dataset loading, pairing, and splitting (`datamodule.py`) permanently does not, for the reasons given in §6.2. This was previously bundled as one deferred item; it is now a settled design decision, not an open question.
 
@@ -512,7 +573,9 @@ Every model example above builds, and trains through `scripts/train.py` (`tests/
 
 **Also resolved:** the trainer capabilities (roadmap P2-3). Mixed precision, gradient accumulation and `torch.compile` are opt-in (ADR 0031); `training.resume_from` continues a run, `num_epochs` is the total, and callbacks keep their state across a resume (ADR 0032); `top_k_checkpoint`, `linear_warmup_lr` and `cosine_lr` are registered callbacks (ADR 0033); checkpoints are loaded with `weights_only=True` by default (ADR 0034).
 
-**Also resolved:** the YAML schema for the routing graph, the Latent Head assignments and the regularizer/beta configuration (§9, ADR 0025). Heads sit on the encoder -> latent edge (`fed_by`), decoder instances are named independently of modalities (`encoders`, `decoders`), the regularizer is a field of each latent space, and beta stays per latent space in `TrainingConfig.beta_schedules`. `validateRoutingGraph` and `validateModelConfig` check the result, and an error starts with the dotted path of the field. Per-modality `reconstruction_loss` and `reconstruction_weight` are not part of this routing schema: they are `training` fields, a single value or a decoder -> value mapping validated against the model's decoders (ADR 0030).
+**Also resolved:** the YAML schema for the routing graph, the Latent Head assignments and the regularizer/beta configuration (§9, ADR 0025). Heads sit on the encoder -> latent edge (`fed_by`), decoder instances are named independently of modalities (`encoders`, `decoders`), the regularizer is a field of each latent space, and beta stays per latent space in `TrainingConfig.beta_schedules`. `validateRoutingGraph` and `validateModelConfig` check the result, and an error starts with the dotted path of the field. Per-modality `reconstruction_loss` and `reconstruction_weight` are not part of this routing schema: they are `training` fields, a single value or a decoder -> value mapping validated against the model's decoders (ADR 0030). This sentence is exact for a decoder that handles one modality. For a decoder shared by several modalities it has a known limit (roadmap finding I-1): a mapping keyed by modality is refused, and a weight or a reduction keyed by the decoder's name is accepted and not applied per modality. Two changes are planned and not built (roadmap P5-4 and P5-3), and the sentence will be rewritten when they land. A shared decoder will be keyed by the reconstruction names it produces (its `output_modalities`), so that each modality takes its own loss, weight and reduction, and a one-modality decoder keeps its own name. A loss will be a name in a registry, with a `{name, kwargs}` entry for a loss that takes arguments, instead of one of the four names of a fixed table.
+
+**Also resolved:** which regularizer strategies to implement beyond the default `kl_standard_normal` (§2.3). `free_bits_kl` and `mmd` are registered (`losses/regularizers/`, ADR 0003), and the registry stays open to others. The one family that is not built, learned or autoregressive priors, is the third direction of §7 and is tracked as roadmap P4-2.
 
 ---
 

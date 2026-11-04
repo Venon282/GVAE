@@ -23,8 +23,8 @@ a `Logger` is a journalling service, not a member of this registry, even though
 `AbstractExperimentLogger` happens to subclass `TrainerCallback` for the hook plumbing;
 see `docs/adr/0022-callback-registry.md` for why the two stay apart.
 
-`optimizer.name` and `reconstruction_loss` (a name, or a decoder -> name mapping, ADR 0030)
-are the two exceptions: they select a plain
+`optimizer.name` and `reconstruction_loss` (a name, or a reconstruction name -> name mapping,
+ADR 0030, ADR 0045) are the two exceptions: they select a plain
 `torch.optim.Optimizer` subclass or a `torch.nn.functional` loss function, neither of
 which is one of this project's own pluggable strategies (spec §10's registry pattern is
 for *this framework's* extension points; wrapping every PyTorch built-in in a registry
@@ -134,16 +134,17 @@ class TrainingConfig:
         optimizer: See `OptimizerConfig`.
         reconstruction_loss: One of `listSupportedReconstructionLossNames()`
             (`"mse"` (default), `"l1"`, `"bce"`, `"smooth_l1"`) for every
-            modality, or a mapping from a decoder name to one of them
-            (roadmap P2-2, ADR 0030), for example `{signal: mse, mask:
-            bce}` for a continuous target next to a binary one. A decoder
+            modality, or a mapping from a reconstruction name to one of them
+            (roadmap P2-2, ADR 0030; the name of a decoder of one modality, or one modality of a
+            shared decoder, roadmap P5-4), for example `{signal: mse, mask:
+            bce}` for a continuous target next to a binary one. A reconstruction
             left out of the mapping keeps `"mse"`. Forwarded to
             `Trainer`'s `reconstruction_loss_fn`. Typed `Any` because a
             structured config cannot express `str | dict[str, str]`;
             `buildTrainerFromConfig` validates it and names this field in
             the error.
         reconstruction_weight: A number (at least zero) for every
-            modality, or a mapping from a decoder name to one, for example
+            modality, or a mapping from a reconstruction name to one, for example
             `{signal: 0.5, image: 2.0}`. A decoder left out of the mapping
             keeps `1.0`. Forwarded to `Trainer`'s `reconstruction_weights`.
             Typed `Any` and validated like `reconstruction_loss`.
@@ -152,7 +153,7 @@ class TrainingConfig:
             the per-element mean, which is what every config did before
             this field existed) or `"sum"` (the per-sample sum averaged
             over the batch, the scale of the KL term). Either one name
-            for every modality or a mapping from a decoder name to a
+            for every modality or a mapping from a reconstruction name to a
             name, for example `{signal: sum, image: mean}`; a decoder
             left out of the mapping keeps `"mean"`. Typed `Any` because
             a structured config cannot express `str | dict[str, str]`;
@@ -317,32 +318,41 @@ def resolveReconstructionLossFn(name: str) -> LossFn:
     return _RECONSTRUCTION_LOSS_FNS[name]
 
 
-def _checkDecoderKeys(
+def _checkReconstructionKeys(
     field_name: str, mapping: Mapping[Any, Any], model: GlobalVae, default_text: str
 ) -> None:
-    """Raise if a per-decoder mapping names a decoder that `model` does not have.
+    """Raise if a per-modality mapping names a reconstruction that `model` does not produce.
+
+    A setting is keyed by the name of a **reconstruction**, which is what the loss reads
+    (`computeTotalReconstructionLoss`): the name of a decoder that handles one modality, and, for
+    a decoder shared by several modalities, each of its `output_modalities` (ADR 0030, ADR 0045).
 
     Args:
         field_name: How the setting is called in the message.
-        mapping: The configured mapping, decoder name -> value.
-        model: The model the trainer is built for. Its `decoders` give the valid keys.
-        default_text: What a decoder left out of the mapping gets, written for the message.
+        mapping: The configured mapping, reconstruction name -> value.
+        model: The model the trainer is built for. Its `output_modalities` give the valid keys.
+        default_text: What a reconstruction left out of the mapping gets, written for the message.
 
     Raises:
-        ValueError: If a key is not a decoder of `model`. It is an error and not a warning: the
-            decoder the key was meant for would silently keep its default.
+        ValueError: If a key is not a reconstruction name of `model`. It is an error and not a
+            warning: the reconstruction the key was meant for would silently keep its default.
+            The message lists the reconstruction names and the decoder names, since the name of a
+            shared decoder is the likeliest mistake.
     """
-    unknown = sorted(str(name) for name in set(mapping) - set(model.decoders))
+    unknown = sorted(str(name) for name in set(mapping) - set(model.output_modalities))
     if unknown:
         raise ValueError(
-            f"{field_name} names decoder(s) {unknown} that the model does not have "
-            f"(decoders: {sorted(model.decoders)}). A decoder left out of the mapping keeps "
-            f"{default_text}, so a mistyped name would change nothing and say nothing."
+            f"{field_name} names decoder(s) {unknown} that are not reconstruction names of the "
+            f"model (decoders: {sorted(model.decoders)}, reconstruction names: "
+            f"{sorted(model.output_modalities)}). Key a setting by reconstruction name: the name "
+            f"of a decoder of one modality, or one modality of a shared decoder. A reconstruction "
+            f"left out of the mapping keeps {default_text}, so a mistyped name would change "
+            f"nothing and say nothing."
         )
 
 
 def _checkModalityName(name: Any, field_name: str) -> None:
-    """Raise `ValueError` if a mapping key is not a string (a decoder name always is)."""
+    """Raise `ValueError` if a mapping key is not a string (a reconstruction name always is)."""
     if not isinstance(name, str):
         raise ValueError(f"{field_name}: a modality name must be a string, got {name!r}.")
 
@@ -350,7 +360,7 @@ def _checkModalityName(name: Any, field_name: str) -> None:
 def validateReconstructionLoss(
     value: Any, field_name: str = "training.reconstruction_loss"
 ) -> None:
-    """Check that `value` is a supported loss name or a mapping decoder name -> supported name.
+    """Check that `value` is a supported loss name or a mapping reconstruction name -> name.
 
     This needs no model, so it cannot tell whether a mapping key is a decoder; see
     `resolveReconstructionLoss` for that.
@@ -388,7 +398,7 @@ def validateReconstructionLoss(
 def validateReconstructionWeight(
     value: Any, field_name: str = "training.reconstruction_weight"
 ) -> None:
-    """Check that `value` is a finite number >= 0, or a mapping decoder name -> such a number.
+    """Check that `value` is a finite number >= 0, or a mapping reconstruction name -> number.
 
     A negative weight would make the optimizer maximize a reconstruction error, which is never
     what a config means, so it is refused here (the `Trainer` itself does not check).
@@ -422,26 +432,27 @@ def resolveReconstructionLoss(
     """Turn `TrainingConfig.reconstruction_loss` into `Trainer`'s `reconstruction_loss_fn`.
 
     Args:
-        value: The configured value: a loss name, or a mapping decoder name -> loss name.
+        value: The configured value: a loss name, or a mapping reconstruction name -> loss name.
         model: The model the trainer is built for. Its `decoders` give the valid keys.
         field_name: How the setting is called in error messages.
 
     Returns:
         One loss function for a name. For a mapping, a `dict` with an entry for **every**
-        decoder of `model`: the configured loss, or `"mse"` for a decoder the mapping leaves
-        out (`Trainer` raises `KeyError` for a decoder that has no entry).
+        reconstruction of `model` (`model.output_modalities`): the configured loss, or `"mse"`
+        for a reconstruction the mapping leaves out (`Trainer` raises `KeyError` for a
+        reconstruction that has no entry).
 
     Raises:
         KeyError: If a loss name is not supported (`validateReconstructionLoss`).
-        ValueError: If `value` has the wrong shape, or a mapping key is not a decoder of
-            `model`.
+        ValueError: If `value` has the wrong shape, or a mapping key is not a reconstruction
+            name of `model`.
     """
     validateReconstructionLoss(value, field_name)
     if isinstance(value, Mapping):
-        _checkDecoderKeys(field_name, value, model, repr(DEFAULT_RECONSTRUCTION_LOSS))
+        _checkReconstructionKeys(field_name, value, model, repr(DEFAULT_RECONSTRUCTION_LOSS))
         return {
-            decoder: _RECONSTRUCTION_LOSS_FNS[value.get(decoder, DEFAULT_RECONSTRUCTION_LOSS)]
-            for decoder in model.decoders
+            name: _RECONSTRUCTION_LOSS_FNS[value.get(name, DEFAULT_RECONSTRUCTION_LOSS)]
+            for name in model.output_modalities
         }
     return _RECONSTRUCTION_LOSS_FNS[value]
 
@@ -452,7 +463,7 @@ def resolveReconstructionWeight(
     """Turn `TrainingConfig.reconstruction_weight` into `Trainer`'s `reconstruction_weights`.
 
     Args:
-        value: The configured value: a number, or a mapping decoder name -> number.
+        value: The configured value: a number, or a mapping reconstruction name -> number.
         model: The model the trainer is built for. Its `decoders` give the valid keys.
         field_name: How the setting is called in error messages.
 
@@ -467,7 +478,7 @@ def resolveReconstructionWeight(
     """
     validateReconstructionWeight(value, field_name)
     if isinstance(value, Mapping):
-        _checkDecoderKeys(field_name, value, model, repr(DEFAULT_RECONSTRUCTION_WEIGHT))
+        _checkReconstructionKeys(field_name, value, model, repr(DEFAULT_RECONSTRUCTION_WEIGHT))
         return {str(name): float(weight) for name, weight in value.items()}
     return float(value)
 
@@ -478,7 +489,7 @@ def resolveReconstructionReduction(
     """Validate `TrainingConfig.reconstruction_reduction` against a model's decoders.
 
     Args:
-        value: The configured value: a reduction name, or a mapping decoder name -> name.
+        value: The configured value: a reduction name, or a mapping reconstruction name -> name.
         model: The model the trainer is built for. Its `decoders` give the valid keys.
         field_name: How the setting is called in error messages.
 
@@ -493,7 +504,7 @@ def resolveReconstructionReduction(
     """
     validateReduction(value, field_name)
     if isinstance(value, Mapping):
-        _checkDecoderKeys(field_name, value, model, repr(DEFAULT_REDUCTION))
+        _checkReconstructionKeys(field_name, value, model, repr(DEFAULT_REDUCTION))
         return {str(name): str(reduction) for name, reduction in value.items()}
     return str(value)
 
@@ -626,10 +637,11 @@ def buildTrainerFromConfig(
         ValueError: If `config.reconstruction_loss`,
             `config.reconstruction_weight` or `config.reconstruction_reduction`
             has the wrong shape or an unsupported value (a negative weight,
-            say), or is a mapping that names a decoder `model` does not
-            have. A mistyped decoder name is an error and not a warning: it
-            would leave that decoder on its default (`"mse"`, `1.0`,
-            `"mean"`), a silent change of the objective (ADR 0029, ADR 0030).
+            say), or is a mapping that names a reconstruction `model` does
+            not produce (`model.output_modalities`). A mistyped name is an
+            error and not a warning: it would leave that reconstruction on its
+            default (`"mse"`, `1.0`, `"mean"`), a silent change of the
+            objective (ADR 0029, ADR 0030, ADR 0045).
     """
     optimizer_cls = resolveOptimizerClass(config.optimizer.name)
     reconstruction_loss_fn = resolveReconstructionLoss(config.reconstruction_loss, model)

@@ -44,3 +44,4 @@
 - [0043: The graph modality](0043-graph-modality.md)
 - [0044: The point cloud modality](0044-point-cloud-modality.md)
 - [0045: Loss settings are keyed by reconstruction name](0045-settings-keyed-by-reconstruction-name.md)
+- [0046: Encode and decode seams](0046-encode-and-decode-seams.md)

@@ -328,7 +328,7 @@ def collectModalityPosteriorMeans(
             record: dict[str, dict[str, torch.Tensor]] = {}
             for modality in present:
                 alone = {modality: inputs[modality][:keep].to(resolved_device)}
-                latent_params = model(alone, use_mean=True)["latent_params"]
+                latent_params = model.encode(alone, use_mean=True)["latent_params"]
                 record[modality] = {
                     latent_name: mu.cpu() for latent_name, (mu, _) in latent_params.items()
                 }

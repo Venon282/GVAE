@@ -13,7 +13,7 @@ under a `_paired_eval_test` suffix, as the sibling test files do for theirs.
 import importlib.util
 import json
 import math
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
 
@@ -162,6 +162,23 @@ def _batches(
     ]
 
 
+def _countDecoderSideCalls(model: GlobalVae) -> Callable[[], int]:
+    """Count every call of a decoder or an assembler of `model` from now on.
+
+    Returns:
+        A function that gives the number of calls so far.
+    """
+    calls = [0]
+
+    def hook(*_: object) -> None:
+        calls[0] += 1
+
+    for modules in (model.decoders, model.assemblers):
+        for module in modules.values():
+            module.register_forward_hook(hook)
+    return lambda: calls[0]
+
+
 class TestCollectModalityPosteriorMeans:
     def test_each_modality_gives_its_own_mean_and_not_the_fused_one(self) -> None:
         views = _views(16, noise=0.5)
@@ -177,6 +194,32 @@ class TestCollectModalityPosteriorMeans:
             "latent_params"
         ]["z_fused"][0]
         assert not torch.allclose(fused_mu, records[0]["a"]["z_fused"])
+
+    def test_no_decoder_runs_while_the_means_are_collected(self) -> None:
+        """Retrieval reads the latent spaces only (ADR 0046): the decoders are never called."""
+        model = _model(("a", "b", "c"))
+        views = _views(16, noise=0.2, modalities=("a", "b", "c"))
+        decoderCalls = _countDecoderSideCalls(model)
+        records = collectModalityPosteriorMeans(model, _batches(views, 8))
+        assert len(records) == 2 and decoderCalls() == 0
+        # The control: the same queries through `forward` do pay for the decoders.
+        for modality in ("a", "b", "c"):
+            model({modality: views[modality][:8]}, use_mean=True)
+        assert decoderCalls() == 3 * len(model.decoders)
+
+    def test_the_means_are_those_the_full_forward_pass_gives(self) -> None:
+        views = _views(16, noise=0.5)
+        model = _model()
+        records = collectModalityPosteriorMeans(model, _batches(views, 8))
+        model.eval()
+        with torch.no_grad():
+            for index, record in enumerate(records):
+                rows = slice(8 * index, 8 * index + 8)
+                for modality in ("a", "b"):
+                    mu = model({modality: views[modality][rows]}, use_mean=True)["latent_params"][
+                        "z_fused"
+                    ][0]
+                    assert torch.equal(record[modality]["z_fused"], mu)
 
     def test_the_means_do_not_require_grad_and_the_model_is_left_in_eval_mode(self) -> None:
         model = _model().train()
@@ -406,6 +449,13 @@ class TestRealModels:
         assert 0.0 <= metrics["recall@1"] <= metrics["recall@3"] <= 1.0
         assert math.isfinite(results.alignment["z_fused"]["signal|image"]["cosine_paired"])
 
+    def test_the_paired_evaluation_of_a_real_model_calls_no_decoder_and_no_assembler(self) -> None:
+        for name in ("signal_image_shared_private", "signal_image_shared_transformer"):
+            model = _modelFromYaml(name)
+            decoderCalls = _countDecoderSideCalls(model)
+            evaluatePairedAlignment(model, _signalImageBatches(), ks=(1,))
+            assert decoderCalls() == 0, name
+
     def test_the_cross_attention_model_is_compared_through_its_fusion(self) -> None:
         model = _modelFromYaml("signal_image_transformer_cross_attention")
         results = evaluatePairedAlignment(model, _signalImageBatches(), ks=(1,))
@@ -422,6 +472,17 @@ def _meanBatches(sizes: tuple[int, ...]) -> list[dict[str, torch.Tensor]]:
 
 
 class TestStreamingEvaluate:
+    @pytest.fixture(autouse=True)
+    def _fixedInitialization(self) -> None:
+        """Build the model from a fixed random state.
+
+        The streamed and the pooled paths sum in float32 in a different order, which differs by
+        about 1e-7. For some random initializations an `r2` close to zero then exceeds the relative
+        tolerance of 1e-5, so a test that inherits whatever state the tests before it left was
+        order dependent (about 1 initialization in 20).
+        """
+        torch.manual_seed(0)
+
     def test_the_streamed_metrics_equal_the_pooled_ones(self) -> None:
         model = _model()
         batches = _meanBatches((8, 8, 5))

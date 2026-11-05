@@ -28,7 +28,12 @@ from omegaconf import OmegaConf
 import global_vae.config  # noqa: F401  (registers structured configs with Hydra's ConfigStore)
 from global_vae.config.experiment import ExperimentConfig, loadExperimentConfig
 from global_vae.config.model import ModelConfig, buildModelFromConfig, validateModelConfig
-from global_vae.config.training import resolveReconstructionLoss, resolveReconstructionWeight
+from global_vae.config.training import (
+    buildTrainerFromConfig,
+    resolveReconstructionLoss,
+    resolveReconstructionReduction,
+    resolveReconstructionWeight,
+)
 from global_vae.fusion.cross_attention import CrossAttentionFusion
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
@@ -434,13 +439,14 @@ class TestSharedTransformerFile:
 
 
 class TestLossSettingsOfASharedDecoder:
-    """What a model with a shared decoder does with `training.reconstruction_*` (roadmap P3-5).
+    """What a model with a shared decoder does with `training.reconstruction_*` (roadmap P5-4).
 
-    The config layer keys a per-decoder mapping by decoder instance name (`backbone_out`), and the
-    loss reads the reconstruction keys, which are the modalities (`signal`, `image`). A single
-    value works and covers every modality, which is what the shipped experiment uses; a mapping
-    does not. The `xfail` tests state the behaviour a mapping should have: when the config layer
-    or the loss is changed to agree, they pass and `strict` asks for the marker to be removed.
+    A shared decoder (`backbone_out`) reconstructs two modalities (`signal`, `image`), and the loss
+    reads the reconstruction keys, which are the modalities. The config layer keys a mapping by the
+    same names (ADR 0045): a modality of the shared decoder, so two modalities of one decoder may
+    take different losses, weights and reductions. The name of the shared decoder itself is not a
+    reconstruction and is refused, with both lists of names in the message. A single value covers
+    every modality, as it always did.
     """
 
     name = "signal_image_shared_transformer"
@@ -472,36 +478,86 @@ class TestLossSettingsOfASharedDecoder:
             expected, rel=1e-4
         )
 
-    def test_a_mapping_by_modality_is_refused_with_the_decoder_names(self) -> None:
+    def test_a_mapping_by_modality_is_accepted(self) -> None:
         model = _model(self.name)
-        with pytest.raises(ValueError, match=r"\['signal'\].*decoders: \['backbone_out'\]"):
-            resolveReconstructionWeight({"signal": 0.5}, model)
+        assert resolveReconstructionWeight({"signal": 0.5}, model) == {"signal": 0.5}
+        assert resolveReconstructionReduction({"image": "sum"}, model) == {"image": "sum"}
 
-    def test_a_mapping_by_decoder_name_is_accepted(self) -> None:
-        assert resolveReconstructionWeight({"backbone_out": 0.5}, _model(self.name)) == {
-            "backbone_out": 0.5
-        }
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason="roadmap P3-5: a weight keyed by shared decoder name is ignored by the loss",
-    )
-    def test_a_weight_mapping_by_decoder_name_is_applied(self) -> None:
+    def test_the_name_of_the_shared_decoder_is_refused_with_both_lists_of_names(self) -> None:
         model = _model(self.name)
-        weights = resolveReconstructionWeight({"backbone_out": 0.5}, model)
+        with pytest.raises(
+            ValueError,
+            match=r"\['backbone_out'\].*decoders: \['backbone_out'\], "
+            r"reconstruction names: \['image', 'signal'\]",
+        ):
+            resolveReconstructionWeight({"backbone_out": 0.5}, model)
+
+    def test_a_weight_mapping_by_modality_is_applied_to_that_modality_only(self) -> None:
+        model = _model(self.name)
+        signal = self._reconstruction(model, reconstruction_weights={"signal": 1.0, "image": 0.0})
+        image = self._reconstruction(model, reconstruction_weights={"signal": 0.0, "image": 1.0})
+        weights = resolveReconstructionWeight({"signal": 0.5}, model)
         assert self._reconstruction(model, reconstruction_weights=weights) == pytest.approx(
-            self._reconstruction(model) / 2, rel=1e-4
+            0.5 * signal + image, rel=1e-4
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=KeyError,
-        reason="roadmap P3-5: a loss function keyed by shared decoder name has no entry for signal",
-    )
-    def test_a_loss_function_mapping_by_decoder_name_trains(self) -> None:
+    def test_two_modalities_of_one_decoder_take_different_losses(self) -> None:
         model = _model(self.name)
-        loss_fn = resolveReconstructionLoss({"backbone_out": "l1"}, model)
-        assert self._reconstruction(model, reconstruction_loss_fn=loss_fn) > 0
+        signal = self._reconstruction(
+            model,
+            reconstruction_loss_fn=torch.nn.functional.l1_loss,
+            reconstruction_weights={"signal": 1.0, "image": 0.0},
+        )
+        image = self._reconstruction(model, reconstruction_weights={"signal": 0.0, "image": 1.0})
+        loss_fn = resolveReconstructionLoss({"signal": "l1"}, model)
+        assert isinstance(loss_fn, dict)
+        assert set(loss_fn) == {"signal", "image"}
+        assert self._reconstruction(model, reconstruction_loss_fn=loss_fn) == pytest.approx(
+            signal + image, rel=1e-4
+        )
+
+    def test_two_modalities_of_one_decoder_take_different_reductions(self) -> None:
+        model = _model(self.name)
+        batch = _batch("signal", "image")
+        reduction = resolveReconstructionReduction({"signal": "sum"}, model)
+        torch.manual_seed(0)
+        outputs = model(batch)["reconstructions"]
+        mse = torch.nn.functional.mse_loss
+        expected = (
+            mse(outputs["signal"], batch["signal"]).item() * batch["signal"][0].numel()
+            + mse(outputs["image"], batch["image"]).item()
+        )
+        trainer = Trainer(model, modality_dropout_p=0.0, reconstruction_reduction=reduction)
+        torch.manual_seed(0)
+        assert trainer.computeLosses(batch, step=0).reconstruction.item() == pytest.approx(
+            expected, rel=1e-4
+        )
+
+    def test_a_mapping_per_modality_written_in_yaml_reaches_the_loss(self) -> None:
+        """The three settings of the shared experiment, one value per modality, end to end."""
+        config = _experiment(
+            "signal_image_shared_transformer_vae",
+            "training.reconstruction_loss={signal:l1,image:mse}",
+            "training.reconstruction_weight={signal:0.5,image:2.0}",
+            "training.reconstruction_reduction={signal:sum,image:mean}",
+            "training.modality_dropout_p=0.0",
+        )
+        model = buildModelFromConfig(config.model)
+        trainer = buildTrainerFromConfig(model, config.training)
+        assert trainer.reconstruction_weights == {"signal": 0.5, "image": 2.0}
+        assert trainer.reconstruction_reduction == {"signal": "sum", "image": "mean"}
+        batch = _batch("signal", "image")
+        torch.manual_seed(0)
+        outputs = model(batch)["reconstructions"]
+        functional = torch.nn.functional
+        expected = (
+            0.5 * functional.l1_loss(outputs["signal"], batch["signal"]).item() * SIGNAL_LENGTH
+            + 2.0 * functional.mse_loss(outputs["image"], batch["image"]).item()
+        )
+        torch.manual_seed(0)
+        assert trainer.computeLosses(batch, step=0).reconstruction.item() == pytest.approx(
+            expected, rel=1e-4
+        )
 
 
 @pytest.mark.parametrize(("experiment", "expected"), list(_EXPERIMENTS.items()))

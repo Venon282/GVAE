@@ -6,6 +6,19 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Extra loss terms at the single loss site (roadmap P5-6,
+  [ADR 0047](../adr/0047-extra-loss-terms.md)). A registry `losses/terms/` (`AbstractLossTerm`,
+  `registerLossTerm`, `getLossTermClass`, `listRegisteredLossTerms`; it ships empty, the terms being
+  the objectives of Phases 6 and 7) and `training.loss_terms`, a list of `{name, weight, schedule,
+  kwargs}` whose weight is a number or a registered beta schedule. `StepLosses` gains a `terms`
+  mapping (empty by default); each term is added to the total after its weight and logged as
+  `train/loss/<name>` and `val/loss/<name>`. The trainer holds the terms: their parameters are in
+  the optimizer, clipped with the model's, saved in the checkpoint under `loss_terms_state_dict` and
+  restored by `resume_from`. A term runs in `float32` and is scaled by the accumulation like the
+  total. A run with no `loss_terms` is bit-identical to 2.0.0.
+
 ### Changed
 
 - Loss settings of a shared decoder are keyed by modality (roadmap P5-4, finding I-1,

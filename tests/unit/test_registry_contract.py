@@ -1,19 +1,22 @@
 """Contract test shared by every self-registration registry (spec §10, roadmap P0-4(c)).
 
-The codebase has ten registries (encoders, decoders, fusion strategies, latent heads, assemblers,
-latent regularizers, data transforms, beta schedules, callbacks and experiment loggers), each a
-small module with the same three functions. This file states the behaviour they all promise and
-checks it once per registry, so that a registry that drifts, or a new one that forgets part of the
-pattern, fails here:
+The codebase has eleven registries (encoders, decoders, fusion strategies, latent heads,
+assemblers, latent regularizers, data transforms, beta schedules, callbacks, experiment loggers and
+loss terms), each a small module with the same three functions. This file states the behaviour
+they all promise and checks it once per registry, so that a registry that drifts, or a new one that
+forgets part of the pattern, fails here:
 
 * a class registered under a name is returned by the lookup, unchanged;
 * registering a name twice raises `ValueError` and keeps the first class;
 * looking up an unknown name raises `KeyError`, and the message lists the available names;
 * the `listRegistered*` function returns names in sorted order;
-* importing the registry's subpackage registers at least one built-in.
+* importing the registry's subpackage registers at least one built-in, for a registry that has
+  any: the loss terms of roadmap P5-6 ship none, since the terms are the objectives of Phases 6
+  and 7 (`ships_built_ins=False`, which skips the two checks that need one and nothing else).
 
 A registry added later joins by adding one `_RegistrySpec` to `_REGISTRIES` (the latent head
-registry of roadmap P1-1 did); `test_ten_registries_are_covered` makes forgetting that visible.
+registry of roadmap P1-1 and the loss term registry of P5-6 did);
+`test_eleven_registries_are_covered` makes forgetting that visible.
 Behaviour that belongs to one registry only (which built-ins exist, what each does) stays in that
 registry's own tests, such as `test_callback_registry.py`, `test_assemblers.py` and
 `test_heads.py`.
@@ -57,6 +60,12 @@ from global_vae.losses.regularizers.registry import (
     listRegisteredRegularizers,
     registerRegularizer,
 )
+from global_vae.losses.terms.base import AbstractLossTerm
+from global_vae.losses.terms.registry import (
+    getLossTermClass,
+    listRegisteredLossTerms,
+    registerLossTerm,
+)
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
 from global_vae.training.beta_schedules.registry import (
     getBetaScheduleClass,
@@ -92,6 +101,8 @@ class _RegistrySpec:
         register: The `registerX(name)` class decorator.
         get: The `getXClass(name)` lookup.
         list_names: The `listRegisteredX()` function.
+        ships_built_ins: Whether importing the subpackage registers any built-in. `False` for the
+            loss terms (roadmap P5-6, ADR 0047), which ship none.
     """
 
     label: str
@@ -103,6 +114,7 @@ class _RegistrySpec:
     get: Callable[[str], type]
     list_names: Callable[[], list[str]]
     shared_base: type | None = None
+    ships_built_ins: bool = True
 
 
 _REGISTRIES: tuple[_RegistrySpec, ...] = (
@@ -208,6 +220,17 @@ _REGISTRIES: tuple[_RegistrySpec, ...] = (
         getLoggerClass,
         listRegisteredLoggers,
     ),
+    _RegistrySpec(
+        "loss_terms",
+        "global_vae.losses.terms",
+        "global_vae.losses.terms.registry",
+        "_LOSS_TERM_REGISTRY",
+        AbstractLossTerm,
+        registerLossTerm,
+        getLossTermClass,
+        listRegisteredLossTerms,
+        ships_built_ins=False,
+    ),
 )
 
 _IDS = [spec.label for spec in _REGISTRIES]
@@ -251,10 +274,10 @@ def spec(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> _Re
     return registry_spec
 
 
-def test_ten_registries_are_covered() -> None:
-    """The contract runs over all ten registries; adding an eleventh means adding a spec."""
-    assert len(_REGISTRIES) == 10
-    assert len({s.registry_attr for s in _REGISTRIES}) == 10
+def test_eleven_registries_are_covered() -> None:
+    """The contract runs over all eleven registries; adding a twelfth means adding a spec."""
+    assert len(_REGISTRIES) == 11
+    assert len({s.registry_attr for s in _REGISTRIES}) == 11
 
 
 class TestRegisterAndLookUp:
@@ -310,6 +333,8 @@ class TestDuplicateName:
 
     def test_built_in_names_are_protected_too(self, spec: _RegistrySpec) -> None:
         """Re-using the name of a built-in raises as well, and the built-in stays."""
+        if not spec.ships_built_ins:
+            pytest.skip(f"the {spec.label} registry ships no built-in")
         built_in = spec.list_names()[0]
         before = spec.get(built_in)
         with pytest.raises(ValueError, match="already registered"):
@@ -376,6 +401,7 @@ class TestListing:
 
     def test_returns_a_fresh_list(self, spec: _RegistrySpec) -> None:
         """Editing the returned list does not edit the registry."""
+        spec.register("contract_fresh")(_newEntry(spec, "Fresh"))
         names = spec.list_names()
         names.clear()
         assert spec.list_names() != []
@@ -386,6 +412,8 @@ class TestBuiltIns:
 
     def test_subpackage_registers_at_least_one_built_in(self, spec: _RegistrySpec) -> None:
         """A registry that is empty after its import would make every lookup a `KeyError`."""
+        if not spec.ships_built_ins:
+            pytest.skip(f"the {spec.label} registry ships no built-in")
         assert spec.list_names() != []
 
     def test_every_built_in_resolves_to_a_subclass_of_the_base(self, spec: _RegistrySpec) -> None:

@@ -31,6 +31,10 @@ without any training state at all:
   the file and it had callbacks with state (`TrainerCallback.stateDict`) or a
   gradient scaler (mixed precision with `fp16`), so a resumed run continues them too
   (roadmap P2-3, `docs/adr/0032-resume-from-the-training-script.md`).
+- `loss_terms_state_dict`: only present when the saving `Trainer` had loss terms with state
+  (parameters or buffers, ADR 0047). It is a key of its own and not part of `model_state_dict`:
+  the parameters of an objective are training-only, so a model loaded for evaluation or export
+  does not need them and does not carry them.
 
 Every entry is made of tensors, numbers, strings, `None` and plain containers
 (`dict`, `list`, `tuple`), never of an object of this framework or of NumPy. That is what
@@ -182,6 +186,7 @@ def saveCheckpoint(
     include_rng_state: bool = True,
     callbacks_state: list[dict[str, Any]] | None = None,
     scaler_state_dict: dict[str, Any] | None = None,
+    loss_terms: nn.Module | None = None,
 ) -> None:
     """Save model (+ optionally optimizer, step/epoch/history, config) to `path`.
 
@@ -215,6 +220,10 @@ def saveCheckpoint(
             readable in the safe mode. Omitted from the file when empty or `None`.
         scaler_state_dict: `GradScaler.state_dict()` of the saving `Trainer`, when it used
             `fp16`. Omitted from the file when `None`.
+        loss_terms: The module holding the loss terms of the saving `Trainer`
+            (`Trainer.loss_terms`, ADR 0047). Its `state_dict()` is saved under
+            `loss_terms_state_dict`, and omitted from the file when it is empty, so the file
+            of a run with no term has no new key.
     """
     checkpoint: dict[str, Any] = {
         "global_vae_version": global_vae.__version__,
@@ -230,6 +239,10 @@ def saveCheckpoint(
         checkpoint["callbacks_state"] = callbacks_state
     if scaler_state_dict is not None:
         checkpoint["scaler_state_dict"] = scaler_state_dict
+    if loss_terms is not None:
+        terms_state = loss_terms.state_dict()
+        if terms_state:
+            checkpoint["loss_terms_state_dict"] = terms_state
     if include_rng_state:
         checkpoint["rng_state"] = _captureRngState()
 
@@ -287,6 +300,60 @@ def upgradeCheckpoint(path: str | Path, output_path: str | Path | None = None) -
     return destination
 
 
+def _restoreLossTerms(
+    loss_terms: nn.Module,
+    saved: dict[str, Any],
+    restoring_optimizer: bool,
+    strict: bool,
+    path: Path,
+) -> None:
+    """Load the saved state of the loss terms, or say why it cannot be.
+
+    Args:
+        loss_terms: The module holding the loss terms of the loading trainer.
+        saved: The checkpoint's `loss_terms_state_dict`, `{}` when it has none.
+        restoring_optimizer: Whether the optimizer state is restored too.
+        strict: As for the model: whether a saved name the terms lack is an error.
+        path: The checkpoint file, named in the messages.
+
+    Raises:
+        ValueError: If `saved` holds a name the terms lack and `strict` is `True`, or if a
+            term parameter is absent from `saved` while the optimizer state is restored.
+    """
+    current = loss_terms.state_dict()
+    unexpected = sorted(set(saved) - set(current))
+    missing = sorted(set(current) - set(saved))
+    parameter_names = {name for name, _ in loss_terms.named_parameters()}
+    missing_parameters = [name for name in missing if name in parameter_names]
+    if unexpected:
+        message = (
+            f"Checkpoint '{path}' holds loss term state {unexpected} that the trainer's loss "
+            f"terms {sorted(current)} do not have: it was saved by a run with other "
+            f"`training.loss_terms`."
+        )
+        if strict:
+            raise ValueError(message)
+        logger.warning("%s Dropped.", message)
+    if missing_parameters and restoring_optimizer:
+        raise ValueError(
+            f"Checkpoint '{path}' has no state for the loss term parameter(s) "
+            f"{missing_parameters}, and its optimizer state is for other parameters: it was "
+            f"saved by a run with other `training.loss_terms`. Resume with the terms it was "
+            f"saved with, or load the weights only (`restore_optimizer=False`), and the new "
+            f"terms start from their initial parameters."
+        )
+    if missing:
+        logger.warning(
+            "Checkpoint '%s' has no state for the loss term entries %s: they keep their "
+            "initial values.",
+            path,
+            missing,
+        )
+    loss_terms.load_state_dict(
+        {name: value for name, value in saved.items() if name in current}, strict=False
+    )
+
+
 def loadCheckpoint(
     path: str | Path,
     model: nn.Module,
@@ -295,6 +362,7 @@ def loadCheckpoint(
     restore_rng_state: bool = True,
     strict: bool = True,
     weights_only: bool = True,
+    loss_terms: nn.Module | None = None,
 ) -> CheckpointMetadata:
     """Load a checkpoint saved by `saveCheckpoint` into `model` (and optionally `optimizer`).
 
@@ -329,6 +397,13 @@ def loadCheckpoint(
             (its RNG state holds a NumPy array), or one whose `config` snapshot is not made
             of plain values (a dataclass, say). See
             `docs/adr/0034-safe-checkpoint-loading-by-default.md`.
+        loss_terms: If given, the module holding the loss terms of the loading `Trainer`
+            (`Trainer.loss_terms`, ADR 0047). Its state is restored from
+            `loss_terms_state_dict`, before the optimizer, whose state covers the parameters
+            of the terms. A name the checkpoint holds and the module lacks is refused when
+            `strict` is `True` and dropped with a warning otherwise. A term parameter the
+            checkpoint lacks is refused when an `optimizer` is to be restored (its saved state
+            is for other parameters), and otherwise keeps its initial value, with a warning.
 
     Returns:
         `CheckpointMetadata` holding everything besides the tensors
@@ -341,7 +416,8 @@ def loadCheckpoint(
             `upgradeCheckpoint` and `weights_only=False` remedies for a trusted
             file.
         ValueError: If `optimizer` is given but the checkpoint has no
-            `optimizer_state_dict` (it was saved without one).
+            `optimizer_state_dict` (it was saved without one), or if the loss terms and the
+            checkpoint disagree as described for `loss_terms`.
     """
     resolved_path = Path(path)
     if not resolved_path.exists():
@@ -363,6 +439,15 @@ def loadCheckpoint(
         ) from error
 
     model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
+
+    if loss_terms is not None:
+        _restoreLossTerms(
+            loss_terms,
+            checkpoint.get("loss_terms_state_dict", {}),
+            restoring_optimizer=optimizer is not None,
+            strict=strict,
+            path=resolved_path,
+        )
 
     if optimizer is not None:
         if "optimizer_state_dict" not in checkpoint:

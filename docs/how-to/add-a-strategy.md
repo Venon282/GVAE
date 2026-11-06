@@ -1,4 +1,4 @@
-# Add a fusion, latent head, assembler, regularizer, transform, beta schedule, callback, or logger
+# Add a fusion, latent head, assembler, regularizer, loss term, transform, beta schedule, callback, or logger
 
 Every one of these follows the exact same three-step pattern: subclass an
 abstract base class, decorate it to self-register under a name, and import
@@ -11,6 +11,7 @@ runs.
 | Latent head | `AbstractLatentHead` | `@registerHead("name")` | `heads/` | `heads/__init__.py` |
 | Assembler | `AbstractAssembler` | `@registerAssembler("name")` | `assemblers/` | `assemblers/__init__.py` |
 | Latent regularizer | `AbstractLatentRegularizer` | `@registerRegularizer("name")` | `losses/regularizers/` | `losses/regularizers/__init__.py` |
+| Loss term | `AbstractLossTerm` | `@registerLossTerm("name")` | `losses/terms/` | `losses/terms/__init__.py` |
 | Data transform | `AbstractTransform` | `@registerTransform("name")` | `data/transforms/` | `data/transforms/__init__.py` |
 | Beta schedule | `AbstractBetaSchedule` | `@registerBetaSchedule("name")` | `training/beta_schedules/` | `training/beta_schedules/__init__.py` |
 | Training callback | `TrainerCallback` | `@registerCallback("name")` | `training/callbacks/` | `training/callbacks/__init__.py` |
@@ -75,6 +76,47 @@ An assembler merges the sampled latent vectors of a decoder that consumes severa
   assembler is left out of that pass.
 
 The built-ins are `concat`, `sum`, `average`, and the learned `weighted_sum` and `attention`.
+
+## A note specific to loss terms
+
+A loss term is one extra objective added to the loss of every step, chosen by name from
+`training.loss_terms` (roadmap P5-6, [ADR 0047](../adr/0047-extra-loss-terms.md)). It is an `nn.Module`
+whose `forward` receives the model, the batch, what the model produced for the step and the step, and
+returns a **scalar**:
+
+```python
+@registerLossTerm("latent_alignment")
+class LatentAlignment(AbstractLossTerm):
+    def __init__(self, pairs: list[list[str]]) -> None:
+        super().__init__()
+        self.pairs = pairs
+        self.head = nn.Linear(32, 32)  # a parameter: the trainer trains and saves it
+
+    def validateModel(self, model: GlobalVae) -> None:  # optional: fail at build time
+        for pair in self.pairs:
+            for name in pair:
+                if name not in model.latent_spaces:
+                    raise ValueError(f"latent_alignment: no latent space '{name}'")
+
+    def forward(self, model, batch, outputs, step):
+        a, b = (outputs["latent_params"][name][0] for name in self.pairs[0])
+        return (self.head(a) - b).pow(2).mean()
+```
+
+- **The weight is not the term's business.** It is `weight` (a number, default 1.0) or `schedule` (a
+  registered beta schedule, so the term can be ramped) in the config entry, and the trainer applies it. The
+  value that is logged, as `train/loss/<name>` and `val/loss/<name>`, is the term after its weight.
+- **Return one number.** Reduce over the batch yourself (a mean is the usual choice); the trainer refuses a
+  vector, naming the term, since the scale is a choice that belongs to the term.
+- **The term runs in `float32`**, outside the autocast context, on `float32` outputs. To encode or decode
+  again, call `model.encode(...)` and `model.decode(...)` (ADR 0046), and do not keep the model as an
+  attribute: it would become a submodule of the term.
+- **Parameters are the trainer's.** They join the optimizer (in the model's single group), are clipped with
+  the model's, are saved in the checkpoint under `loss_terms_state_dict` and are restored by `resume_from`.
+  A checkpoint can only be resumed with the terms it was saved with.
+- **The name is the key.** It is the registry name, a term is listed once in `loss_terms`, and it cannot be
+  `total`, `reconstruction` or `regularization`.
+- The registry ships empty on purpose: the terms are the objectives of Phases 6 and 7, each with its own ADR.
 
 ## A note specific to data transforms
 

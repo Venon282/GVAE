@@ -34,9 +34,10 @@ own decoder target.
 
 import contextlib
 import logging
+import math
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,7 @@ from global_vae.losses.reconstruction import (
     computeTotalReconstructionLoss,
     validateReduction,
 )
+from global_vae.losses.terms.base import AbstractLossTerm
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedule_resolution import resolveBetaSchedules
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
@@ -67,6 +69,9 @@ SUPPORTED_MIXED_PRECISIONS = ("bf16", "fp16")
 
 _AUTOCAST_DTYPES = {"bf16": torch.bfloat16, "fp16": torch.float16}
 
+RESERVED_LOSS_TERM_NAMES = ("total", "reconstruction", "regularization")
+"""The losses every run has: an extra term cannot take one of these names."""
+
 
 def _castOutputsToFloat32(outputs: dict[str, Any]) -> dict[str, Any]:
     """Cast the parts of a forward pass that feed the losses back to `float32`.
@@ -80,7 +85,9 @@ def _castOutputsToFloat32(outputs: dict[str, Any]) -> dict[str, Any]:
         outputs: What `GlobalVae.forward` returned.
 
     Returns:
-        `outputs` with `"reconstructions"` and `"latent_params"` cast to `float32`.
+        `outputs` with `"reconstructions"`, `"latent_params"` and `"latent_samples"` cast to
+        `float32`. Only the loss terms (ADR 0047) read the samples, so casting them changes no
+        number of a run without a term.
     """
     return {
         **outputs,
@@ -90,6 +97,9 @@ def _castOutputsToFloat32(outputs: dict[str, Any]) -> dict[str, Any]:
         "latent_params": {
             name: (mu.float(), logvar.float())
             for name, (mu, logvar) in outputs["latent_params"].items()
+        },
+        "latent_samples": {
+            name: tensor.float() for name, tensor in outputs["latent_samples"].items()
         },
     }
 
@@ -110,9 +120,48 @@ def _formatMetrics(metrics: dict[str, float]) -> str:
     )
 
 
+def _validateLossTerms(
+    terms: Mapping[str, AbstractLossTerm],
+    weights: Mapping[str, float | AbstractBetaSchedule],
+) -> None:
+    """Check the names of the loss terms and the weights given for them.
+
+    Args:
+        terms: Loss term name -> term.
+        weights: Loss term name -> number or beta schedule.
+
+    Raises:
+        ValueError: If a name is reserved (`RESERVED_LOSS_TERM_NAMES`) or has a dot in it (it
+            would be a path in the checkpoint's `state_dict`), if `weights` names something
+            that is not in `terms` (a mistyped name would leave the term on its default weight),
+            or if a number is negative or not finite.
+    """
+    for name in terms:
+        if name in RESERVED_LOSS_TERM_NAMES:
+            raise ValueError(
+                f"A loss term cannot be named '{name}': it is the name of a loss that every "
+                f"run has (reserved: {list(RESERVED_LOSS_TERM_NAMES)}), and `loss/{name}` "
+                f"would clash with it."
+            )
+        if "." in name:
+            raise ValueError(f"A loss term name cannot contain a dot, got '{name}'.")
+    unknown = sorted(set(weights) - set(terms))
+    if unknown:
+        raise ValueError(
+            f"loss_term_weights names {unknown}, which are not in loss_terms "
+            f"({sorted(terms)}). A mistyped name would leave the term on weight 1.0."
+        )
+    for name, weight in weights.items():
+        if isinstance(weight, int | float) and (not math.isfinite(weight) or weight < 0):
+            raise ValueError(
+                f"The weight of loss term '{name}' must be a finite number of at least 0, "
+                f"got {weight}."
+            )
+
+
 @dataclass
 class StepLosses:
-    """The three loss tensors produced by one `Trainer.computeLosses` call.
+    """The loss tensors produced by one `Trainer.computeLosses` call.
 
     Kept as a small dataclass rather than a plain dict of tensors so
     call sites (`fitEpoch`, `evaluate`) get named, typed access instead
@@ -129,25 +178,33 @@ class StepLosses:
         regularization: Summed, batch-averaged regularization loss
             across every active latent space this step, already
             weighted by beta (`GlobalVae.computeRegularizationLoss`).
+        terms: Extra loss term name -> its value after its weight
+            (`training.loss_terms`, ADR 0047), the quantity that was added to
+            `total`. Empty when the trainer has no term, which is the default, so
+            `total` is then `reconstruction + regularization`.
     """
 
     total: torch.Tensor
     reconstruction: torch.Tensor
     regularization: torch.Tensor
+    terms: dict[str, torch.Tensor] = field(default_factory=dict)
 
     def asMetrics(self) -> dict[str, float]:
         """Convert to a flat, JSON/logging-friendly `dict[str, float]`.
 
         Returns:
             `{"loss/total": ..., "loss/reconstruction": ...,
-            "loss/regularization": ...}`, detached from the autograd
-            graph (`.item()`).
+            "loss/regularization": ...}`, then `"loss/<name>"` for each extra
+            term, detached from the autograd graph (`.item()`).
         """
-        return {
+        metrics = {
             "loss/total": self.total.item(),
             "loss/reconstruction": self.reconstruction.item(),
             "loss/regularization": self.regularization.item(),
         }
+        for name, value in self.terms.items():
+            metrics[f"loss/{name}"] = value.item()
+        return metrics
 
 
 class Trainer:
@@ -178,6 +235,11 @@ class Trainer:
             or returning a sentinel `fit()` would have to interpret.
         scaler: The `torch.amp.GradScaler` of a run with `mixed_precision="fp16"`, else
             `None` (`bf16` has the range of `float32` and needs none).
+        loss_terms: The extra loss terms (`training.loss_terms`, ADR 0047) by name, an empty
+            `nn.ModuleDict` by default. The trainer holds them, so their parameters are in
+            the optimizer and in the checkpoint.
+        loss_term_weights: Loss term name -> a number or a beta schedule, the weight of
+            each term (`1.0` for a term with no entry).
     """
 
     def __init__(
@@ -199,6 +261,8 @@ class Trainer:
         accumulate_grad_batches: int = 1,
         compile_model: bool = False,
         compile_kwargs: dict[str, Any] | None = None,
+        loss_terms: dict[str, AbstractLossTerm] | None = None,
+        loss_term_weights: dict[str, float | AbstractBetaSchedule] | None = None,
     ) -> None:
         """Build a `Trainer` around an already-constructed `GlobalVae`.
 
@@ -297,6 +361,17 @@ class Trainer:
             compile_kwargs: Keyword arguments for `torch.compile` (for example
                 `{"mode": "reduce-overhead"}`, or `{"backend": "eager"}` to trace without a
                 C++ compiler). Ignored when `compile_model` is `False`.
+            loss_terms: Extra terms of the loss, name -> `AbstractLossTerm`
+                (`losses/terms/`, ADR 0047). Each is computed at the single loss site, weighted,
+                added to the total and logged as `loss/<name>`. `None` (default) means none: the
+                loss is `reconstruction + regularization`, as before. The parameters of the
+                terms are trained by the optimizer (appended to the model's in one group, or
+                added to an optimizer instance you pass), clipped with the model's, and saved
+                in and restored from the checkpoint.
+            loss_term_weights: Loss term name -> weight, a number of at least zero or an
+                `AbstractBetaSchedule` resolved at the step (it takes the place of a number,
+                as a beta schedule takes the place of `beta`). A term with no entry has weight
+                `1.0`.
 
         Raises:
             ValueError: If `modality_dropout_p` is not in `[0, 1]`, if
@@ -304,8 +379,11 @@ class Trainer:
                 `log_every_n_steps` is not positive, if
                 `reconstruction_reduction` is not a supported reduction
                 (`global_vae.losses.reconstruction.validateReduction`), if
-                `mixed_precision` is not `None`, `"bf16"` or `"fp16"`, or if
-                `accumulate_grad_batches` is below 1.
+                `mixed_precision` is not `None`, `"bf16"` or `"fp16"`, if
+                `accumulate_grad_batches` is below 1, if a loss term has a name that is
+                reserved (`total`, `reconstruction`, `regularization`) or has a dot in it,
+                if `loss_term_weights` names something that is not in `loss_terms` or holds a
+                negative or non-finite number, or if a term's `validateModel` refuses `model`.
         """
         if not (0.0 <= modality_dropout_p <= 1.0):
             raise ValueError(f"modality_dropout_p must be in [0, 1], got {modality_dropout_p}.")
@@ -323,6 +401,9 @@ class Trainer:
             raise ValueError(
                 f"accumulate_grad_batches must be at least 1, got {accumulate_grad_batches}."
             )
+        terms = dict(loss_terms or {})
+        term_weights = dict(loss_term_weights or {})
+        _validateLossTerms(terms, term_weights)
 
         self.device = (
             torch.device(device)
@@ -330,11 +411,16 @@ class Trainer:
             else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
         self.model = model.to(self.device)
+        self.loss_terms = nn.ModuleDict(terms).to(self.device)
+        self.loss_term_weights = term_weights
+        for term in terms.values():
+            term.validateModel(self.model)
 
         if isinstance(optimizer, Optimizer):
             self.optimizer = optimizer
+            self._addLossTermParametersToOptimizer()
         else:
-            self.optimizer = optimizer(self.model.parameters(), **(optimizer_kwargs or {}))
+            self.optimizer = optimizer(self._trainedParameters(), **(optimizer_kwargs or {}))
 
         self.reconstruction_weights = reconstruction_weights
         self.reconstruction_loss_fn = reconstruction_loss_fn
@@ -406,10 +492,13 @@ class Trainer:
                 for the exact same model and data.
 
         Returns:
-            `StepLosses` still attached to the autograd graph.
+            `StepLosses` still attached to the autograd graph. When the trainer has extra
+            loss terms, each one is weighted at `step`, added to `total` and kept in
+            `terms` (ADR 0047).
 
         Raises:
-            ValueError: If `batch` is empty, if none of its keys names
+            ValueError: If `batch` is empty, if a loss term returns anything but a scalar
+                tensor, if none of its keys names
                 one of `self.model`'s encoders (via
                 `GlobalVae.selectEncoderInputs`), or (via
                 `computeTotalReconstructionLoss`) if a decoder's
@@ -442,8 +531,26 @@ class Trainer:
             outputs["latent_params"], beta=resolved_beta
         )
         total_loss = reconstruction_loss + regularization_loss
+        term_losses: dict[str, torch.Tensor] = {}
+        if len(self.loss_terms) > 0:
+            weights = self._computeLossTermWeights(step)
+            for name, term in self.loss_terms.items():
+                value = term(self.model, batch, outputs, step)
+                if not isinstance(value, torch.Tensor) or value.dim() != 0:
+                    shape = tuple(value.shape) if isinstance(value, torch.Tensor) else None
+                    raise ValueError(
+                        f"Loss term '{name}' must return a scalar tensor, got "
+                        f"{type(value).__name__}{'' if shape is None else f' of shape {shape}'}. "
+                        f"Reduce it to one number (a mean over the batch, say) before returning it."
+                    )
+                weighted = weights[name] * value
+                term_losses[name] = weighted
+                total_loss = total_loss + weighted
         return StepLosses(
-            total=total_loss, reconstruction=reconstruction_loss, regularization=regularization_loss
+            total=total_loss,
+            reconstruction=reconstruction_loss,
+            regularization=regularization_loss,
+            terms=term_losses,
         )
 
     def fitEpoch(
@@ -473,6 +580,7 @@ class Trainer:
             ValueError: If `dataloader` yields no batches.
         """
         self.model.train()
+        self.loss_terms.train()
         running_totals: dict[str, float] = {}
         num_steps = 0
         accumulate = self.accumulate_grad_batches
@@ -568,12 +676,12 @@ class Trainer:
         if self.scaler is not None:
             if self.grad_clip_norm is not None:
                 self.scaler.unscale_(self.optimizer)
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+                nn.utils.clip_grad_norm_(self._trainedParameters(), self.grad_clip_norm)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
             if self.grad_clip_norm is not None:
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
+                nn.utils.clip_grad_norm_(self._trainedParameters(), self.grad_clip_norm)
             self.optimizer.step()
 
         for key, value in step_metrics.items():
@@ -616,6 +724,7 @@ class Trainer:
             ValueError: If `dataloader` yields no batches.
         """
         self.model.eval()
+        self.loss_terms.eval()
         running_totals: dict[str, float] = {}
         num_batches = 0
 
@@ -730,6 +839,7 @@ class Trainer:
                 for callback in self.callbacks
             ],
             scaler_state_dict=self.scaler.state_dict() if self.scaler is not None else None,
+            loss_terms=self.loss_terms,
         )
 
     def loadCheckpoint(
@@ -760,6 +870,10 @@ class Trainer:
                 (default) reads the file with the restricted unpickler; pass `False` only
                 for a file you trust that it refuses (ADR 0034).
 
+        The parameters of the loss terms (`loss_terms_state_dict`, ADR 0047) are restored
+        before the optimizer, whose state covers them: a checkpoint saved by a run with other
+        terms is refused with a message that says so (see `training.checkpoint.loadCheckpoint`).
+
         The state of the callbacks (`TrainerCallback.stateDict`) and of the gradient
         scaler is restored too: each saved callback state goes to the callback of the
         same class, in order, so a resumed run keeps its patience counters and best
@@ -777,6 +891,7 @@ class Trainer:
             map_location=self.device,
             strict=strict,
             weights_only=weights_only,
+            loss_terms=self.loss_terms,
         )
         self.global_step = metadata.global_step
         self.start_epoch = metadata.start_epoch
@@ -807,6 +922,44 @@ class Trainer:
                 "callback (or fewer of them); that state is dropped.",
                 dropped,
             )
+
+    def _trainedParameters(self) -> list[nn.Parameter]:
+        """Return every parameter the optimizer trains: the model's, then the loss terms'.
+
+        Returns:
+            The parameters of `self.model` followed by those of `self.loss_terms`. With no loss
+            term that is `list(model.parameters())`, which is what the optimizer was built from
+            and what the clipping covered before loss terms existed.
+        """
+        return [*self.model.parameters(), *self.loss_terms.parameters()]
+
+    def _addLossTermParametersToOptimizer(self) -> None:
+        """Give an optimizer instance the loss term parameters it does not hold yet.
+
+        The parameters are added as one more parameter group, which takes the defaults of that
+        optimizer. A caller who wants another learning rate for them puts them in a group of the
+        optimizer before building the trainer, and nothing is added for them here.
+        """
+        held = {id(p) for group in self.optimizer.param_groups for p in group["params"]}
+        missing = [p for p in self.loss_terms.parameters() if id(p) not in held]
+        if missing:
+            self.optimizer.add_param_group({"params": missing})
+
+    def _computeLossTermWeights(self, step: int) -> dict[str, float]:
+        """Resolve the weight of every loss term at `step`.
+
+        Args:
+            step: Global step index a schedule is resolved at.
+
+        Returns:
+            Term name -> weight: the schedule's value at `step` for a term with a schedule, its
+            number for a term with a constant weight, and `1.0` for a term with no entry.
+        """
+        resolved: dict[str, float] = {}
+        for name in self.loss_terms:
+            weight = self.loss_term_weights.get(name, 1.0)
+            resolved[name] = float(weight(step)) if callable(weight) else float(weight)
+        return resolved
 
     def _moveBatchToDevice(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Move every tensor in `batch` to `self.device`.

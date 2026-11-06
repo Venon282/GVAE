@@ -4,11 +4,11 @@ Also holds the builder functions that turn a validated `TrainingConfig` into a r
 `Trainer` with real optimizer, beta schedules, and callbacks wired in.
 
 Every registry-backed field here (`beta_schedules[...].strategy`, `loggers[...].name`,
-the keys of `callbacks`) is resolved through this project's existing registries
-(`training.beta_schedules.registry`, `training.loggers.registry`,
-`training.callbacks.registry`), never hardcoded, so adding a new schedule, logger, or
-callback strategy elsewhere in the codebase makes it usable from config automatically,
-with zero changes needed here (spec §10, §12).
+`loss_terms[...].name`, the keys of `callbacks`) is resolved through this project's existing
+registries (`training.beta_schedules.registry`, `training.loggers.registry`,
+`training.callbacks.registry`, `losses.terms.registry`), never hardcoded, so adding a new
+schedule, logger, loss term, or callback strategy elsewhere in the codebase makes it usable from
+config automatically, with zero changes needed here (spec §10, §12).
 
 `callbacks` (ADR 0022) replaces what used to be a single, hardcoded `checkpoint:
 CheckpointConfig` field covering both checkpoint callbacks at once: a plain
@@ -47,6 +47,8 @@ from omegaconf import MISSING
 from torch.optim import Optimizer
 
 from global_vae.losses.reconstruction import DEFAULT_REDUCTION, LossFn, validateReduction
+from global_vae.losses.terms.base import AbstractLossTerm
+from global_vae.losses.terms.registry import getLossTermClass
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
 from global_vae.training.beta_schedules.registry import getBetaScheduleClass
@@ -108,6 +110,27 @@ class BetaScheduleConfig:
 
 
 @dataclass
+class LossTermConfig:
+    """One extra term of the training loss (roadmap P5-6, ADR 0047).
+
+    Attributes:
+        name: `losses.terms` registry key. It is also the name of the term in the metrics
+            (`train/loss/<name>`, `val/loss/<name>`) and in the checkpoint, so a name can be
+            listed once.
+        weight: A number of at least zero that multiplies the term. `None` (default) means
+            `1.0` when there is no `schedule`.
+        schedule: A beta schedule (`strategy` and `kwargs`, as in `beta_schedules`) whose value at
+            the step is the weight, so a term can be ramped. Not together with `weight`.
+        kwargs: Forwarded to the term's constructor.
+    """
+
+    name: str = MISSING
+    weight: float | None = None
+    schedule: BetaScheduleConfig | None = None
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class LoggerEntryConfig:
     """One experiment logger to attach to the `Trainer` (spec §10 "Experiment tracking").
 
@@ -162,6 +185,10 @@ class TrainingConfig:
             `reconstruction_reduction`.
         beta: Base regularization weight (spec §2.3), shared across
             every latent space that has no entry in `beta_schedules`.
+        loss_terms: Extra terms of the loss, a list of `LossTermConfig`
+            (`name`, `weight`, `schedule`, `kwargs`, roadmap P5-6, ADR 0047). Empty by
+            default, and then the loss is `reconstruction + regularization` as before.
+            Forwarded to `Trainer`'s `loss_terms` and `loss_term_weights`.
         beta_schedules: Latent space name -> `BetaScheduleConfig`.
             Empty (default) means every latent space uses the plain
             `beta` constant, unannealed.
@@ -251,6 +278,7 @@ class TrainingConfig:
     reconstruction_reduction: Any = DEFAULT_REDUCTION
     beta: float = 1.0
     beta_schedules: dict[str, BetaScheduleConfig] = field(default_factory=dict)
+    loss_terms: list[LossTermConfig] = field(default_factory=list)
     modality_dropout_p: float = 0.0
     grad_clip_norm: float | None = None
     device: str | None = None
@@ -529,6 +557,57 @@ def buildBetaSchedules(config: TrainingConfig) -> dict[str, AbstractBetaSchedule
     }
 
 
+def buildLossTerms(
+    config: TrainingConfig,
+) -> tuple[dict[str, AbstractLossTerm], dict[str, float | AbstractBetaSchedule]]:
+    """Instantiate every extra loss term and resolve its weight from `config.loss_terms`.
+
+    Args:
+        config: A `TrainingConfig`.
+
+    Returns:
+        `(loss_terms, loss_term_weights)`, ready to pass as `Trainer(loss_terms=...,
+        loss_term_weights=...)`: term name -> term, and term name -> a number or an
+        `AbstractBetaSchedule`. A term with neither `weight` nor `schedule` has weight `1.0`.
+        Both are empty for a config without `loss_terms`.
+
+    Raises:
+        KeyError: If an entry's `name` is not a registered `losses.terms` term, or a schedule's
+            `strategy` is not a registered beta schedule.
+        ValueError: If a name is listed twice, if an entry gives both `weight` and `schedule`,
+            or if a `weight` is negative or not finite. The message starts with the entry,
+            for example `training.loss_terms[1]`.
+    """
+    terms: dict[str, AbstractLossTerm] = {}
+    weights: dict[str, float | AbstractBetaSchedule] = {}
+    for index, entry in enumerate(config.loss_terms):
+        where = f"training.loss_terms[{index}]"
+        if entry.name in terms:
+            raise ValueError(
+                f"{where}: the loss term '{entry.name}' is listed twice. The name is the key of "
+                f"the term in the metrics and in the checkpoint, so a term is listed once; give "
+                f"it several pairs, say, through its kwargs."
+            )
+        if entry.weight is not None and entry.schedule is not None:
+            raise ValueError(
+                f"{where} ('{entry.name}'): give a `weight` or a `schedule`, not both. The "
+                f"value of the schedule at the step is the weight."
+            )
+        if entry.weight is not None and (not math.isfinite(entry.weight) or entry.weight < 0):
+            raise ValueError(
+                f"{where}.weight ('{entry.name}'): must be a finite number of at least 0, "
+                f"got {entry.weight}."
+            )
+        terms[entry.name] = getLossTermClass(entry.name)(**entry.kwargs)
+        if entry.schedule is not None:
+            weights[entry.name] = getBetaScheduleClass(entry.schedule.strategy)(
+                **entry.schedule.kwargs
+            )
+        elif entry.weight is not None:
+            weights[entry.name] = float(entry.weight)
+    return terms, weights
+
+
 def buildCallbacksFromConfig(
     config: TrainingConfig, config_snapshot: Any = None
 ) -> list[TrainerCallback]:
@@ -632,8 +711,8 @@ def buildTrainerFromConfig(
     Raises:
         KeyError: If `config.optimizer.name`, a name in
             `config.reconstruction_loss`, any `beta_schedules[...].strategy`,
-            any `loggers[...].name`, or any key of `config.callbacks` is not
-            a supported/registered name.
+            any `loggers[...].name`, any `loss_terms[...].name` or any key of
+            `config.callbacks` is not a supported/registered name.
         ValueError: If `config.reconstruction_loss`,
             `config.reconstruction_weight` or `config.reconstruction_reduction`
             has the wrong shape or an unsupported value (a negative weight,
@@ -641,7 +720,9 @@ def buildTrainerFromConfig(
             not produce (`model.output_modalities`). A mistyped name is an
             error and not a warning: it would leave that reconstruction on its
             default (`"mse"`, `1.0`, `"mean"`), a silent change of the
-            objective (ADR 0029, ADR 0030, ADR 0045).
+            objective (ADR 0029, ADR 0030, ADR 0045). Also if a
+            `loss_terms` entry is invalid (see `buildLossTerms`) or a term's
+            `validateModel` refuses `model` (ADR 0047).
     """
     optimizer_cls = resolveOptimizerClass(config.optimizer.name)
     reconstruction_loss_fn = resolveReconstructionLoss(config.reconstruction_loss, model)
@@ -659,6 +740,7 @@ def buildTrainerFromConfig(
             unmatched,
             sorted(model.latent_spaces),
         )
+    loss_terms, loss_term_weights = buildLossTerms(config)
     callbacks = buildCallbacksFromConfig(config, config_snapshot=config_snapshot)
 
     return Trainer(
@@ -679,6 +761,8 @@ def buildTrainerFromConfig(
         accumulate_grad_batches=config.accumulate_grad_batches,
         compile_model=config.compile_model,
         compile_kwargs=dict(config.compile_kwargs),
+        loss_terms=loss_terms,
+        loss_term_weights=loss_term_weights,
     )
 
 

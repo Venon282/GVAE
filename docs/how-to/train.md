@@ -479,6 +479,38 @@ python scripts/evaluate.py \
 The per-modality metrics of the report do not depend on any of them. The report records the
 reduction and not the loss and the weights, so keep them with the run.
 
+## Add an extra term to the loss
+
+`training.loss_terms` lists extra objectives that are added to the reconstruction and the regularization at
+the single loss site, so the training and the validation loss both have them (roadmap P5-6,
+[ADR 0047](../adr/0047-extra-loss-terms.md)). Each entry is `{name, weight, schedule, kwargs}`:
+
+```yaml
+training:
+  loss_terms:
+    - name: latent_alignment          # a term registered in `losses/terms/`
+      kwargs: {pairs: [[z_signal, z_image]]}
+      schedule:                       # the weight follows a beta schedule: a ramp
+        strategy: linear_warmup
+        kwargs: {warmup_steps: 500, end_value: 0.1}
+    - name: latent_reconstruction
+      weight: 0.5                     # or a constant weight, 1.0 when neither is given
+```
+
+- `weight` and `schedule` are alternatives: the value of the schedule at the step **is** the weight (a
+  `constant` schedule is a number). Giving both is an error.
+- Each term is logged as `train/loss/<name>` and `val/loss/<name>`, after its weight, so
+  `loss/total = loss/reconstruction + loss/regularization + the terms`. The CSV, TensorBoard and MLflow
+  loggers need no change, and a callback can monitor a term (`monitor: val/loss/<name>`).
+- A term is listed once, and its name cannot be `total`, `reconstruction` or `regularization`.
+- The parameters of a term (a projection head, say) are trained by the same optimizer, clipped with the
+  model's, saved in the checkpoint under `loss_terms_state_dict` and restored by `resume_from`, so the
+  guarantee of the section above covers them. **Resume with the same `loss_terms` the run was saved with**:
+  a checkpoint saved with other terms is refused with a message that says so.
+- With no `loss_terms`, which is the default, the run is the same as before, bit for bit.
+- No term ships with the framework yet: they are the objectives of Phases 6 and 7. To write one, see
+  [Add a strategy](add-a-strategy.md).
+
 ## Loading a config programmatically
 
 Outside the `scripts/train.py` CLI entry point (e.g. from a notebook or your

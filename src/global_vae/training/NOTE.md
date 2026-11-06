@@ -11,6 +11,13 @@ metrics, called once per optimizer step and once per epoch.
 right after each epoch's `onEpochEnd` callbacks have all run) is the
 lever a callback uses to end a run early (`callbacks/early_stopping.py`).
 
+Extra terms of the loss (roadmap P5-6, `docs/adr/0047-extra-loss-terms.md`) are held by the trainer
+(`Trainer.loss_terms`, an `nn.ModuleDict`, from `training.loss_terms` or the `loss_terms` argument) and
+computed in `computeLosses`, the single loss site for training and validation: each term is weighted (a
+number or a beta schedule), added to the total and kept in `StepLosses.terms`. Their parameters are in
+the optimizer, clipped with the model's, saved under `loss_terms_state_dict` by `checkpoint.py` and
+restored on resume. With no term, nothing changes.
+
 `beta_schedules/` predates `trainer.py` and does not depend on it: see
 `beta_schedules/base.py`, `beta_schedule_resolution.py`, and
 `docs/adr/0004-pluggable-beta-schedules.md`. `Trainer` calls

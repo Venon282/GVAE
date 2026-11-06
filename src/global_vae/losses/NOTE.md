@@ -12,6 +12,11 @@ Both halves of the objective are implemented here.
   `free_bits_kl` and `mmd`. `GlobalVae.computeRegularizationLoss` is the model-side entry
   point and delegates here. See `docs/adr/0003-pluggable-latent-regularization.md`.
 
+- `terms/`: the extra terms of the training loss (`AbstractLossTerm`, registry in
+  `terms/registry.py`, roadmap P5-6, `docs/adr/0047-extra-loss-terms.md`). The registry ships
+  empty: the terms are the objectives of Phases 6 and 7. `Trainer.computeLosses` weights each
+  one, adds it to the total and logs it as `loss/<name>`.
+
 Beta weighting lives outside this package, in `training/beta_schedules/` (`constant`,
 `linear_warmup`, `cyclical_annealing`; see `docs/adr/0004-pluggable-beta-schedules.md`).
 `Trainer` resolves the schedules each step and passes the result to

@@ -45,11 +45,18 @@ into `"reconstructions"` by modality name. Both are nodes of the routing
 graph like any other, named by their instance name, so the graph and
 its validation do not change. See
 `docs/adr/0027-shared-encoders-and-decoders.md`.
+
+`forward()` is `encode()` followed by `decode()`, and both halves are public. `encode()` runs the
+encoders, the fusion and the sampling and stops at the latent spaces. `decode()` starts from latent
+samples and runs the assemblers and the decoders, with the rules for a missing latent space that
+`forward()` has. Retrieval evaluation, cross decoding, sampling from a prior, a latent
+reconstruction loss and an export of the posterior use them instead of a full pass. See
+`docs/adr/0046-encode-and-decode-seams.md`.
 """
 
 import inspect
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import torch
 from torch import nn
@@ -69,6 +76,17 @@ from global_vae.latent.base import RoutingGraph, validateRoutingGraph
 from global_vae.latent.routing_graph_builders.single import buildSingleLatentRoutingGraph
 from global_vae.losses.regularization import computeTotalRegularizationLoss
 from global_vae.losses.regularizers.registry import getRegularizerClass
+
+
+class EncodeOutput(TypedDict):
+    """What `GlobalVae.encode` returns: the two latent entries of `forward`'s result.
+
+    It is a plain dict with these two keys, typed so that `model.decode(encoded["latent_samples"])`
+    checks without a cast.
+    """
+
+    latent_params: dict[str, tuple[torch.Tensor, torch.Tensor]]
+    latent_samples: dict[str, torch.Tensor]
 
 
 class GlobalVae(nn.Module):
@@ -695,10 +713,251 @@ class GlobalVae(nn.Module):
             )
         return encoder_inputs
 
+    def _checkEncoderInputs(self, inputs: dict[str, torch.Tensor], caller: str) -> None:
+        """Raise if `inputs` is empty or names a key that no encoder ingests.
+
+        Args:
+            inputs: The per-modality tensors a caller passed.
+            caller: The public method that was called (`"GlobalVae.forward()"`,
+                `"GlobalVae.encode()"`), so the message names the call the user wrote.
+
+        Raises:
+            ValueError: If `inputs` is empty.
+            KeyError: If some key of `inputs` is not an input modality of any encoder.
+        """
+        if not inputs:
+            raise ValueError(f"{caller} requires at least one modality in `inputs`.")
+
+        unknown_keys = sorted(set(inputs) - set(self._modality_owner))
+        if unknown_keys:
+            raise KeyError(
+                f"{caller} received input key(s) {unknown_keys} with no matching "
+                f"encoder (input modalities: {sorted(self.input_modalities)}). If these are "
+                f"decoder-only reconstruction targets rather than genuine encoder inputs (e.g. a "
+                f"translation-style 'image_in -> image_out' model, ADR 0019), restrict "
+                f"`inputs` first: model.selectEncoderInputs(batch)."
+            )
+
+    def _encode(
+        self, inputs: dict[str, torch.Tensor], use_mean: bool
+    ) -> tuple[dict[str, tuple[torch.Tensor, torch.Tensor]], dict[str, torch.Tensor]]:
+        """Encode, fuse and sample, without checking `inputs` (the callers did).
+
+        This is the first half of what `forward` has always done, in the same order: every
+        encoder with a modality present runs, then each latent space in graph order is fused and
+        sampled. The order matters for a fixed seed, since each sample draws from the global
+        random state.
+
+        Args:
+            inputs: Modality name -> raw input tensor, already checked.
+            use_mean: Use the posterior mean instead of a sample.
+
+        Returns:
+            `(latent_params, latent_samples)`, each keyed by latent space name.
+        """
+        # Group the modalities by the encoder that owns them, in the order of `inputs`, so an
+        # encoder with no modality present does not run and a one-modality encoder sees its tensor.
+        inputs_by_encoder: dict[str, dict[str, torch.Tensor]] = {}
+        for modality, x in inputs.items():
+            inputs_by_encoder.setdefault(self._modality_owner[modality], {})[modality] = x
+        encoder_outputs: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        for encoder_name, modality_inputs in inputs_by_encoder.items():
+            encoder = self.encoders[encoder_name]
+            if isinstance(encoder, AbstractSharedEncoder):
+                ordered = {
+                    modality: modality_inputs[modality]
+                    for modality in self._encoder_modalities[encoder_name]
+                    if modality in modality_inputs
+                }
+                encoder_outputs[encoder_name] = encoder(ordered)
+            else:
+                encoder_outputs[encoder_name] = encoder(modality_inputs[encoder_name])
+
+        latent_params: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
+        latent_samples: dict[str, torch.Tensor] = {}
+        for latent_name, encoder_names in self._feeding_encoders.items():
+            active = [name for name in encoder_names if name in encoder_outputs]
+            if not active:
+                continue
+            edge_params = {
+                name: self._adaptThroughHead(name, latent_name, encoder_outputs[name])
+                for name in active
+            }
+            if len(active) == 1:
+                mu, logvar = edge_params[active[0]]
+            else:
+                mu, logvar = self.fusions[latent_name](edge_params)
+            latent_params[latent_name] = (mu, logvar)
+            latent_samples[latent_name] = (
+                mu if use_mean else self.latent_spaces[latent_name].reparameterize(mu, logvar)
+            )
+        return latent_params, latent_samples
+
+    def _decode(self, latent_samples: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Assemble and decode, without checking `latent_samples` (the callers did).
+
+        This is the second half of what `forward` has always done: for every decoder, in decoder
+        order, the latent spaces it consumes that are present are assembled and decoded. A decoder
+        none of whose latent spaces is present is left out, and so is a decoder whose assembler
+        cannot handle a subset (spec §5) when only a subset is present.
+
+        Args:
+            latent_samples: Latent space name -> sample, already checked.
+
+        Returns:
+            Modality name -> reconstruction, for the decoders that could run.
+
+        Raises:
+            ValueError: If a shared decoder returns other modalities than the ones it declares.
+        """
+        reconstructions: dict[str, torch.Tensor] = {}
+        for decoder_name, decoder in self.decoders.items():
+            required = self._decoder_inputs.get(decoder_name, [])
+            consumed = [latent_name for latent_name in required if latent_name in latent_samples]
+            if not consumed:
+                continue
+            if decoder_name not in self.assemblers:
+                # One latent space and no assembler: the sample is the decoder input.
+                z_in = latent_samples[consumed[0]]
+            else:
+                assembler = cast(AbstractAssembler, self.assemblers[decoder_name])
+                if len(consumed) < len(required) and not assembler.handlesMissingLatents:
+                    # An incomplete input to an assembler that needs all of its latent
+                    # spaces (`concat`): leave this decoder out of the pass (spec §5).
+                    continue
+                # Always through the assembler, even for a single remaining latent space:
+                # `weighted_sum` and `attention` transform it, and the decoder was sized
+                # for the assembler's `output_dim`. `present` says which spaces these are.
+                present = (
+                    None
+                    if len(consumed) == len(required)
+                    else [required.index(name) for name in consumed]
+                )
+                z_in = assembler([latent_samples[name] for name in consumed], present)
+            if isinstance(decoder, AbstractSharedDecoder):
+                produced = decoder(z_in)
+                declared = self._decoder_modalities[decoder_name]
+                if set(produced) != set(declared):
+                    raise ValueError(
+                        f"Shared decoder '{decoder_name}' returned the modalities "
+                        f"{sorted(produced)}, but declares {sorted(declared)} in "
+                        f"`output_modalities`. It must return exactly one tensor per declared "
+                        f"modality."
+                    )
+                for modality in declared:
+                    reconstructions[modality] = produced[modality]
+            else:
+                reconstructions[decoder_name] = decoder(z_in)
+        return reconstructions
+
+    def _checkLatentSamples(self, latent_samples: dict[str, torch.Tensor]) -> None:
+        """Raise if `latent_samples` is empty, names an unknown space or has a wrong width.
+
+        Args:
+            latent_samples: The mapping a caller passed to `decode`.
+
+        Raises:
+            ValueError: If it is empty, or a sample does not have the width of the latent space
+                it is passed under.
+            KeyError: If a name is not a latent space of this model.
+            TypeError: If a sample is not a tensor.
+        """
+        if not latent_samples:
+            raise ValueError(
+                "GlobalVae.decode() requires at least one latent space in `latent_samples`."
+            )
+        unknown = sorted(set(latent_samples) - set(self.latent_spaces))
+        if unknown:
+            raise KeyError(
+                f"GlobalVae.decode() received latent space name(s) {unknown} that this model "
+                f"does not have (latent spaces: {sorted(self.latent_spaces)})."
+            )
+        for name, sample in latent_samples.items():
+            if not isinstance(sample, torch.Tensor):
+                raise TypeError(
+                    f"GlobalVae.decode() expects a tensor for latent space '{name}', got "
+                    f"{type(sample).__name__}."
+                )
+            width = sample.shape[-1] if sample.dim() > 0 else None
+            expected = self.latent_spaces[name].dim
+            if width != expected:
+                raise ValueError(
+                    f"GlobalVae.decode(): latent space '{name}' has width {expected} but the "
+                    f"sample passed under that name has width {width} (shape "
+                    f"{tuple(sample.shape)}). A sample may be passed under the name of another "
+                    f"latent space to decode it with that space's decoders (cross decoding), but "
+                    f"it needs equal latent widths."
+                )
+
+    def encode(self, inputs: dict[str, torch.Tensor], use_mean: bool = False) -> EncodeOutput:
+        """Run the encode, fuse, sample half of `forward` and stop at the latent spaces.
+
+        Every encoder with a modality present runs, then each latent space it reaches is fused
+        and sampled. No assembler and no decoder runs, so it is what retrieval evaluation, a
+        latent reconstruction loss or an export of the posterior need, without a pass through
+        the decoders (ADR 0046).
+
+        Args:
+            inputs: Modality name -> raw input tensor. Any non-empty subset of the configured
+                modalities is accepted, with the same missing-modality rules as `forward`.
+                Every key must be one of `input_modalities` (see `selectEncoderInputs`).
+            use_mean: If `False` (default), each latent space is sampled with the
+                reparameterization trick. If `True`, each one uses its posterior mean `mu` in
+                place of a sample, as in `forward`.
+
+        Returns:
+            A dict with `"latent_params"` (latent space name -> `(mu, logvar)`) and
+            `"latent_samples"` (latent space name -> sampled, or `mu` if `use_mean=True`, `z`).
+            A latent space with no available input is absent from both.
+
+        Raises:
+            ValueError: If `inputs` is empty.
+            KeyError: If some key of `inputs` is not an input modality of any encoder.
+        """
+        self._checkEncoderInputs(inputs, "GlobalVae.encode()")
+        latent_params, latent_samples = self._encode(inputs, use_mean)
+        return {"latent_params": latent_params, "latent_samples": latent_samples}
+
+    def decode(self, latent_samples: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Run the assemble, decode half of `forward`, starting from latent samples.
+
+        For every decoder whose latent spaces are present in `latent_samples`, the assembler (if
+        it has one) combines them and the decoder reconstructs its modality. The rules for a
+        missing latent space are the ones `forward` has: a decoder none of whose spaces is
+        present is left out, and so is a decoder whose assembler cannot handle a subset (spec §5)
+        when only a subset is present.
+
+        **Cross decoding** needs no method of its own: pass the sample of one latent space under
+        the name of another, for example `decode({"z_image": samples["z_signal"]})`, and the
+        decoders of `z_image` read it. The two spaces need equal widths.
+
+        Args:
+            latent_samples: Latent space name -> sample, shape `(batch, dim)`, typically the
+                `"latent_samples"` of `encode`, a draw from a prior, or a sample passed under
+                another space's name. A name must be a latent space of this model.
+
+        Returns:
+            Modality name -> reconstruction: the decoder name for a one-modality decoder, each of
+            its `output_modalities` for a shared one. A decoder that could not run is absent.
+
+        Raises:
+            ValueError: If `latent_samples` is empty, a sample does not have the width of the
+                latent space it is passed under, or a shared decoder returns other modalities
+                than the ones it declares.
+            KeyError: If a name is not a latent space of this model.
+            TypeError: If a sample is not a tensor.
+        """
+        self._checkLatentSamples(latent_samples)
+        return self._decode(latent_samples)
+
     def forward(
         self, inputs: dict[str, torch.Tensor], use_mean: bool = False
     ) -> dict[str, dict[str, torch.Tensor] | dict[str, tuple[torch.Tensor, torch.Tensor]]]:
-        """Run one encode, fuse, sample, assemble, decode pass.
+        """Run one encode, fuse, sample, assemble, decode pass: `encode` then `decode`.
+
+        The two halves are public (`encode`, `decode`, ADR 0046) and this method runs them one
+        after the other, so under a fixed seed its outputs are exactly what they were when it was
+        a single loop.
 
         Args:
             inputs: Modality name -> raw input tensor. Any non-empty
@@ -739,95 +998,9 @@ class GlobalVae(nn.Module):
             KeyError: If some key of `inputs` is not an input modality of
                 any encoder (see `selectEncoderInputs`).
         """
-        if not inputs:
-            raise ValueError("GlobalVae.forward() requires at least one modality in `inputs`.")
-
-        unknown_keys = sorted(set(inputs) - set(self._modality_owner))
-        if unknown_keys:
-            raise KeyError(
-                f"GlobalVae.forward() received input key(s) {unknown_keys} with no matching "
-                f"encoder (input modalities: {sorted(self.input_modalities)}). If these are "
-                f"decoder-only reconstruction targets rather than genuine encoder inputs (e.g. a "
-                f"translation-style 'image_in -> image_out' model, ADR 0019), restrict "
-                f"`inputs` first: model.selectEncoderInputs(batch)."
-            )
-
-        # Group the modalities by the encoder that owns them, in the order of `inputs`, so an
-        # encoder with no modality present does not run and a one-modality encoder sees its tensor.
-        inputs_by_encoder: dict[str, dict[str, torch.Tensor]] = {}
-        for modality, x in inputs.items():
-            inputs_by_encoder.setdefault(self._modality_owner[modality], {})[modality] = x
-        encoder_outputs: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
-        for encoder_name, modality_inputs in inputs_by_encoder.items():
-            encoder = self.encoders[encoder_name]
-            if isinstance(encoder, AbstractSharedEncoder):
-                ordered = {
-                    modality: modality_inputs[modality]
-                    for modality in self._encoder_modalities[encoder_name]
-                    if modality in modality_inputs
-                }
-                encoder_outputs[encoder_name] = encoder(ordered)
-            else:
-                encoder_outputs[encoder_name] = encoder(modality_inputs[encoder_name])
-
-        latent_params: dict[str, tuple[torch.Tensor, torch.Tensor]] = {}
-        latent_samples: dict[str, torch.Tensor] = {}
-        for latent_name, encoder_names in self._feeding_encoders.items():
-            active = [name for name in encoder_names if name in encoder_outputs]
-            if not active:
-                continue
-            edge_params = {
-                name: self._adaptThroughHead(name, latent_name, encoder_outputs[name])
-                for name in active
-            }
-            if len(active) == 1:
-                mu, logvar = edge_params[active[0]]
-            else:
-                mu, logvar = self.fusions[latent_name](edge_params)
-            latent_params[latent_name] = (mu, logvar)
-            latent_samples[latent_name] = (
-                mu if use_mean else self.latent_spaces[latent_name].reparameterize(mu, logvar)
-            )
-
-        reconstructions: dict[str, torch.Tensor] = {}
-        for decoder_name, decoder in self.decoders.items():
-            required = self._decoder_inputs.get(decoder_name, [])
-            consumed = [latent_name for latent_name in required if latent_name in latent_samples]
-            if not consumed:
-                continue
-            if decoder_name not in self.assemblers:
-                # One latent space and no assembler: the sample is the decoder input.
-                z_in = latent_samples[consumed[0]]
-            else:
-                assembler = cast(AbstractAssembler, self.assemblers[decoder_name])
-                if len(consumed) < len(required) and not assembler.handlesMissingLatents:
-                    # An incomplete input to an assembler that needs all of its latent
-                    # spaces (`concat`): leave this decoder out of the pass (spec §5).
-                    continue
-                # Always through the assembler, even for a single remaining latent space:
-                # `weighted_sum` and `attention` transform it, and the decoder was sized
-                # for the assembler's `output_dim`. `present` says which spaces these are.
-                present = (
-                    None
-                    if len(consumed) == len(required)
-                    else [required.index(name) for name in consumed]
-                )
-                z_in = assembler([latent_samples[name] for name in consumed], present)
-            if isinstance(decoder, AbstractSharedDecoder):
-                produced = decoder(z_in)
-                declared = self._decoder_modalities[decoder_name]
-                if set(produced) != set(declared):
-                    raise ValueError(
-                        f"Shared decoder '{decoder_name}' returned the modalities "
-                        f"{sorted(produced)}, but declares {sorted(declared)} in "
-                        f"`output_modalities`. It must return exactly one tensor per declared "
-                        f"modality."
-                    )
-                for modality in declared:
-                    reconstructions[modality] = produced[modality]
-            else:
-                reconstructions[decoder_name] = decoder(z_in)
-
+        self._checkEncoderInputs(inputs, "GlobalVae.forward()")
+        latent_params, latent_samples = self._encode(inputs, use_mean)
+        reconstructions = self._decode(latent_samples)
         return {
             "reconstructions": reconstructions,
             "latent_params": latent_params,

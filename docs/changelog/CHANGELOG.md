@@ -20,7 +20,16 @@ versioning follows [Semantic Versioning](https://semver.org/).
   The name of a shared decoder is now refused at build time, and the error lists the reconstruction
   names and the decoder names. The two `strict` `xfail` tests of `test_transformer_model_configs.py`
   are ordinary tests, with new ones for the three settings and a YAML end-to-end check.
-
+- `GlobalVae` gains two public methods and `forward` is now `encode` then `decode` (roadmap P5-5,
+  ADR 0046). `encode(inputs, use_mean=False)` runs the encoders, the heads, the fusion and the
+  sampling and returns `latent_params` and `latent_samples` (typed `EncodeOutput`).
+  `decode(latent_samples)` runs the assemblers and the decoders of every decoder whose latent spaces
+  are present, with the rules for a missing latent space that `forward` has, and returns the
+  reconstructions. A sample passed under the name of another latent space is decoded by that space's
+  decoders (cross decoding), and a width that differs raises a clear error. `forward` returns the
+  same three keys, raises the same errors and, under a fixed seed, gives the tensors of 2.0.0 bit
+  for bit (a copy of the old loop is kept in the tests). `collectModalityPosteriorMeans` uses
+  `encode`, so a paired retrieval no longer calls a decoder or an assembler.
 - Specification sync (roadmap P5-2), **proposed to the owner for approval, since the specification is
   the ground truth**. Section 6 gains a subsection 6.3 that lists the six data kinds of 2.0.0
   (tabular, audio, text, time series, graphs, point clouds) with their batch keys, registry names,

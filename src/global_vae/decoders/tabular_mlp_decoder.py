@@ -85,6 +85,15 @@ class TabularMlpDecoder(AbstractDecoder):
         self.body, width = buildMlp(latent_dim, hidden_dims, activation, normalization, dropout)
         self.to_output = nn.Linear(width, num_features)
 
+    @property
+    def categorical_sizes(self) -> tuple[int, ...]:
+        """The number of categories of each one-hot block, in order (empty: all numeric).
+
+        The `tabular_mixed` reconstruction loss reads it from the decoder when the config does not
+        give it (roadmap P5-3, ADR 0048).
+        """
+        return self._categorical_sizes
+
     def forward(self, z: torch.Tensor) -> torch.Tensor:
         """Reconstruct a batch of table rows from latent vectors.
 

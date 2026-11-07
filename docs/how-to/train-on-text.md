@@ -7,14 +7,16 @@ happen in your `loader_factory`, as for any other data (spec §6.2).
 
 ## What a batch is
 
-A batch is a dict with one key, `text`, holding a **one-hot float tensor `(batch, length, vocab_size)`**:
-one row per token, padding included.
+A batch is a dict with one key, `text`, holding either **token ids, an integer tensor `(batch, length)`**, or a
+**one-hot float tensor `(batch, length, vocab_size)`**: one position per token, padding included. Both give the
+same latent vector, and `token_cross_entropy`, the loss of `experiment/text_vae`, takes either as its target
+([ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)).
 
-The shape is not a matter of taste. The loss compares a decoder's reconstruction with the batch tensor of
-the same name, and the two must have one shape. The decoder gives a distribution over the vocabulary at
-every position, so the target has to be one-hot, and so does the encoder's input, which is the same tensor.
-The encoder also takes integer ids `(batch, length)` and gives the same output, which is how to encode with
-no one-hot tensor in memory once the model is trained.
+Ids are the form to prefer for a large vocabulary: the batch holds `batch * length` integers and not
+`batch * length * vocab_size` floats. The one-hot tensor is what the shipped data file and the loader below
+describe, and it stays valid. A loss that compares point by point (`mse`, `bce`) still needs the one-hot
+tensor, because it asks the reconstruction and the target to have one shape. The encoder reads ids through its
+embedding table, so no one-hot tensor has to be in memory to encode with a trained model.
 
 - **`vocab_size`** counts every token the model can see, the padding token included. It is written in the
   encoder and in the decoder, and it is the last axis of the batch. Nothing fills it in for you.
@@ -128,39 +130,43 @@ PYTHONPATH=. python scripts/train.py --config-name experiment/text_vae \
 
 ## The loss
 
-`experiment/text_vae` sets `reconstruction_loss: bce` with the `sum` reduction and weight `2.0`. The decoder
-returns probabilities, and `bce` against the one-hot target is a Bernoulli likelihood on every class of every
-position: the negative log-probability of the right token plus a term on the other classes. It is a proper
-score and not exactly the categorical likelihood of a text, and it is the closest thing a YAML file can name,
-since its loss names are the fixed table of `config/training.py` (`mse`, `l1`, `bce`, `smooth_l1`).
+`experiment/text_vae` sets `reconstruction_loss: token_cross_entropy` with the `sum` reduction and weight `2.0`.
+The loss is the categorical likelihood of a text: the decoder gives raw scores (`output_activation: null`, which
+the experiment sets, since a softmax that the decoder applied would be applied twice), the loss applies its own
+log-softmax at every position, and picks the log-probability of the target token. It is the mean over the tokens
+of a text, so `sum` makes it the cross-entropy of the whole text, on the scale of the KL term. A position whose
+target row is all zeros adds nothing to it, so pad with the pad class and not with zeros if the decoder is to
+learn lengths. A target id outside `[0, vocab_size)` is an error that names the id.
 
 **The weight is the lever.** A weight of `w` on the reconstruction is a `beta` of `1 / w` on the KL term, and a
 text VAE at `beta = 1` uses little of its latent vector: encoding a random word costs about what it saves in
-reconstruction. On a synthetic language ([ADR 0041](../adr/0041-text-modality.md)), `bce` at weight 1.0 gave
-87% of the tokens right, 2.0 gave 99% and 4.0 gave 100%, while any `mean` reduction and `sum` at 0.5 left the
-latent vector unused. These are numbers from a small synthetic grammar and not a tuned value (the choice of
-`beta` is [roadmap](../roadmap.md) decision D-6), so try a few weights on your own data, and watch the number
-of active latent units that `scripts/evaluate.py` reports.
+reconstruction. On a synthetic language ([ADR 0041](../adr/0041-text-modality.md); 4,000 texts of 8 tokens over a
+vocabulary of 32, 60 epochs, two seeds), the exact likelihood gave 56% of the tokens right at weight 1.0, 99% at 2.0
+and 100% at 4.0, while weight 0.5 stayed near the best constant guess (45.5%) and left the latent vector
+unused. These are numbers from a small synthetic grammar and not a tuned value (the choice of `beta` is
+[roadmap](../roadmap.md) decision D-6), so try a few weights on your own data, and watch the number of active
+latent units that `scripts/evaluate.py` reports. Before 2.1, a YAML file could not name this loss and trained
+with `bce` on the one-hot tensor as a stand-in, which gave the same picture at the same weights.
 
-**The exact likelihood needs no change to the framework, only Python.** Set the decoder's `output_activation`
-to `null`, so that it returns raw scores, and give the trainer `computeTokenCrossEntropy`, which applies its
-own softmax and sums over the tokens of a text:
+`evaluate()` reports `token_accuracy` for a model trained with this loss: the share of positions where the
+highest score is the target token (`scripts/evaluate.py --reconstruction-loss token_cross_entropy`). The mean
+squared error of a row of scores against a one-hot row says less about a text than that does.
+
+**From Python.** The same loss is a class, and a loss of your own is another class registered with
+`@registerReconstructionLoss("name")` ([add a strategy](add-a-strategy.md)) or any function
+`(reconstruction, target) -> scalar`, given to the trainer by hand:
 
 ```python
+from global_vae.losses.reconstruction.token_cross_entropy import TokenCrossEntropyLoss
 from global_vae.training.trainer import Trainer
-from global_vae.utils.text_blocks import computeTokenCrossEntropy
 
 trainer = Trainer(
     model,  # built with model.modalities.text.decoder.kwargs.output_activation=null
-    reconstruction_loss_fn=computeTokenCrossEntropy,
-    reconstruction_weights=2.0,  # the reduction stays "mean": the function sums over tokens itself
+    reconstruction_loss_fn=TokenCrossEntropyLoss(),
+    reconstruction_weights=2.0,
+    reconstruction_reduction="sum",
 )
 ```
-
-It trained the synthetic language about as well as `bce` at the same weight (99.6% of the tokens at 2.0,
-against 99.3%), so `bce` loses little. The YAML files cannot name it, because a `cross_entropy` in the loss
-table is a change to a core module, which ADR 0041 flags and does not make. A position whose target row is all
-zeros adds nothing to it, so pad with the pad class and not with zeros if the decoder is to learn lengths.
 
 ## Reading a reconstruction
 
@@ -184,11 +190,11 @@ for scores in (reconstruction, sampled):
 
 ## What it does not do
 
-- **A big vocabulary.** A target has to be a tensor of the shape of the reconstruction, so a batch holds
-  `batch * length * vocab_size` floats: 64 texts of 128 tokens over a vocabulary of 30,000 are about a
-  gigabyte. Characters or bytes (a vocabulary of 100 to 256) and word vocabularies of a few thousand tokens
-  fit. Subword vocabularies at the usual 30,000 do not, until the loss can take ids as targets, which is a
-  change to the core (ADR 0041).
+- **A very large vocabulary, with no tricks.** The target can be ids, but the decoder still writes a score for
+  every token of the vocabulary at every position, so its output is `batch * length * vocab_size` floats: 64
+  texts of 128 tokens over a vocabulary of 30,000 are about a gigabyte, and so is the gradient. Characters or
+  bytes (a vocabulary of 100 to 256) and word vocabularies of a few thousand tokens fit comfortably. A sampled or
+  adaptive softmax would lift the limit and is not part of this modality (ADR 0041, ADR 0048).
 - **One latent vector per text.** The encoder pools over the tokens, so the latent holds what the text
   contains and not where. A decoder that has to give every token of a long text from 16 numbers does best on
   short texts with few degrees of freedom.

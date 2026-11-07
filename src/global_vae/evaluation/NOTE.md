@@ -39,4 +39,19 @@ latent space, which the latent diagnostics and the KL values need), the reconstr
 `scripts/evaluate.py --paired` collects for the cross-modal table (bounded by `--max-samples`),
 and the data of the figures.
 
+# Metric registry and per-modality sets (roadmap P5-3)
+
+`metrics.py` holds a name -> function table (`registerMetric`, `getMetric`, `listRegisteredMetrics`) with a declared
+default set, `DEFAULT_METRIC_NAMES` (`mse`, `rmse`, `mae`, `r2`, `pearson_r`): metrics are not exclusive strategies, so it is
+a table and not a class registry (`docs/adr/0048-reconstruction-loss-and-metric-registries.md`). It also registers the
+`masked_*` forms (a metric on the values whose target is not `NaN`, made by `maskUnobserved`), and `modality_metrics.py`
+registers `chamfer`, `precision`, `recall`, `f_score` (clouds), `edge_auc` (graphs) and `token_accuracy` (text) on the scores
+that live in `utils/`. `metric_sets.py` resolves what `evaluate(reconstruction_metrics=...)` is given (`None`, a dict of
+functions, a list of names, or a mapping by reconstruction name) into one set per modality; with nothing given, the set follows
+the loss (`default_metrics`, else the masked five under their plain names for a loss that reads `NaN` as unobserved, else the
+five). `streaming_metrics.py` streams the ten array metrics and refuses the others by name.
+
+Not done on purpose: the cross-modal and paired reports keep the five default metrics, `edge_auc` has no node counts to leave
+padding out (call `computeEdgeScores` with them), and a metric of a single modality is not told apart by its data.
+
 # Nothing else is currently deferred.

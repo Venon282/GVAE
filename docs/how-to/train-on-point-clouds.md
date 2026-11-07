@@ -4,7 +4,8 @@ A point cloud is the point cloud modality ([ADR 0044](../adr/0044-point-cloud-mo
 dimensions, read by `point_cloud_encoder_v1` and rebuilt by `point_cloud_decoder_v1`. Reading files, sampling,
 centering, scaling and padding all happen in your `loader_factory`, as for any other data (spec §6.2). The one
 thing that is different from the other modalities is the loss: a set has no order, so the loss is the Chamfer
-distance, and it is set in Python.
+distance, `chamfer`, which `configs/experiment/point_cloud_vae.yaml` names and `scripts/train.py` trains
+([ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)).
 
 ## What a batch is
 
@@ -13,9 +14,9 @@ A batch is a dict with one key, `point_cloud`, holding a **float tensor `(batch,
 - **The rows are in no particular order.** The encoder does not depend on it, and the Chamfer loss does not
   either. Nothing has to be sorted.
 - **`N` is the number of rows**, the same for the whole dataset. It is written in the data file
-  (`sequence_length.point_cloud`) and in the decoder (`num_points`), and the two have to be equal: the trainer
-  refuses a reconstruction whose shape differs from its target's. Nothing fills either one in for you, and any
-  positive integer works.
+  (`sequence_length.point_cloud`) and in the decoder (`num_points`). They need not be equal, since the `chamfer`
+  loss compares two clouds of any sizes, but a loss that pairs points by row (`mse`) refuses a reconstruction whose
+  shape differs from its target's. Nothing fills either one in for you, and any positive integer works.
 - **A row of `NaN` is a point that does not exist.** A cloud with fewer than `N` points is padded with rows of
   `NaN`, at the end or anywhere else. The encoder leaves them out and the Chamfer loss does too, so a cloud of 40
   points among 64 rows is a cloud of 40 points. Do not pad with zeros: the origin is a point.
@@ -106,7 +107,8 @@ hundred points than fed whole.
 
 `configs/model/point_cloud_single_latent.yaml` is the complete file. What to set:
 
-- **`num_points`** in the decoder, to the `N` of `data.sequence_length.point_cloud`. For another size, set both:
+- **`num_points`** in the decoder, the number of points it writes. It can be the `N` of
+  `data.sequence_length.point_cloud` or another number. To change both:
 
   ```bash
   data.sequence_length.point_cloud=256 model.modalities.point_cloud.decoder.kwargs.num_points=256
@@ -123,43 +125,31 @@ hundred points than fed whole.
 ## Train
 
 `configs/experiment/point_cloud_vae.yaml` composes the model, data and training files, and it is where the
-optimizer, the beta schedule and the weight come from. **Do not train it through `scripts/train.py`.** A YAML
-file can name only `mse`, `l1`, `bce` and `smooth_l1`, and each of them compares a point with whichever point
-has the same row index, which for a set is an unrelated one. On synthetic clouds the model trained that way ended
-up farther from the clouds than one that ignores its input (Chamfer distance 0.81 on clouds in a random order and
-0.39 with the points sorted, against 0.10), and on a padded cloud the loss is `NaN`. Build the trainer from the file
-and switch its loss to the Chamfer distance, which is a plain Python function:
+optimizer, the beta schedule, the loss and the weight come from. It trains through `scripts/train.py` like the
+others:
 
-```python
-from global_vae.config.experiment import loadExperimentConfig
-from global_vae.config.model import buildModelFromConfig
-from global_vae.config.training import buildTrainerFromConfig
-from global_vae.utils.point_cloud_metrics import computeChamferDistance
-
-config = loadExperimentConfig(
-    "experiment/point_cloud_vae",
-    overrides=[
-        "data.train_path=data/raw/shapes",
-        "data.loader_factory=my_project.data:buildPointCloudDataloaders",
-    ],
-)
-model = buildModelFromConfig(config.model)
-bundle = buildPointCloudDataloaders(config.data)
-trainer = buildTrainerFromConfig(model, config.training)
-trainer.reconstruction_loss_fn = computeChamferDistance
-trainer.reconstruction_reduction = "mean"  # the Chamfer distance is already a sum over points
-trainer.fit(bundle.train, num_epochs=60, val_dataloader=bundle.val)
+```bash
+PYTHONPATH=. python scripts/train.py --config-name experiment/point_cloud_vae \
+    data.train_path=data/raw/shapes \
+    data.loader_factory=my_project.data:buildPointCloudDataloaders
 ```
 
-The same trainer is used by `evaluate`, so the validation loss, the best checkpoint and the report read the
-Chamfer loss too.
+The experiment names `reconstruction_loss: chamfer`. Before 2.1, a YAML file could name only `mse`, `l1`, `bce`
+and `smooth_l1`, each of which compares a point with whichever point has the same row index, which for a set is an
+unrelated one. On synthetic clouds the model trained that way ended up farther from the clouds than one that
+ignores its input (Chamfer distance 0.81 on clouds in a random order and 0.39 with the points sorted, against
+0.10), and on a padded cloud the loss is `NaN`, so the experiment carried a placeholder loss and a warning to
+train from Python. Both are gone. The same trainer is used by `evaluate`, so the validation loss, the best
+checkpoint and the report read the Chamfer loss too.
 
 ## The loss
 
-`computeChamferDistance(reconstruction, target)` sums, for each cloud, the squared distance from every
-reconstructed point to the nearest target point and from every target point to the nearest reconstructed one,
-and averages over the clouds. Rows of `NaN` in the target are left out. It is a sum over points, which is why the
-reduction stays `mean`: `sum` would multiply it by `N * 3` again.
+`chamfer` is `computeChamferDistance(reconstruction, target)`: it sums, for each cloud, the squared distance from
+every reconstructed point to the nearest target point and from every target point to the nearest reconstructed
+one, and averages over the clouds. Rows of `NaN` in the target are left out. It is already a sum over points, so
+the loss declares one term per cloud: `reconstruction_reduction: sum` and `mean` give the same number, and a
+weight on it reads like the weight of a summed squared error. The two clouds may have different numbers of points.
+The distance is quadratic in the number of points, so sample large clouds in the loader.
 
 **The weight is the lever.** A weight of `w` on the reconstruction is a `beta` of `1 / w` on the KL term. The
 experiment sets `100.0`. On synthetic clouds of 40 to 64 points ([ADR 0044](../adr/0044-point-cloud-modality.md)) the
@@ -170,9 +160,11 @@ active latent units that `scripts/evaluate.py` reports.
 
 ## Reading a reconstruction
 
-`computeCloudScores` scores a reconstruction on the real points only. The `mse`, `r2` and `pearson_r` of the report
-of `evaluate` compare point `i` with point `i`, so they mean nothing for a set and are `NaN` on a padded cloud. Read
-the total reconstruction loss of the report (it is the Chamfer loss) and these:
+A model trained with `chamfer` is reported with set scores: `evaluate` (and `scripts/evaluate.py
+--reconstruction-loss chamfer`) gives `chamfer`, `precision`, `recall` and `f_score` for the modality, on the real
+points only, in place of the `mse`, `r2` and `pearson_r` that compare point `i` with point `i` and mean nothing for
+a set. The total reconstruction loss of the report is the Chamfer loss. `computeCloudScores` is the function
+behind them, and gives the scores of one batch directly:
 
 ```python
 import torch
@@ -193,7 +185,9 @@ scores = computeCloudScores(reconstruction, batch["point_cloud"], threshold=0.1)
 one, and `f_score` is their harmonic mean. The threshold is in the units of your normalized clouds (the farthest
 point is at distance 1), so 0.1 is a tenth of the size of the cloud. `computeCloudScores` and
 `computeChamferDistance` take any two numbers of points, so a reconstruction of 256 points can be scored against a
-cloud of 64 by calling them. The trainer cannot train that, since it compares shapes first.
+cloud of 64, and the `chamfer` loss trains it. The report uses the default threshold, 0.1. For another one, call
+`computeCloudScores(..., threshold=...)`, or give `evaluate` a dict of `reconstruction_metrics` with a function of
+your own that does.
 
 To draw clouds from the model, decode latent vectors from the prior:
 
@@ -208,12 +202,9 @@ for.
 
 ## What it does not do
 
-- **A loss a YAML file can name.** There is no set loss in the loss table of `config/training.py`, so
-  `scripts/train.py` on this experiment trains the wrong objective, and the Chamfer distance is set in Python. A
-  `chamfer` entry in the table is a change to the core (ADR 0044).
-- **Different numbers of points in the reconstruction and the target.** The loss function allows it and the
-  trainer does not, so `num_points` equals `N` when training.
-- **Set metrics in the report.** `evaluate` reports position-by-position metrics, so use `computeCloudScores`.
+- **A loss that does not depend on the order of the points but is cheaper than Chamfer.** The distance is
+  quadratic in `N` (877 ms for a batch of 32 at 1,024 points). Sample large clouds in the loader, or register a
+  loss of your own ([add a strategy](add-a-strategy.md)).
 - **Rotations, sampling and normalization.** They are the loader's.
 - **Large clouds and fine detail.** The Chamfer loss is quadratic in `N`, and the encoder pools the points to one
   vector with no neighbourhoods, so it reads global shape and not local structure.

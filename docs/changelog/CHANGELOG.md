@@ -8,6 +8,28 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Reconstruction loss and metric registries (roadmap P5-3,
+  [ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)). `losses/reconstruction/` is
+  a package with `AbstractReconstructionLoss` (an `nn.Module`), `registerReconstructionLoss`,
+  `getReconstructionLossClass` and `listRegisteredReconstructionLosses`, and three class-level
+  declarations read through the registry: `requires_matching_shapes`, `reads_nan_as_unobserved`
+  and `countTerms`, the number of terms that the `sum` reduction multiplies by. Registered:
+  `mse`, `l1`, `bce`, `smooth_l1` (unchanged, with a new `beta` for the last), `bce_with_logits`,
+  `masked_mse`, `token_cross_entropy` (token ids or one-hot rows as targets), `chamfer` (clouds of
+  different sizes) and `tabular_mixed` (squared error on the numeric columns, cross-entropy per
+  categorical block, `categorical_sizes` read from the decoder). `training.reconstruction_loss`
+  takes a name, an entry `{name, kwargs}` or a mapping from a reconstruction name to either. The
+  parameters of a loss are in the optimizer, clipped, and saved in the checkpoint under
+  `reconstruction_loss_state_dict` (a key written only when it is not empty, so a run with the
+  classic losses writes the file it wrote). Metrics are a name to function table
+  (`registerMetric`, `getMetric`, `listRegisteredMetrics`, `DEFAULT_METRIC_NAMES`) with the five
+  default metrics, their `masked_*` forms, `chamfer`, `precision`, `recall`, `f_score`, `edge_auc`
+  and `token_accuracy`. `evaluate(reconstruction_metrics=...)` takes `None`, a dict of functions,
+  a list of names, or a mapping from a reconstruction name to either, and by default reports what
+  fits the loss: the cloud scores for `chamfer`, the token accuracy for `token_cross_entropy`, the
+  masked metrics (under the plain names) for a loss that reads `NaN` as unobserved, the five
+  otherwise. The streaming evaluation accumulates the masked forms too. Every roadmap item now
+  carries `**status**: todo` or `**status**: done`.
 - Extra loss terms at the single loss site (roadmap P5-6,
   [ADR 0047](../adr/0047-extra-loss-terms.md)). A registry `losses/terms/` (`AbstractLossTerm`,
   `registerLossTerm`, `getLossTermClass`, `listRegisteredLossTerms`; it ships empty, the terms being
@@ -21,6 +43,15 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The experiment configs name the loss that fits their data (roadmap P5-3). `text_vae.yaml` uses
+  `token_cross_entropy` (the decoder returns raw scores, `output_activation: null`; it trained with
+  `bce` as a stand-in), `time_series_vae.yaml` uses `masked_mse`, so a series with gaps no longer
+  gives `NaN`, `point_cloud_vae.yaml` uses `chamfer` and loses its placeholder loss and its warning
+  header, and `tabular_vae.yaml` uses `tabular_mixed`. The weights are those of 2.0.0 and each
+  loss is a mean over its terms, so `reduction: sum` means a sum over the terms of a sample for
+  every loss. `trainer.reconstruction_loss_fn` of a trainer built from YAML is an instance of the
+  registered class and no longer `torch.nn.functional.mse_loss`; passing a function to `Trainer`
+  by hand is unchanged. The four classic names give the numbers of 2.0.0 (a test compares them).
 - Loss settings of a shared decoder are keyed by modality (roadmap P5-4, finding I-1,
   [ADR 0045](../adr/0045-settings-keyed-by-reconstruction-name.md)).
   `training.reconstruction_loss`, `training.reconstruction_weight` and

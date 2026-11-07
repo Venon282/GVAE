@@ -138,7 +138,8 @@ class was added.
 
 ## Train
 
-If your windows are complete, the experiment trains through `scripts/train.py` like the others:
+The experiment trains through `scripts/train.py` like the others, whether the windows are complete or have
+gaps:
 
 ```bash
 PYTHONPATH=. python scripts/train.py --config-name experiment/time_series_vae \
@@ -146,25 +147,14 @@ PYTHONPATH=. python scripts/train.py --config-name experiment/time_series_vae \
     data.loader_factory=my_project.data:buildTimeSeriesDataloaders
 ```
 
-If some values are `NaN`, that route cannot be used. The loss names of a YAML file (`mse`, `l1`, `bce`,
-`smooth_l1`) know no mask, and the `mse` of the experiment is `NaN` as soon as one value of a batch is. Train
-through Python with the masked loss, which is a plain function and needs no change to the framework:
+Its loss is `masked_mse`, which reads a `NaN` in the target as a value that was not observed
+([ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)). Before 2.1, the loss names of a YAML file
+knew no mask, the `mse` of the experiment was `NaN` as soon as one value of a batch was, and a series with
+gaps had to be trained through Python with a function. That route is unchanged, and it is the same number:
 
 ```python
-from global_vae.config.experiment import loadExperimentConfig
-from global_vae.config.model import buildModelFromConfig
 from global_vae.training.trainer import Trainer
 from global_vae.utils.series_blocks import computeMaskedSquaredError
-
-config = loadExperimentConfig(
-    "experiment/time_series_vae",
-    overrides=[
-        "data.train_path=data/raw/sensors",
-        "data.loader_factory=my_project.data:buildTimeSeriesDataloaders",
-    ],
-)
-model = buildModelFromConfig(config.model)
-bundle = buildTimeSeriesDataloaders(config.data)
 
 trainer = Trainer(
     model,
@@ -172,17 +162,24 @@ trainer = Trainer(
     reconstruction_loss_fn=computeMaskedSquaredError,
     reconstruction_weights=50.0,  # the reduction stays "mean": the function sums over values itself
 )
-trainer.fit(bundle.train, num_epochs=60, val_dataloader=bundle.val)
 ```
 
 ## The loss
 
-`computeMaskedSquaredError` sums the squared error over the observed values of a series and averages over the
-batch. A `NaN` in the target adds nothing, and the reconstruction there receives no gradient. On a series with
-no gap it is the sum of squared errors, which is what `reconstruction_loss: mse` with
-`reconstruction_reduction: sum` computes, so the shipped experiment and the Python route agree where both
-apply. The decoder still reconstructs every step of every channel: a gap is filled in, and only the loss
-looks away.
+`masked_mse` sums the squared error over the observed values of a series and averages over the batch, then
+divides by the number of values of a series, as every registered loss is a mean over its terms. With
+`reconstruction_reduction: sum`, which the experiment sets, the division is undone, so the value is exactly
+`computeMaskedSquaredError`. A `NaN` in the target adds nothing, and the reconstruction there receives no
+gradient. On a series with no gap it is the sum of squared errors, which is what `reconstruction_loss: mse` with
+`reconstruction_reduction: sum` computes, so the experiment of 2.0.0 and this one agree where both apply. The
+decoder still reconstructs every step of every channel: a gap is filled in, and only the loss looks away.
+
+**Use `sum` with this loss.** `masked_mse` is a mean over every position, an unobserved one counting as zero
+error. So with `mean` its value is the sum of the observed squared errors divided by the size of the window,
+which is not the mean of the observed errors and is not on the scale of the KL term, and with `sum` it is the
+sum of the observed squared errors, the negative log-likelihood of what was observed up to a constant. A window
+with fewer observed values carries less evidence and weighs less in both readings, which is how a likelihood
+behaves. A window that is mostly gaps is better dropped by the loader.
 
 **The weight is the lever.** A weight of `w` on the reconstruction is a `beta` of `1 / w` on the KL term, and
 a weight of `0.5` is a Gaussian of variance one, which is right only when the noise of your standardized
@@ -205,10 +202,12 @@ with torch.no_grad():
     filled = torch.where(torch.isnan(series), reconstruction, series)
 ```
 
-**The metrics of `evaluate` know no mask either.** On series with gaps, `scripts/evaluate.py` and `evaluate`
-return `NaN` for the `mse`, `rmse`, `mae`, `r2` and `pearson_r` of the modality, while the total loss
-(with the masked loss passed as `reconstruction_loss_fn`) and the figures work. Score the gaps yourself, by
-hiding values of a complete window that the model never sees and comparing the reconstruction there:
+**The metrics of `evaluate` follow the loss.** With `masked_mse`, which `scripts/evaluate.py
+--reconstruction-loss masked_mse` and `evaluate(..., reconstruction_loss_fn=...)` read, the report has the
+`mse`, `rmse`, `mae`, `r2` and `pearson_r` of the modality computed on the observed values only, so a series
+with gaps gives numbers and not `NaN`. With a loss that does not read a mask, a gap makes every metric `NaN`, as
+before. These are scores of what was observed, which the model saw. To score the gaps themselves, hide values
+of a complete window that the model never sees and compare the reconstruction there:
 
 ```python
 def scoreHiddenValues(model, series: torch.Tensor, hidden: torch.Tensor) -> float:
@@ -232,9 +231,9 @@ your sensor does), because a model fills a short hole far more easily than a lon
 
 ## What it does not do
 
-- **A mask in the core.** The `NaN` convention and the Python loss need no change to the framework, and they
-  leave two things only a core change could give: a masked loss that `scripts/train.py` can name, and
-  metrics over the observed values in `evaluate`. Both are flagged in ADR 0042 and not made.
+- **A mask for every kind of data.** `NaN` is the mask of this modality, and `masked_mse` and the masked metrics
+  read it. A loss or a metric of your own that should look away from gaps declares
+  `reads_nan_as_unobserved` ([add a strategy](add-a-strategy.md)).
 - **One latent vector per window.** The encoder pools over the patches, so the latent holds what the window
   contains and not when, and the decoder writes the whole window from it.
 - **Irregular sampling, per-window normalization, forecasting.** The grid is regular, a window's own scale

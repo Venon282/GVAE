@@ -170,7 +170,7 @@ The experiment sets `reconstruction_loss: bce`, `reconstruction_reduction: sum` 
 The decoder returns the probability of each edge, so `bce` against the 0/1 matrix is the Bernoulli likelihood of
 the graph, and `sum` makes it one number per graph like the KL term. This is also why the decoder is its own
 class: the raw output of `2d_cnn_decoder_v1` is not a probability, `bce` refuses it, and its `mse` measured about
-0.01 of AUC behind.
+0.01 of AUC behind. A decoder built without a sigmoid takes `bce_with_logits`, the same loss on raw scores.
 
 **The weight is the lever.** A weight of `w` on the reconstruction is a `beta` of `1 / w` on the KL term. On
 synthetic graphs of 8 to 16 nodes ([ADR 0043](../adr/0043-graph-modality.md)), the area under the ROC curve of the

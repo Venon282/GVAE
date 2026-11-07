@@ -34,9 +34,11 @@ modalities:
         # For a table with categorical columns, list the number of categories of each one-hot block
         # (they are the last sum(categorical_sizes) of the num_features columns, in this order):
         #   categorical_sizes: [3, 5]
-        # A softmax is then applied inside each block, so the default `mse` reconstruction loss is
-        # the Brier score of that column (docs/adr/0039-tabular-modality.md). Left out, every output
-        # is a linear value, which is right for an all-numeric table.
+        # A softmax is then applied inside each block, so the `mse` reconstruction loss is the Brier
+        # score of that column (docs/adr/0039-tabular-modality.md), and `tabular_mixed`, the loss of
+        # experiment/tabular_vae.yaml, is its cross-entropy: it reads these sizes from this decoder,
+        # so they are written once (docs/adr/0048-reconstruction-loss-and-metric-registries.md).
+        # Left out, every output is a linear value, which is right for an all-numeric table.
 
 single_latent:
   dim: 8

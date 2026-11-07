@@ -75,35 +75,32 @@ training setup. All of them read your data through a `loader_factory`.
 
 | Experiment | Modality | Batch tensor | Loss | Guide |
 |---|---|---|---|---|
-| `tabular_vae` | Table (ADR 0039) | `tabular` `(batch, num_features)` | `mse`, sum, weight 0.5 | [Train on a table](train-on-a-table.md) |
+| `tabular_vae` | Table (ADR 0039) | `tabular` `(batch, num_features)` | `tabular_mixed`, sum, weight 0.5 | [Train on a table](train-on-a-table.md) |
 | `audio_vae` | Raw waveform (ADR 0040) | `audio` `(batch, 2048)` in `[-1, 1]` | `mse`, sum, weight 0.5 | [Train on audio](train-on-audio.md) |
-| `text_vae` | Text (ADR 0041) | `text` one-hot `(batch, 8, 32)` | `bce`, sum, weight 2.0 | [Train on text](train-on-text.md) |
-| `time_series_vae` | Time series (ADR 0042) | `time_series` `(batch, 3, 96)` | `mse`, sum, weight 50 | [Train on time series](train-on-time-series.md) |
+| `text_vae` | Text (ADR 0041) | `text` ids or one-hot `(batch, 8)` or `(batch, 8, 32)` | `token_cross_entropy`, sum, weight 2.0 | [Train on text](train-on-text.md) |
+| `time_series_vae` | Time series (ADR 0042) | `time_series` `(batch, 3, 96)` | `masked_mse`, sum, weight 50 | [Train on time series](train-on-time-series.md) |
 | `graph_vae` | Graph (ADR 0043) | `graph` `(batch, 16, 16)` | `bce`, sum, weight 4.0 | [Train on graphs](train-on-graphs.md) |
-| `point_cloud_vae` | Point cloud (ADR 0044) | `point_cloud` `(batch, 64, 3)` | placeholder, see below | [Train on point clouds](train-on-point-clouds.md) |
+| `point_cloud_vae` | Point cloud (ADR 0044) | `point_cloud` `(batch, 64, 3)` | `chamfer`, sum, weight 100 | [Train on point clouds](train-on-point-clouds.md) |
 
 What each one asks of your data and your files:
 
 - **Table.** `num_features` is set in the data file and in the model.
 - **Audio.** The clip length is written in the data file and in the decoder's `output_length`.
 - **Text.** The length is written in the data file and in the decoder's `output_length`. The
-  vocabulary size is written in the encoder and the decoder. The decoder returns probabilities, which
-  is why the loss is `bce`.
-- **Time series.** A `NaN` is a value that was not observed. The `mse` of a YAML file is `NaN` on a
-  gap, so the YAML loss is for complete series, and series with gaps train through Python with a
-  masked loss. The length is written in the data file and in the decoder's `output_length`, and the
-  channels in the encoder and the decoder.
+  vocabulary size is written in the encoder and the decoder. The decoder returns raw scores
+  (`output_activation: null`, set by the experiment), because the loss is a cross-entropy that applies its
+  own softmax. The batch can hold token ids or one-hot rows.
+- **Time series.** A `NaN` is a value that was not observed, and the loss `masked_mse` leaves it out, so
+  series with gaps train through `scripts/train.py` like complete ones. The length is written in the data
+  file and in the decoder's `output_length`, and the channels in the encoder and the decoder.
 - **Graph.** The adjacency matrices are padded with isolated nodes up to the size written in the data
   file and in the decoder's `output_shape`. The nodes have to come in a meaningful order, which is
-  the loader's job. The decoder returns the probability of each edge, hence `bce`.
-
-!!! warning "Do not train `point_cloud_vae` through `scripts/train.py`"
-    Its `training` block (`mse`, `sum`, weight 100.0) is a placeholder. A YAML file cannot name the
-    Chamfer distance, and every loss it can name pairs unrelated points of a set. Build the trainer
-    from the file and set `trainer.reconstruction_loss_fn` to `computeChamferDistance` and the
-    reduction to `"mean"`. The number of points is written in the data file and in the decoder's
-    `num_points`, and the two have to be equal.
-    [Train on point clouds](train-on-point-clouds.md) has a loader and the Python route.
+  the loader's job. The decoder returns the probability of each edge, hence `bce`; a decoder built
+  without a sigmoid takes `bce_with_logits`.
+- **Point cloud.** A row of `NaN` is a point that does not exist, and the loss `chamfer` compares two clouds
+  as sets, in any order and of any sizes. The number of points is written in the data file and in the
+  decoder's `num_points`, and need not be the same number. [Train on point
+  clouds](train-on-point-clouds.md) has a loader.
 
 ## Train on paired signal and image data
 
@@ -421,10 +418,16 @@ or a mapping from a reconstruction name to a value ([ADR 0030](../adr/0030-per-m
 need different treatment: a binary target next to a continuous one, or a modality that should count
 for more or for less in the reconstruction term.
 
+The loss is a registered name ([ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)). It is one
+of three forms: a **name**, an **entry** `{name, kwargs}` for a loss that takes arguments, or a **mapping** from a
+reconstruction name to a name or an entry.
+
 ```yaml
 training:
   reconstruction_loss: mse                          # the default, for every modality
+  # reconstruction_loss: {name: smooth_l1, kwargs: {beta: 0.5}}   # an entry, with an argument
   # reconstruction_loss: {signal: mse, mask: bce}     # a reconstruction left out keeps mse
+  # reconstruction_loss: {signal: mse, mask: {name: smooth_l1, kwargs: {beta: 0.5}}}
   reconstruction_weight: 1.0                        # the default, for every modality
   # reconstruction_weight: {signal: 0.5, mask: 0.2}   # a reconstruction left out keeps 1.0
 ```
@@ -445,9 +448,23 @@ python scripts/train.py \
     'training.reconstruction_weight={signal:1.0,mask:0.2}'
 ```
 
-- The losses are `mse` (the default), `l1`, `bce` and `smooth_l1`. `bce` needs a reconstruction and a
-  target inside `[0, 1]`, so the decoder has to end in a sigmoid or an equivalent; PyTorch raises
-  an error for a value outside that range, and the config does not check it.
+- The registered losses are `mse` (the default), `l1`, `bce`, `smooth_l1`, `bce_with_logits`, `masked_mse`,
+  `token_cross_entropy`, `chamfer` and `tabular_mixed`. Each is a mean over its terms, so `reduction: sum` is a
+  sum over the terms of a sample for every one of them. `bce` needs a reconstruction and a target inside
+  `[0, 1]`, so the decoder has to end in a sigmoid or an equivalent (PyTorch raises an error for a value outside
+  that range, and the config does not check it), and `bce_with_logits` is the same loss on raw scores.
+  `masked_mse` leaves a `NaN` target out, `token_cross_entropy` takes token ids or one-hot rows, `chamfer` is
+  for sets of points, and `tabular_mixed` is a squared error on the numeric columns and a cross-entropy on
+  each categorical block. `listRegisteredReconstructionLosses()` lists them, and a loss of your own joins them
+  with `@registerReconstructionLoss("name")` ([add a strategy](add-a-strategy.md)).
+- An entry's `kwargs` go to the loss's constructor. A bare name or an entry is one loss for every
+  reconstruction, built once, so a loss that has parameters shares them between the modalities; a mapping
+  builds one per reconstruction. A mapping whose keys are only `name` and `kwargs` is an entry, so a model with a
+  reconstruction called `name` has to write `kwargs: {}` to mean an entry, and the config says so when it is
+  ambiguous. A loss that needs something the decoder knows (`tabular_mixed` and its `categorical_sizes`)
+  reads it from the decoder, unless the entry gives it.
+- A loss that owns parameters has them in the optimizer, clipped with the model's, and saved in the checkpoint
+  under `reconstruction_loss_state_dict`.
 - A weight is a finite number of at least `0`. `0` takes a modality out of the loss: its decoder
   gets no gradient from the reconstruction term. A negative weight, `true` or a string is refused.
 - Each modality's term is its loss function, then the reduction chosen above, then its weight. The
@@ -476,7 +493,9 @@ python scripts/evaluate.py \
     --reconstruction-reduction sum
 ```
 
-The per-modality metrics of the report do not depend on any of them. The report records the
+The reduction and the weight do not change the per-modality metrics. The loss does: the report has the cloud
+scores for `chamfer`, the token accuracy for `token_cross_entropy`, and the metrics on the observed values for
+`masked_mse` ([evaluate](evaluate.md#which-metrics-a-modality-gets)). The report records the
 reduction and not the loss and the weights, so keep them with the run.
 
 ## Add an extra term to the loss

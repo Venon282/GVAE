@@ -10,6 +10,7 @@ points to), a model that learns clouds of several shapes, evaluation, the data c
 of `scripts/train.py` on dummy batches.
 """
 
+import math
 import os
 import re
 import subprocess
@@ -29,6 +30,7 @@ from global_vae.decoders.registry import listRegisteredDecoders
 from global_vae.encoders.registry import listRegisteredEncoders
 from global_vae.evaluation.evaluate import evaluate
 from global_vae.evaluation.visual_export import exportEvaluationFigures
+from global_vae.losses.reconstruction.chamfer import ChamferLoss
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.training.trainer import Trainer
@@ -54,7 +56,9 @@ POINTS = 64
 # The packages that make a model, a loss, a training loop or a config. Adding a modality must not
 # touch them (spec §10: zero changes to core framework code), so none may name this one: neither
 # its registered classes nor its batch key.
-_MODALITY_REFERENCE = re.compile(r"point_cloud|PointCloud")
+# `utils.point_cloud_metrics` is the shared helper that the `chamfer` loss and the cloud metrics
+# wrap (roadmap P5-3, ADR 0048), a utility and not a modality class or a batch key.
+_MODALITY_REFERENCE = re.compile(r"point_cloud(?!_metrics)|PointCloud")
 _CORE_PACKAGES = (
     "assemblers",
     "config",
@@ -102,15 +106,13 @@ def _experiment(*overrides: str, output_dir: Path | None = None) -> ExperimentCo
 
 
 def _chamferTrainer(model: GlobalVae, *overrides: str, output_dir: Path) -> Trainer:
-    """The trainer of the experiment, switched to the Chamfer distance (docs/how-to).
+    """The trainer of the experiment, which names the Chamfer distance in its YAML (ADR 0048).
 
-    The optimizer, the beta schedule and the weight come from the file. The loss is a Python
-    function, which a YAML file cannot name, and its reduction stays `mean` because the Chamfer
-    distance already is a sum over points.
+    The loss, the optimizer, the beta schedule and the weight all come from the file. The Chamfer
+    distance is already a sum over points and counts as one term, so `sum` does not rescale it.
     """
     trainer = buildTrainerFromConfig(model, _experiment(*overrides, output_dir=output_dir).training)
-    trainer.reconstruction_loss_fn = computeChamferDistance
-    trainer.reconstruction_reduction = "mean"
+    assert isinstance(trainer.reconstruction_loss_fn, ChamferLoss)
     return trainer
 
 
@@ -323,32 +325,43 @@ class TestWhatTheYamlLetsYouChange:
         with pytest.raises(ValueError, match="pooling"):
             _model(encoder_pooling="attention")
 
-    def test_a_decoder_of_another_size_is_refused_by_the_trainer_with_both_shapes(
+    def test_a_decoder_of_another_size_trains_with_chamfer_and_is_refused_with_mse(
         self, tmp_path: Path
     ) -> None:
-        """The Chamfer distance takes any two sizes of cloud, the trainer's shape check does not.
+        """The Chamfer distance takes any two sizes of cloud, and so does the loss that wraps it.
 
-        `computeChamferDistance` compares any two numbers of points, so a decoder that writes 32
-        points can be scored against clouds of 64 by calling it. The trainer compares shapes
-        before it calls any loss function, and refuses (ADR 0044).
+        A decoder that writes 32 points is scored against clouds of 64 by the experiment's
+        `chamfer` (it opts out of the shape check, ADR 0048). A position-by-position loss such as
+        `mse` still needs equal shapes, and the trainer refuses with both shapes (ADR 0044).
         """
         model = _model(decoder_num_points=32)
         guess = model(_batch())["reconstructions"]["point_cloud"]
         assert guess.shape == (BATCH_SIZE, 32, 3)
-        assert torch.isfinite(computeChamferDistance(guess, _clouds()))
         trainer = _chamferTrainer(model, output_dir=tmp_path)
+        losses = trainer.computeLosses(_batch(), step=0)
+        backward(losses.total)
+        assert torch.isfinite(losses.total)
+        mse_trainer = buildTrainerFromConfig(
+            model, _experiment("training.reconstruction_loss=mse", output_dir=tmp_path).training
+        )
         with pytest.raises(ValueError, match="shape"):
-            trainer.computeLosses(_batch(), step=0)
+            mse_trainer.computeLosses(_batch(), step=0)
 
 
 class TestTheLossOfTheExperiment:
-    """Why the loss of a point cloud is a Python function and not a name in the YAML file."""
+    """Why the loss of a point cloud is the Chamfer distance, and that the YAML file names it."""
 
-    def test_the_file_sets_what_a_yaml_file_can_say_with_weight_one_hundred(self) -> None:
+    def test_the_file_names_the_chamfer_distance_with_weight_one_hundred(self) -> None:
         training = _experiment().training
-        assert training.reconstruction_loss == "mse"
+        assert training.reconstruction_loss == "chamfer"
         assert training.reconstruction_reduction == "sum"
         assert training.reconstruction_weight == 100.0
+
+    def test_the_file_has_no_placeholder_loss_and_no_warning_header(self) -> None:
+        text = (_CONFIG_DIR / "experiment" / f"{EXPERIMENT}.yaml").read_text()
+        assert "READ THIS BEFORE TRAINING" not in text
+        assert "Python route" not in text
+        assert "placeholder" not in text
 
     def test_a_position_by_position_loss_depends_on_the_order_of_the_points_the_chamfer_does_not(
         self,
@@ -359,19 +372,34 @@ class TestTheLossOfTheExperiment:
         assert float(torch.nn.functional.mse_loss(shuffled, clouds)) > 0.05
         assert float(computeChamferDistance(shuffled, clouds)) < 1e-4
 
-    def test_the_mse_of_a_yaml_file_is_nan_on_a_padded_cloud_and_the_chamfer_is_not(
+    def test_the_mse_is_nan_on_a_padded_cloud_and_the_chamfer_of_the_file_is_not(
         self, tmp_path: Path
     ) -> None:
         clouds, _, _ = makeClouds(BATCH_SIZE, seed=6)
         batch = {"point_cloud": clouds}
         model = _model()
-        yaml_trainer = buildTrainerFromConfig(model, _experiment(output_dir=tmp_path).training)
-        assert torch.isnan(yaml_trainer.computeLosses(batch, step=0).reconstruction)
+        mse_trainer = buildTrainerFromConfig(
+            model, _experiment("training.reconstruction_loss=mse", output_dir=tmp_path).training
+        )
+        assert torch.isnan(mse_trainer.computeLosses(batch, step=0).reconstruction)
         chamfer_trainer = _chamferTrainer(model, output_dir=tmp_path)
         assert torch.isfinite(chamfer_trainer.computeLosses(batch, step=0).reconstruction)
 
-    def test_sum_multiplies_the_chamfer_by_the_number_of_values_of_a_cloud(self) -> None:
-        """Pins why the Chamfer route keeps `mean`: it is already a sum over points (ADR 0029)."""
+    def test_the_registered_chamfer_counts_as_one_term_so_sum_leaves_it_alone(self) -> None:
+        batch = {"point_cloud": makeClouds(BATCH_SIZE, seed=7)[0]}
+
+        def reconstruction(reduction: str) -> float:
+            torch.manual_seed(0)  # the same weights and reparameterisation noise for both
+            trainer = Trainer(
+                _model(), reconstruction_loss_fn=ChamferLoss(), reconstruction_reduction=reduction
+            )
+            torch.manual_seed(1)
+            return trainer.computeLosses(batch, step=0).reconstruction.item()
+
+        assert reconstruction("sum") == reconstruction("mean")
+
+    def test_sum_multiplies_the_plain_chamfer_function_by_the_values_of_a_cloud(self) -> None:
+        """The plain function, passed by hand, is rescaled by `sum` like any callable (ADR 0029)."""
         batch = {"point_cloud": makeClouds(BATCH_SIZE, seed=7)[0]}
 
         def reconstruction(reduction: str) -> float:
@@ -397,7 +425,7 @@ def _trainedScores(
 ) -> dict[str, float]:
     """Train the shipped experiment on `train` and score the held-out clouds' reconstructions.
 
-    `chamfer=False` trains it as a YAML file says (`mse`, summed), with the same optimizer.
+    `chamfer=False` trains it with `mse` instead (summed), with the same optimizer.
     """
     overrides = (
         "training.beta_schedules.z_fused.kwargs.warmup_steps=20",
@@ -408,7 +436,10 @@ def _trainedScores(
         trainer = _chamferTrainer(model, *overrides, output_dir=output_dir)
     else:
         trainer = buildTrainerFromConfig(
-            model, _experiment(*overrides, output_dir=output_dir).training
+            model,
+            _experiment(
+                *overrides, "training.reconstruction_loss=mse", output_dir=output_dir
+            ).training,
         )
     trainer.fit(_batchesOf(train), num_epochs=40, val_dataloader=_batchesOf(held_out))
     model.eval()
@@ -450,14 +481,15 @@ class TestAModelThatLearnsPointClouds:
         assert scores["chamfer"] < 0.8 * guess["chamfer"]
         assert scores["f_score"] > guess["f_score"] + 0.05
 
-    def test_the_loss_a_yaml_file_can_name_trains_a_model_worse_than_that_cloud(
+    def test_a_position_by_position_loss_trains_a_model_worse_than_that_cloud(
         self, tmp_path: Path
     ) -> None:
         """Pins the main finding of ADR 0044: `mse` compares points that have nothing in common.
 
         The clouds are complete, since on a padded one `mse` is `NaN` (tested above). The same
         model, optimizer and weight, with the loss of the file instead of the Chamfer distance,
-        ends up several times farther from the clouds than a cloud that ignores them.
+        ends up several times farther from the clouds than a cloud that ignores them, which is
+        why the file names `chamfer`.
         """
         torch.manual_seed(0)
         train, _, _ = makeClouds(512, seed=1, variable=False)
@@ -466,7 +498,7 @@ class TestAModelThatLearnsPointClouds:
         scores = _trainedScores(train, held_out, tmp_path, chamfer=False)
         assert scores["chamfer"] > 2 * guess["chamfer"]
 
-    def test_sorting_the_points_does_not_rescue_the_loss_of_a_yaml_file(
+    def test_sorting_the_points_does_not_rescue_a_position_by_position_loss(
         self, tmp_path: Path
     ) -> None:
         """A canonical order helps, and is still worse than that cloud (ADR 0044)."""
@@ -485,10 +517,13 @@ class TestEvaluation:
         model = _model().eval()
         clouds, _, _ = makeClouds(6, seed=8)
         loader = [{"point_cloud": clouds}]
-        results = evaluate(model, loader, reconstruction_loss_fn=computeChamferDistance)
+        results = evaluate(model, loader, reconstruction_loss_fn=ChamferLoss())
         assert results.num_samples == 6
         assert set(results.reconstruction_metrics) == {"point_cloud"}
         assert torch.isfinite(torch.tensor(results.total_reconstruction_loss))
+        scores = results.reconstruction_metrics["point_cloud"]
+        assert set(scores) == {"chamfer", "precision", "recall", "f_score"}
+        assert all(math.isfinite(value) for value in scores.values())
         paths = exportEvaluationFigures(model, loader, tmp_path)
         assert [path.name for path in paths] == [
             "reconstructions_point_cloud.png",
@@ -497,10 +532,10 @@ class TestEvaluation:
         ]
         assert all(path.exists() for path in paths)
 
-    def test_the_position_by_position_metrics_of_the_report_are_nan_on_a_padded_cloud(
+    def test_a_plain_function_says_nothing_so_the_five_metrics_are_nan_on_a_padded_cloud(
         self,
     ) -> None:
-        """Pins what to read instead: the total (Chamfer) loss and `computeCloudScores`."""
+        """The metrics follow a registered loss; a bare function gets the five, as in 2.0.0."""
         model = _model().eval()
         clouds, _, _ = makeClouds(6, seed=8)
         results = evaluate(

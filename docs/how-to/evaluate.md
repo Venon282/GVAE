@@ -60,11 +60,47 @@ the total reconstruction loss of the report is on the scale of the training
 curves: `--reconstruction-reduction` (`training.reconstruction_reduction`:
 `mean`, the default, `sum`, or `modality=name` pairs such as
 `signal=sum,image=mean`, [ADR 0029](../adr/0029-loss-scale-convention.md)),
-`--reconstruction-loss` (`mse`, the default, `l1`, `bce`, `smooth_l1`, or pairs
+`--reconstruction-loss` (a registered name: `mse`, the default, `l1`, `bce`, `smooth_l1`,
+`bce_with_logits`, `masked_mse`, `token_cross_entropy`, `chamfer` or `tabular_mixed`, or pairs
 such as `signal=mse,mask=bce`) and `--reconstruction-weight` (a number, default
 `1`, or pairs such as `signal=0.5,mask=0.2`,
 [ADR 0030](../adr/0030-per-modality-reconstruction-loss-and-weight.md)). A modality name that the model does not have is a usage
-error. The per-modality metrics do not depend on any of them.
+error. The reduction and the weight do not change the per-modality metrics. The loss does, as the
+next section says.
+
+## Which metrics a modality gets
+
+The metrics of a modality follow the loss it was trained with
+([ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)), so that the report says
+something about the data and not only about a squared error. By default:
+
+| The loss of the modality | The report has |
+|---|---|
+| `mse`, `l1`, `bce`, `smooth_l1`, `bce_with_logits`, `tabular_mixed`, or a function | `mse`, `rmse`, `mae`, `r2`, `pearson_r`, as in 2.0.0 |
+| `masked_mse`, which reads a `NaN` target as "not observed" | the same five names, computed on the observed values only, so a series with gaps gives numbers and no `NaN` |
+| `chamfer` | `chamfer`, `precision`, `recall`, `f_score` of the clouds (threshold `0.1`, in the units of the data), where a row of `NaN` in the target is a point that does not exist |
+| `token_cross_entropy` | `token_accuracy`, the share of positions where the highest score is the target token |
+
+Ask for others by name with `reconstruction_metrics` in Python. It takes `None` (the default
+above), a list of names for every modality, a dict of functions for every modality (the form of
+2.0.0), or a mapping from a reconstruction name to a list of names or a dict:
+
+```python
+results = evaluate(
+    model,
+    dataloader,
+    reconstruction_loss_fn=reconstruction_loss_fn,
+    reconstruction_metrics={"point_cloud": ["chamfer", "f_score"], "image": ["mse", "r2"]},
+)
+```
+
+`listRegisteredMetrics()` lists the names: the five above, their `masked_*` forms (a metric
+computed on the values whose target is not `NaN`), `chamfer`, `precision`, `recall`, `f_score`,
+`edge_auc` (graphs, every node present) and `token_accuracy`. A function of your own joins them with
+`@registerMetric("name")`, a function of the reconstruction and the target that returns a float. A
+name that is not registered is refused before any batch is read, with the list of the registered
+ones. In the table of `--output-dir` a modality has a blank where its set has no such metric. The
+cross-modal metrics of `--paired` keep the five default metrics.
 
 If your own data pipeline applied a `data.transforms` step (`log` /
 `standardize` / `resample`, spec §6.2) before training, reconstruction
@@ -98,10 +134,11 @@ table also has one row per input subset and modality: the row with `signal` as i
 
 `evaluate` computes each metric over the whole pooled test set, which keeps every original and
 every reconstruction in memory. `--streaming` (`evaluate(..., streaming=True)` in Python) computes
-the same five metrics one batch at a time from running statistics, so the memory they need does
-not grow with the test set. The values equal the pooled ones up to the rounding of the `float32`
-pool, whatever the batch size. It cannot be combined with custom `reconstruction_metrics`, which
-are functions of the pooled tensors. What stays in memory is the latent posteriors
+the same five metrics, and their masked forms, one batch at a time from running statistics, so the
+memory they need does not grow with the test set. The values equal the pooled ones up to the
+rounding of the `float32` pool, whatever the batch size. It cannot be combined with custom
+`reconstruction_metrics`, which are functions of the pooled tensors, and it refuses a metric that
+needs the pool (`chamfer`, `token_accuracy`) with a message that names it. What stays in memory is the latent posteriors
 (`num_samples x latent_dim` per latent space); `--max-samples` still bounds everything.
 
 ## Paired data: retrieval and alignment

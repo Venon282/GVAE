@@ -1,4 +1,4 @@
-# Add a fusion, latent head, assembler, regularizer, loss term, transform, beta schedule, callback, or logger
+# Add a fusion, latent head, assembler, regularizer, loss term, reconstruction loss, metric, transform, beta schedule, callback, or logger
 
 Every one of these follows the exact same three-step pattern: subclass an
 abstract base class, decorate it to self-register under a name, and import
@@ -12,6 +12,8 @@ runs.
 | Assembler | `AbstractAssembler` | `@registerAssembler("name")` | `assemblers/` | `assemblers/__init__.py` |
 | Latent regularizer | `AbstractLatentRegularizer` | `@registerRegularizer("name")` | `losses/regularizers/` | `losses/regularizers/__init__.py` |
 | Loss term | `AbstractLossTerm` | `@registerLossTerm("name")` | `losses/terms/` | `losses/terms/__init__.py` |
+| Reconstruction loss | `AbstractReconstructionLoss` | `@registerReconstructionLoss("name")` | `losses/reconstruction/` | `losses/reconstruction/__init__.py` |
+| Metric | a function `(reconstruction, target) -> float` | `@registerMetric("name")` | `evaluation/` | `evaluation/__init__.py` |
 | Data transform | `AbstractTransform` | `@registerTransform("name")` | `data/transforms/` | `data/transforms/__init__.py` |
 | Beta schedule | `AbstractBetaSchedule` | `@registerBetaSchedule("name")` | `training/beta_schedules/` | `training/beta_schedules/__init__.py` |
 | Training callback | `TrainerCallback` | `@registerCallback("name")` | `training/callbacks/` | `training/callbacks/__init__.py` |
@@ -117,6 +119,67 @@ class LatentAlignment(AbstractLossTerm):
 - **The name is the key.** It is the registry name, a term is listed once in `loss_terms`, and it cannot be
   `total`, `reconstruction` or `regularization`.
 - The registry ships empty on purpose: the terms are the objectives of Phases 6 and 7, each with its own ADR.
+
+## A note specific to reconstruction losses
+
+A reconstruction loss compares what a decoder wrote with its target, and it is chosen by name from
+`training.reconstruction_loss` (roadmap P5-3, [ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)).
+It is an `nn.Module` whose `forward` receives the reconstruction and the target and returns a **scalar that is a
+mean over the loss's terms**:
+
+```python
+@registerReconstructionLoss("huber_per_channel")
+class HuberPerChannelLoss(AbstractReconstructionLoss):
+    reads_nan_as_unobserved = True  # a NaN in the target adds nothing
+    default_metrics = ("masked_mse", "masked_mae")  # what `evaluate` reports for this loss
+
+    def __init__(self, delta: float = 1.0) -> None:
+        super().__init__()
+        self.delta = delta
+
+    def forward(self, reconstruction, target):
+        seen = ~torch.isnan(target)
+        error = functional.huber_loss(
+            reconstruction[seen], target[seen], delta=self.delta, reduction="sum"
+        )
+        return error / target.numel()
+```
+
+- **Declare what the generic code needs to know**, as class attributes, so that nothing has to build the loss to
+  ask: `requires_matching_shapes` (default `True`: the reconstruction and the target must have one shape, and
+  the check of the trainer stays for a loss that does not opt out), `reads_nan_as_unobserved` (default `False`),
+  `default_metrics` (names of registered metrics, default `None`, meaning the five default ones) and
+  `decoder_arguments` (constructor arguments the config layer reads from the decoder of the reconstruction when
+  the YAML does not give them, as `tabular_mixed` does with `categorical_sizes`).
+- **Return a mean over the terms, and say how many there are.** `reconstruction_reduction: sum` multiplies the
+  value by `countTerms(reconstruction, target)`, the number of terms one sample's value averages over, so
+  the same line means the same thing for every loss ([ADR 0029](../adr/0029-loss-scale-convention.md)). The
+  default is the product of the axes after the batch. Override the method for a loss whose terms are the tokens
+  of a text, the columns of a table, or one per cloud.
+- **Parameters are the trainer's.** A parameter of the loss (a learned noise scale, say) joins the optimizer, is
+  clipped with the model's, and is saved in the checkpoint under `reconstruction_loss_state_dict`. A loss with no
+  parameter writes nothing. A bare name or an `{name, kwargs}` entry gives one instance to every reconstruction,
+  so its parameters are shared by the modalities, and a mapping builds one per reconstruction.
+- **Keep the metrics in step.** A loss that reads `NaN` as unobserved gets the masked metrics, and one that names
+  `default_metrics` gets those. If your loss is for a new kind of data, register a metric for it
+  (below) so `evaluate()` says something about the data and not only about a squared error.
+
+## A note specific to metrics
+
+A metric is a function of the reconstruction and the target that returns a float. Unlike the strategies above, a
+metric is not one of several exclusive choices: `evaluate()` computes a set of them together, so the registry is
+a name to function table (`registerMetric`, `getMetric`, `listRegisteredMetrics`) and not a class registry:
+
+```python
+@registerMetric("median_error")
+def computeMedianError(reconstruction: torch.Tensor, target: torch.Tensor) -> float:
+    return float((reconstruction - target).abs().median())
+```
+
+Name it in `evaluate(reconstruction_metrics=["median_error", "mse"])`, or in a loss's `default_metrics`. For a
+metric that must ignore a `NaN` target, wrap it with `maskUnobserved(function)`, which is what the `masked_*`
+forms of the five default metrics are. The streaming evaluation accumulates the ten array metrics and refuses
+any other with a message that names it.
 
 ## A note specific to data transforms
 

@@ -253,11 +253,16 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         "--reconstruction-loss",
         type=_parseLoss,
         default=DEFAULT_RECONSTRUCTION_LOSS,
-        help="The loss the model was trained with (training.reconstruction_loss): 'mse' "
-        "(default), 'l1', 'bce' or 'smooth_l1' for every modality, or 'modality=name' pairs "
-        "separated by commas, e.g. 'signal=mse,mask=bce'; a modality left out keeps 'mse'. "
-        "It only affects the total reconstruction loss of the report "
-        "(docs/adr/0030-per-modality-reconstruction-loss-and-weight.md).",
+        help="The loss the model was trained with (training.reconstruction_loss): a registered "
+        "name for every modality ('mse', the default, 'l1', 'bce', 'smooth_l1', "
+        "'bce_with_logits', 'masked_mse', 'token_cross_entropy', 'chamfer', 'tabular_mixed'), "
+        "or 'modality=name' pairs separated by commas, e.g. 'signal=mse,mask=bce'; a modality "
+        "left out keeps 'mse'. It sets the total reconstruction loss of the report and, for a "
+        "loss that declares them, the metrics of its modality: the cloud scores for 'chamfer', "
+        "the token accuracy for 'token_cross_entropy', the masked metrics for a loss that "
+        "reads NaN as unobserved (docs/adr/0048-reconstruction-loss-and-metric-registries.md, "
+        "docs/adr/0030-per-modality-reconstruction-loss-and-weight.md). "
+        "A loss with arguments is written in a YAML file or in Python, not here.",
     )
     parser.add_argument(
         "--reconstruction-weight",
@@ -280,9 +285,11 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--streaming",
         action="store_true",
-        help="Compute the reconstruction metrics (mse, rmse, mae, r2, pearson_r) batch by "
-        "batch instead of over the pooled test set, so that the memory they need does not grow "
-        "with it. The values equal the pooled ones up to rounding.",
+        help="Compute the reconstruction metrics (mse, rmse, mae, r2, pearson_r, and their "
+        "masked forms) batch by batch instead of over the pooled test set, so that the memory "
+        "they need does not grow with it. The values equal the pooled ones up to rounding. "
+        "A loss whose metrics are scores of the whole set (chamfer, token_cross_entropy) "
+        "cannot be streamed.",
     )
     parser.add_argument(
         "--paired",

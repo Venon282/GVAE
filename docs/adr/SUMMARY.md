@@ -46,3 +46,4 @@
 - [0045: Loss settings are keyed by reconstruction name](0045-settings-keyed-by-reconstruction-name.md)
 - [0046: Encode and decode seams](0046-encode-and-decode-seams.md)
 - [0047: Extra loss terms at the single loss site](0047-extra-loss-terms.md)
+- [0048: Reconstruction loss and metric registries](0048-reconstruction-loss-and-metric-registries.md)

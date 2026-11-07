@@ -451,7 +451,12 @@ class TestTrainingConfigLookups:
 
     def test_supported_reconstruction_loss_names_include_mse(self) -> None:
         assert "mse" in listSupportedReconstructionLossNames()
-        assert resolveReconstructionLossFn("mse") is torch.nn.functional.mse_loss
+        loss = resolveReconstructionLossFn("mse")
+        assert type(loss).__name__ == "MseLoss"
+        prediction, target = torch.rand(3, 4), torch.rand(3, 4)
+        assert torch.equal(
+            loss(prediction, target), torch.nn.functional.mse_loss(prediction, target)
+        )
 
     def test_unknown_optimizer_name_raises_key_error(self) -> None:
         with pytest.raises(KeyError, match="does_not_exist"):

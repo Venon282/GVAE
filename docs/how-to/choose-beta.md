@@ -32,7 +32,12 @@ reconstruction loss of decoder `m`, scaled by its **reduction**
 
 Two more rows of the same reading, for the other losses of `training.reconstruction_loss`: with
 `sum`, `bce` is the negative log-likelihood of a Bernoulli decoder and `l1` that of a Laplace
-decoder of scale 1, so `beta = 1` is the ELBO for both, with `reconstruction_weight: 1.0`.
+decoder of scale 1, so `beta = 1` is the ELBO for both, with `reconstruction_weight: 1.0`. The registered losses
+of [ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md) follow the same reading. With `sum`,
+`token_cross_entropy` is the negative log-likelihood of a categorical text and `chamfer` a sum over points
+that has no likelihood behind it, so `reconstruction_weight: 1.0` is the ELBO for the first only. `masked_mse`
+and the numeric columns of `tabular_mixed` are squared errors, so `0.5` is the ELBO of a Gaussian of unit
+variance, as for `mse`, and the categorical blocks of `tabular_mixed` are on the scale of the first.
 
 With several modalities the two reductions differ in one more way. `mean` gives each modality a
 term of the same size whatever its `N`, which keeps a 256-point signal and a 1024-pixel image on

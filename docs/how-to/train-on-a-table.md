@@ -105,8 +105,9 @@ modalities:
   `model.modalities.tabular.encoder.kwargs.num_features=15` and the same for the decoder.
 - **`categorical_sizes`**, in the decoder only, if the table has one-hot columns: the number of
   categories of each block, in order. They are the last `sum(categorical_sizes)` columns. A softmax is
-  applied inside each block, so a block is a probability vector, and the default `mse` loss is the
-  Brier score of the column. Leave it out for an all-numeric table.
+  applied inside each block, so a block is a probability vector, and the `tabular_mixed` loss of the
+  experiment reads these sizes from the decoder: a cross-entropy on each block. Leave it out for an
+  all-numeric table.
 - **The network**: `hidden_dims`, `activation` (`relu`, `gelu`, `silu`, `leaky_relu`, `tanh`),
   `normalization` (`layer`, `batch` or none) and `dropout`. An empty `hidden_dims` is a linear VAE.
   `batch` normalization fails in training on a batch of one row.
@@ -121,16 +122,40 @@ PYTHONPATH=. python scripts/train.py --config-name experiment/tabular_vae \
     model.modalities.tabular.decoder.kwargs.num_features=15
 ```
 
-`experiment/tabular_vae` trains on the `sum` reconstruction loss with weight 0.5, since the default
-`mean` collapsed the model on a synthetic table (no latent unit active; see
+`experiment/tabular_vae` trains on the `tabular_mixed` reconstruction loss, with the `sum` reduction and weight
+0.5, since the default `mean` collapsed the model on a synthetic table (no latent unit active; see
 [choose beta](choose-beta.md#choose-a-reduction)). The numbers behind that are in the ADR and are not
 tuned to your data: [choose beta](choose-beta.md) has the sweep to run once you have a real table.
 
+## The loss
+
+`tabular_mixed` ([ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)) gives each column the
+error that fits it: the squared error on a numeric column and the cross-entropy on each categorical block. It is
+the mean over the numeric columns and the categorical blocks, so with `sum` it is the squared error of the numeric
+part plus the negative log-likelihood of the categorical part, on the scale of the KL term. The sizes of the
+blocks are `categorical_sizes` of the decoder, which the loss reads from it when the YAML does not give them. To
+set them by hand, or to read a decoder that returns raw scores, write the loss as an entry:
+
+```yaml
+training:
+  reconstruction_loss:
+    name: tabular_mixed
+    kwargs:
+      categorical_sizes: [3, 5]
+      probabilities: true   # false if the decoder returns scores and not probabilities
+```
+
+With no categorical column it is the `mse` of the table, so the weight that was measured with `mse` carries over.
+For the categorical columns the exact likelihood has a weight of 1.0, and 0.5 weighs them half as much: raise the
+weight if the categories are what matters. A model with several modalities has to give `categorical_sizes` in the
+entry, since the loss cannot tell which decoder to read. `evaluate` reports the five default metrics for it, over
+the whole row, one-hot columns included.
+
 ## What it does not do
 
-- **No per-column loss.** The reconstruction loss is one function per decoder, so categorical
-  columns cannot take a cross-entropy next to a squared error on the numbers. The softmax with `mse`
-  stands in for it.
+- **No per-column weights.** Each numeric column counts the same, and so does each categorical block. A column
+  that should count more is scaled by the loader, or the loss is a class of your own
+  ([add a strategy](add-a-strategy.md)).
 - **No variance per column.** The decoder returns a mean, so every column is reconstructed with the
   same fixed noise level. Columns with very different scales are the reason to standardize.
 - **No handling of missing values**, as above.

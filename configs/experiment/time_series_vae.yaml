@@ -19,19 +19,23 @@ seed: 0
 deterministic: false
 output_dir: outputs/time_series_vae
 
-# Loss (docs/adr/0029-loss-scale-convention.md, docs/adr/0042-time-series-modality.md, docs/how-to/choose-beta.md).
-# A mean squared error summed over the values of a series, like the KL term, is the reconstruction
-# term of a Gaussian decoder, and its weight w is a beta of 1 / w on the KL (roadmap decision D-6):
-# 0.5 is a Gaussian of variance one, so it is only right for data whose noise is of that size. On
-# synthetic series of unit scale with a noise of 0.05 (3,000 series of 3 channels and 96 steps, 60
-# epochs), the share of the variance recovered was 0.50 at weight 0.5, 0.79 at 5, 0.80 at 50 and 0.80
-# at 500, and the weight is the lever: 50 is a middle setting measured on synthetic data, not a tuned
-# one, and the right one scales as 0.5 / sigma^2 for a noise of sigma after standardization.
+# Loss (docs/adr/0029-loss-scale-convention.md, docs/adr/0042-time-series-modality.md,
+# docs/adr/0048-reconstruction-loss-and-metric-registries.md, docs/how-to/choose-beta.md).
+# `masked_mse` is a mean squared error that leaves out what was not observed, a `NaN` in the batch
+# tensor (a gap in a series, the padding of a short one), so a loader that leaves gaps trains with
+# this file as it is. On a complete series it is the `mse` of the same data, and with `sum` it is a
+# squared error summed over the values of a series, like the KL term: the reconstruction term of a
+# Gaussian decoder, whose weight w is a beta of 1 / w on the KL (roadmap decision D-6). 0.5 is a
+# Gaussian of variance one, so it is only right for data whose noise is of that size. On synthetic
+# series of unit scale with a noise of 0.05 (3,000 series of 3 channels and 96 steps, 60 epochs), the
+# share of the variance recovered was 0.50 at weight 0.5, 0.79 at 5, 0.80 at 50 and 0.80 at 500, and
+# the weight is the lever: 50 is a middle setting measured on synthetic data, not a tuned one, and
+# the right one scales as 0.5 / sigma^2 for a noise of sigma after standardization. Those numbers
+# were measured with `mse` on complete series, which `masked_mse` reproduces up to rounding.
 #
-# This file is for complete series. The `mse` of a YAML file returns `NaN` as soon as one value of
-# the batch is a `NaN`, so a loader that leaves gaps or pads short series with `NaN` trains through
-# Python with `computeMaskedSquaredError` instead (docs/how-to/train-on-time-series.md).
+# `evaluate()` reports the five metrics over the observed values for this loss, under their usual
+# names, so a series with gaps gives numbers and no `NaN`.
 training:
-  reconstruction_loss: mse
+  reconstruction_loss: masked_mse
   reconstruction_reduction: sum
   reconstruction_weight: 50.0

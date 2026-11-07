@@ -49,6 +49,7 @@ from torch.optim import Optimizer
 from global_vae.losses.reconstruction import (
     DEFAULT_REDUCTION,
     LossFn,
+    collectReconstructionLossModules,
     computeTotalReconstructionLoss,
     validateReduction,
 )
@@ -240,6 +241,11 @@ class Trainer:
             the optimizer and in the checkpoint.
         loss_term_weights: Loss term name -> a number or a beta schedule, the weight of
             each term (`1.0` for a term with no entry).
+        reconstruction_losses: The reconstruction losses that are `nn.Module`s (roadmap P5-3,
+            ADR 0048), by reconstruction name (`"default"` for one loss shared by every
+            modality), an empty `nn.ModuleDict` when every loss is a plain function. The
+            trainer holds them, so a loss that owns parameters has them in the optimizer and in
+            the checkpoint (`reconstruction_loss_state_dict`).
     """
 
     def __init__(
@@ -293,7 +299,10 @@ class Trainer:
                 loss function shared by every modality, or a
                 per-modality dict of loss functions. Defaults to
                 `torch.nn.functional.mse_loss`, matching that
-                function's own default.
+                function's own default. A loss may be an
+                `AbstractReconstructionLoss` (`training.reconstruction_loss`
+                resolves a name to one, ADR 0048) or any `nn.Module`: its
+                parameters, if it has any, are trained with the model's.
             beta: Base regularization weight (spec §2.3): a single
                 value shared by every latent space, or a per-latent-space
                 dict, used for any latent space that has no entry in
@@ -412,6 +421,12 @@ class Trainer:
         )
         self.model = model.to(self.device)
         self.loss_terms = nn.ModuleDict(terms).to(self.device)
+        # A reconstruction loss that is a module (one that owns parameters, ADR 0048) is held here,
+        # so that its parameters are trained and checkpointed. The modules are moved in place, so
+        # the loss in `reconstruction_loss_fn` below is the one on the device.
+        self.reconstruction_losses = nn.ModuleDict(
+            collectReconstructionLossModules(reconstruction_loss_fn)
+        ).to(self.device)
         self.loss_term_weights = term_weights
         for term in terms.values():
             term.validateModel(self.model)
@@ -581,6 +596,7 @@ class Trainer:
         """
         self.model.train()
         self.loss_terms.train()
+        self.reconstruction_losses.train()
         running_totals: dict[str, float] = {}
         num_steps = 0
         accumulate = self.accumulate_grad_batches
@@ -725,6 +741,7 @@ class Trainer:
         """
         self.model.eval()
         self.loss_terms.eval()
+        self.reconstruction_losses.eval()
         running_totals: dict[str, float] = {}
         num_batches = 0
 
@@ -840,6 +857,7 @@ class Trainer:
             ],
             scaler_state_dict=self.scaler.state_dict() if self.scaler is not None else None,
             loss_terms=self.loss_terms,
+            reconstruction_losses=self.reconstruction_losses,
         )
 
     def loadCheckpoint(
@@ -892,6 +910,7 @@ class Trainer:
             strict=strict,
             weights_only=weights_only,
             loss_terms=self.loss_terms,
+            reconstruction_losses=self.reconstruction_losses,
         )
         self.global_step = metadata.global_step
         self.start_epoch = metadata.start_epoch
@@ -927,21 +946,32 @@ class Trainer:
         """Return every parameter the optimizer trains: the model's, then the loss terms'.
 
         Returns:
-            The parameters of `self.model` followed by those of `self.loss_terms`. With no loss
-            term that is `list(model.parameters())`, which is what the optimizer was built from
-            and what the clipping covered before loss terms existed.
+            The parameters of `self.model`, then those of `self.loss_terms`, then those of
+            `self.reconstruction_losses`. With no loss term and a reconstruction loss that owns no
+            parameter that is `list(model.parameters())`, which is what the optimizer was built
+            from and what the clipping covered before they existed.
         """
-        return [*self.model.parameters(), *self.loss_terms.parameters()]
+        return [
+            *self.model.parameters(),
+            *self.loss_terms.parameters(),
+            *self.reconstruction_losses.parameters(),
+        ]
 
     def _addLossTermParametersToOptimizer(self) -> None:
-        """Give an optimizer instance the loss term parameters it does not hold yet.
+        """Give an optimizer instance the loss parameters it does not hold yet.
+
+        Those of the loss terms and of the reconstruction losses.
 
         The parameters are added as one more parameter group, which takes the defaults of that
         optimizer. A caller who wants another learning rate for them puts them in a group of the
         optimizer before building the trainer, and nothing is added for them here.
         """
         held = {id(p) for group in self.optimizer.param_groups for p in group["params"]}
-        missing = [p for p in self.loss_terms.parameters() if id(p) not in held]
+        missing = [
+            p
+            for p in (*self.loss_terms.parameters(), *self.reconstruction_losses.parameters())
+            if id(p) not in held
+        ]
         if missing:
             self.optimizer.add_param_group({"params": missing})
 

@@ -30,6 +30,7 @@ from global_vae.decoders.registry import listRegisteredDecoders
 from global_vae.encoders.registry import listRegisteredEncoders
 from global_vae.evaluation.evaluate import evaluate
 from global_vae.evaluation.visual_export import exportEvaluationFigures
+from global_vae.losses.reconstruction.token_cross_entropy import TokenCrossEntropyLoss
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.training.trainer import Trainer
@@ -283,13 +284,46 @@ class TestWhatTheYamlLetsYouChange:
 
 
 class TestTheLossOfTheExperiment:
-    """What `bce` with a sum on one-hot targets is, and what it is not."""
+    """What the experiment's `token_cross_entropy` with a sum is, and what `bce` was on a text."""
 
-    def test_the_experiment_sets_a_bernoulli_loss_summed_per_text_with_weight_two(self) -> None:
+    def test_the_experiment_sets_a_categorical_loss_summed_per_text_with_weight_two(self) -> None:
         training = _experiment().training
-        assert training.reconstruction_loss == "bce"
+        assert training.reconstruction_loss == "token_cross_entropy"
         assert training.reconstruction_reduction == "sum"
         assert training.reconstruction_weight == 2.0
+
+    def test_the_experiment_asks_for_raw_scores_since_the_loss_applies_the_softmax(self) -> None:
+        kwargs = _experiment().model.modalities["text"].decoder.kwargs
+        assert kwargs["output_activation"] is None
+
+    def test_the_yaml_name_builds_the_registered_loss(self, tmp_path: Path) -> None:
+        model = buildModelFromConfig(_experiment().model)
+        trainer = buildTrainerFromConfig(model, _experiment(output_dir=tmp_path).training)
+        assert isinstance(trainer.reconstruction_loss_fn, TokenCrossEntropyLoss)
+
+    def test_the_experiment_trains_a_batch_of_one_hot_texts_and_of_ids(
+        self, tmp_path: Path
+    ) -> None:
+        """The loss reads the target either way: the loader may hand over ids or one-hot rows."""
+        model = buildModelFromConfig(_experiment().model)
+        trainer = buildTrainerFromConfig(model, _experiment(output_dir=tmp_path).training)
+        ids = _ids()
+        for text in (functional.one_hot(ids, VOCAB).float(), ids):
+            losses = trainer.computeLosses({"text": text}, step=0)
+            assert torch.isfinite(losses.reconstruction)
+            assert losses.reconstruction.item() > 0.0
+            backward(losses.total)
+            trainer.optimizer.zero_grad()
+
+    def test_the_value_is_the_cross_entropy_of_the_whole_text_times_the_weight(self) -> None:
+        """`sum` makes the mean over the tokens the cross-entropy of the text (ADR 0029, 0048)."""
+        torch.manual_seed(0)
+        scores = torch.randn(6, LENGTH, VOCAB)
+        ids = _ids(6)
+        loss = TokenCrossEntropyLoss()
+        mean = loss(scores, ids)
+        exact = functional.cross_entropy(scores.transpose(1, 2), ids, reduction="none").sum(dim=1)
+        assert mean * LENGTH == pytest.approx(exact.mean().item(), rel=1e-5)
 
     def test_sum_is_the_number_of_values_of_a_text_times_the_mean(self) -> None:
         """`sum` multiplies the element-wise mean by `length * vocab_size` (ADR 0029)."""
@@ -374,7 +408,7 @@ class TestAModelThatLearnsAGrammar:
             "training.optimizer.kwargs.lr=0.003",
             output_dir=tmp_path,
         ).training
-        model = _model()
+        model = buildModelFromConfig(_experiment().model)
         trainer = buildTrainerFromConfig(model, training)
         trainer.fit(_batchesOf(train_ids), num_epochs=40, val_dataloader=_batchesOf(valid_ids))
 

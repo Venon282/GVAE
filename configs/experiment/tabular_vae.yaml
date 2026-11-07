@@ -20,15 +20,23 @@ seed: 0
 deterministic: false
 output_dir: outputs/tabular_vae
 
-# Loss scale (docs/adr/0029-loss-scale-convention.md, docs/how-to/choose-beta.md). Under the
-# default `mean` reduction, `beta = 1` weights the KL N / 2 = 8 times more than the ELBO does for a
+# Loss (docs/adr/0029-loss-scale-convention.md, docs/adr/0039-tabular-modality.md,
+# docs/adr/0048-reconstruction-loss-and-metric-registries.md, docs/how-to/choose-beta.md).
+# `tabular_mixed` is the squared error of the numeric columns plus the cross-entropy of each
+# categorical column, whose sizes it reads from the decoder (`categorical_sizes` in
+# configs/model/tabular_single_latent.yaml). With no categorical column it is the `mse` of the table.
+# Under a `mean` reduction, `beta = 1` weights the KL N / 2 = 8 times more than the ELBO does for a
 # row of 16 values, and the model collapses: on a synthetic table (1000 rows driven by 4 hidden
 # factors, 60 epochs) it left 0 of 8 latent units active and an R^2 of 0.00 to 0.01 against the
-# column means. `sum` with weight 0.5 is the ELBO of a unit-variance Gaussian decoder, so `beta = 1`
-# (the warm-up of training/default.yaml) is its natural position: the same run used 4 of 8 units
-# (R^2 of 0.23 with 16 numeric columns, 0.46 with 10 numeric and two one-hot columns). These are
-# numbers from synthetic data and a short run, not a tuned value: the choice of beta is roadmap
-# decision D-6, which waits for a real run. Delete the `training` block below to go back to `mean`.
+# column means. `sum` with weight 0.5 is the ELBO of a unit-variance Gaussian decoder for the numeric
+# columns, so `beta = 1` (the warm-up of training/default.yaml) is its natural position: the same run
+# used 4 of 8 units (R^2 of 0.23 with 16 numeric columns). Those numbers are from synthetic data and
+# a short run, not a tuned value: the choice of beta is roadmap decision D-6, which waits for a real
+# run. They were measured with `mse`, which `tabular_mixed` reproduces on an all-numeric table. For
+# categorical columns the exact likelihood has a weight of 1.0, and 0.5 weighs them half as much;
+# raise the weight if the categories are what matters. Delete the `training` block below to go back
+# to `mse` with `mean`.
 training:
+  reconstruction_loss: tabular_mixed
   reconstruction_reduction: sum
   reconstruction_weight: 0.5

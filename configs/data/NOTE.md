@@ -63,7 +63,7 @@ of the tensor and the `vocab_size` of the encoder and the decoder.
 roadmap P3-7 and P3-8): a `loader_factory` of your own whose batches carry one key, `time_series`, a float tensor
 `(batch, channels, length)` (or `(batch, length)` for one channel), with `length` equal to `sequence_length.time_series`.
 A `NaN` is a value that was not observed: a gap, or the padding of a series shorter than `length`. The encoder reads the
-mask from it, and the masked loss of the Python route counts the observed values only. Its `transforms` entry for
+mask from it, and the `masked_mse` loss of the experiment counts the observed values only. Its `transforms` entry for
 `time_series` is empty, because the standardization is per channel and a YAML file can write only one number for
 `standardize`: the loader builds a `StandardizeTransform` from tensors of shape `(channels, 1)`, which leaves a `NaN` a
 `NaN` (`docs/how-to/train-on-time-series.md`). Cutting windows, padding them to one length and putting the observations on a

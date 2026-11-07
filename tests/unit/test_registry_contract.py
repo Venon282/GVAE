@@ -1,10 +1,10 @@
 """Contract test shared by every self-registration registry (spec §10, roadmap P0-4(c)).
 
-The codebase has eleven registries (encoders, decoders, fusion strategies, latent heads,
-assemblers, latent regularizers, data transforms, beta schedules, callbacks, experiment loggers and
-loss terms), each a small module with the same three functions. This file states the behaviour
-they all promise and checks it once per registry, so that a registry that drifts, or a new one that
-forgets part of the pattern, fails here:
+The codebase has twelve registries (encoders, decoders, fusion strategies, latent heads,
+assemblers, latent regularizers, data transforms, beta schedules, callbacks, experiment loggers,
+loss terms and reconstruction losses), each a small module with the same three functions. This file
+states the behaviour they all promise and checks it once per registry, so that a registry that
+drifts, or a new one that forgets part of the pattern, fails here:
 
 * a class registered under a name is returned by the lookup, unchanged;
 * registering a name twice raises `ValueError` and keeps the first class;
@@ -15,8 +15,8 @@ forgets part of the pattern, fails here:
   and 7 (`ships_built_ins=False`, which skips the two checks that need one and nothing else).
 
 A registry added later joins by adding one `_RegistrySpec` to `_REGISTRIES` (the latent head
-registry of roadmap P1-1 and the loss term registry of P5-6 did);
-`test_eleven_registries_are_covered` makes forgetting that visible.
+registry of roadmap P1-1, the loss term registry of P5-6 and the reconstruction loss registry of
+P5-3 did); `test_twelve_registries_are_covered` makes forgetting that visible.
 Behaviour that belongs to one registry only (which built-ins exist, what each does) stays in that
 registry's own tests, such as `test_callback_registry.py`, `test_assemblers.py` and
 `test_heads.py`.
@@ -54,6 +54,12 @@ from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import getFusionClass, listRegisteredFusions, registerFusion
 from global_vae.heads.base import AbstractLatentHead
 from global_vae.heads.registry import getHeadClass, listRegisteredHeads, registerHead
+from global_vae.losses.reconstruction.base import AbstractReconstructionLoss
+from global_vae.losses.reconstruction.registry import (
+    getReconstructionLossClass,
+    listRegisteredReconstructionLosses,
+    registerReconstructionLoss,
+)
 from global_vae.losses.regularizers.base import AbstractLatentRegularizer
 from global_vae.losses.regularizers.registry import (
     getRegularizerClass,
@@ -231,6 +237,16 @@ _REGISTRIES: tuple[_RegistrySpec, ...] = (
         listRegisteredLossTerms,
         ships_built_ins=False,
     ),
+    _RegistrySpec(
+        "reconstruction_losses",
+        "global_vae.losses.reconstruction",
+        "global_vae.losses.reconstruction.registry",
+        "_RECONSTRUCTION_LOSS_REGISTRY",
+        AbstractReconstructionLoss,
+        registerReconstructionLoss,
+        getReconstructionLossClass,
+        listRegisteredReconstructionLosses,
+    ),
 )
 
 _IDS = [spec.label for spec in _REGISTRIES]
@@ -274,10 +290,10 @@ def spec(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> _Re
     return registry_spec
 
 
-def test_eleven_registries_are_covered() -> None:
-    """The contract runs over all eleven registries; adding a twelfth means adding a spec."""
-    assert len(_REGISTRIES) == 11
-    assert len({s.registry_attr for s in _REGISTRIES}) == 11
+def test_twelve_registries_are_covered() -> None:
+    """The contract runs over all twelve registries; adding a thirteenth means adding a spec."""
+    assert len(_REGISTRIES) == 12
+    assert len({s.registry_attr for s in _REGISTRIES}) == 12
 
 
 class TestRegisterAndLookUp:

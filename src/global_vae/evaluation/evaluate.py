@@ -39,7 +39,8 @@ from global_vae.evaluation.latent_diagnostics import (
     computeLatentDiagnostics,
     validateActiveUnitThreshold,
 )
-from global_vae.evaluation.metrics import DEFAULT_RECONSTRUCTION_METRICS, MetricFn
+from global_vae.evaluation.metric_sets import MetricsSetting, resolveMetricSets
+from global_vae.evaluation.metrics import DEFAULT_RECONSTRUCTION_METRICS
 from global_vae.evaluation.streaming_metrics import StreamingMetric, buildStreamingMetrics
 from global_vae.losses.reconstruction import (
     DEFAULT_REDUCTION,
@@ -201,7 +202,7 @@ def evaluate(
     dataloader: Iterable[dict[str, torch.Tensor]],
     reconstruction_weights: dict[str, float] | float = 1.0,
     reconstruction_loss_fn: LossFn | dict[str, LossFn] = F.mse_loss,
-    reconstruction_metrics: dict[str, MetricFn] | None = None,
+    reconstruction_metrics: MetricsSetting = None,
     beta: dict[str, float] | float = 1.0,
     use_mean: bool = True,
     device: str | torch.device | None = None,
@@ -239,11 +240,17 @@ def evaluate(
         reconstruction_loss_fn: Forwarded to
             `computeTotalReconstructionLoss` for
             `total_reconstruction_loss` only.
-        reconstruction_metrics: Metric name -> `(reconstruction,
-            target) -> float`. Defaults to
-            `evaluation.metrics.DEFAULT_RECONSTRUCTION_METRICS` (mse,
-            rmse, mae, r2, pearson_r). Pass your own dict to add,
-            remove, or replace metrics without needing a registry.
+        reconstruction_metrics: Which metrics to report (roadmap P5-3, ADR 0048). `None` (default):
+            the default set of each modality, which follows `reconstruction_loss_fn`: the five
+            of `evaluation.metrics.DEFAULT_RECONSTRUCTION_METRICS` (mse, rmse, mae, r2, pearson_r),
+            or their masked forms under the same names for a loss that reads `NaN` as unobserved
+            (`masked_mse`), or the metrics a loss declares for its data (`chamfer`: chamfer,
+            precision, recall, f_score; `token_cross_entropy`: token_accuracy). Or a dict of metric
+            name -> `(reconstruction, target) -> float` for every modality, which adds, removes or
+            replaces metrics without a registry. Or a list of registered metric names
+            (`evaluation.metrics.listRegisteredMetrics()`) for every modality. Or a mapping from
+            a reconstruction name to such a list or dict, for the modalities it names, the others
+            keeping their default set.
         beta: Forwarded to `GlobalVae.computeRegularizationLoss` for
             `total_regularization_loss` only (`regularization_metrics`
             are always unweighted: see `EvaluationResults`).
@@ -270,11 +277,12 @@ def evaluate(
         active_unit_threshold: A latent dimension is an active unit when
             the variance of its posterior mean over the pooled samples is
             above this value (`LatentDiagnostics`). Defaults to 0.01.
-        streaming: If `True`, the default five reconstruction metrics are accumulated one batch
-            at a time (`evaluation.streaming_metrics`) and the originals and reconstructions are
-            never pooled, so the memory this pass needs does not grow with the dataset. The
-            values equal the pooled ones up to the rounding of the `float32` pool. Custom
-            `reconstruction_metrics` need the pool, so they cannot be combined with it.
+        streaming: If `True`, the reconstruction metrics are accumulated one batch at a time
+            (`evaluation.streaming_metrics`) and the originals and reconstructions are never
+            pooled, so the memory this pass needs does not grow with the dataset. The values
+            equal the pooled ones up to the rounding of the `float32` pool. Only the five default
+            metrics and their masked forms have a streaming form: custom functions, and the scores
+            of clouds, graphs and text, need the pool, so they cannot be combined with it.
             `max_samples` keeps its meaning (the first `max_samples` samples). Defaults to
             `False`.
 
@@ -291,16 +299,23 @@ def evaluate(
             target in some batch differ in shape, or if `streaming` is combined with custom
             `reconstruction_metrics`.
     """
-    if streaming and reconstruction_metrics is not None:
+    validateReduction(reconstruction_reduction, "reconstruction_reduction")
+    validateActiveUnitThreshold(active_unit_threshold)
+    resolved_device = device if device is not None else next(model.parameters()).device
+    metric_sets = resolveMetricSets(
+        reconstruction_metrics,
+        reconstruction_loss_fn,
+        list(model.output_modalities),
+        DEFAULT_RECONSTRUCTION_METRICS,
+    )
+    if streaming and any(
+        spec.name is None for specs in metric_sets.values() for spec in specs.values()
+    ):
         raise ValueError(
             "evaluate(streaming=True) computes the default metrics batch by batch and cannot "
             "take custom `reconstruction_metrics`, which need the pooled dataset. Drop one of "
             "the two."
         )
-    validateReduction(reconstruction_reduction, "reconstruction_reduction")
-    validateActiveUnitThreshold(active_unit_threshold)
-    resolved_device = device if device is not None else next(model.parameters()).device
-    resolved_metrics = reconstruction_metrics or DEFAULT_RECONSTRUCTION_METRICS
     kl_regularizer = KlStandardNormalRegularizer()
 
     model.eval()
@@ -339,7 +354,12 @@ def evaluate(
                         rows = (
                             slice(None) if max_samples is None else slice(max_samples - num_samples)
                         )
-                        meters = streamed_metrics.setdefault(name, buildStreamingMetrics())
+                        meters = streamed_metrics.setdefault(
+                            name,
+                            buildStreamingMetrics(
+                                {key: str(spec.name) for key, spec in metric_sets[name].items()}
+                            ),
+                        )
                         for meter in meters.values():
                             meter.update(reconstruction[rows], batch[name][rows])
                     else:
@@ -360,8 +380,8 @@ def evaluate(
         if max_samples is not None:
             originals, reconstructions = originals[:max_samples], reconstructions[:max_samples]
         reconstruction_metric_results[name] = {
-            metric_name: metric_fn(reconstructions, originals)
-            for metric_name, metric_fn in resolved_metrics.items()
+            metric_name: spec.function(reconstructions, originals)
+            for metric_name, spec in metric_sets[name].items()
         }
 
     if streaming:

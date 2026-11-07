@@ -18,6 +18,12 @@ number or a beta schedule), added to the total and kept in `StepLosses.terms`. T
 the optimizer, clipped with the model's, saved under `loss_terms_state_dict` by `checkpoint.py` and
 restored on resume. With no term, nothing changes.
 
+The reconstruction losses that are `nn.Module`s (roadmap P5-3, `docs/adr/0048-reconstruction-loss-and-metric-registries.md`)
+are held the same way (`Trainer.reconstruction_losses`, an `nn.ModuleDict` named by reconstruction, `default` for one loss
+for every modality): a loss that owns a parameter has it in the optimizer, clipped with the model's, saved under
+`reconstruction_loss_state_dict` and restored on resume. A loss with no parameter, and a plain function such as
+`torch.nn.functional.mse_loss`, adds nothing and writes no key.
+
 `beta_schedules/` predates `trainer.py` and does not depend on it: see
 `beta_schedules/base.py`, `beta_schedule_resolution.py`, and
 `docs/adr/0004-pluggable-beta-schedules.md`. `Trainer` calls

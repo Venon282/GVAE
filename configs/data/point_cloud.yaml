@@ -29,8 +29,10 @@ transforms:
   point_cloud: []
 
 # Number of points `N` per cloud: the number of rows of the batch tensor after the loader's sampling
-# or padding. It must match configs/model/point_cloud_single_latent.yaml's decoder.kwargs.num_points,
-# which is never filled in for you.
+# or padding. It need not match configs/model/point_cloud_single_latent.yaml's
+# decoder.kwargs.num_points, the number of points the decoder emits, since the `chamfer` loss of
+# experiment/point_cloud_vae.yaml compares clouds of any two sizes (ADR 0048); neither is filled in
+# for you.
 sequence_length:
   point_cloud: 64
 

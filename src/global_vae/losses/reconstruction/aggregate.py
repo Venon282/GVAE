@@ -6,6 +6,11 @@ the latent dimensions of each sample. The `reduction` of `computeTotalReconstruc
 per modality, whether the reconstruction term stays that per-element mean (`"mean"`, the default)
 or becomes the per-sample sum averaged over the batch (`"sum"`), which is the scale of the
 regularization term.
+
+A loss that is an `AbstractReconstructionLoss` (roadmap P5-3, ADR 0048) says what the aggregate
+may assume: whether the shapes must match, and how many terms a sample's value is the mean of,
+which the `sum` reduction multiplies by. A plain callable, such as every `torch.nn.functional`
+loss, keeps the rules it always had.
 """
 
 import math
@@ -13,6 +18,9 @@ from collections.abc import Callable, Mapping
 
 import torch
 import torch.nn.functional as F  # noqa: N812 (torch convention)
+from torch import nn
+
+from global_vae.losses.reconstruction.base import AbstractReconstructionLoss
 
 LossFn = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
 
@@ -89,6 +97,47 @@ def resolveReduction(reduction: str | Mapping[str, str], name: str) -> str:
     return reduction.get(name, DEFAULT_REDUCTION)
 
 
+def collectReconstructionLossModules(
+    loss_fn: LossFn | Mapping[str, LossFn],
+) -> dict[str, nn.Module]:
+    """Return the `nn.Module`s among a reconstruction loss setting, each once.
+
+    `Trainer` holds them (`Trainer.reconstruction_losses`) so that a loss that owns parameters has
+    them in the optimizer and in the checkpoint (ADR 0048). A loss that is not a module, such as
+    `torch.nn.functional.mse_loss`, is left out.
+
+    Args:
+        loss_fn: One loss for every modality, or a mapping reconstruction name -> loss.
+
+    Returns:
+        Name -> module, in the order of the mapping. The name of a loss given for every modality is
+        `"default"`. A module that serves several names is listed under the first, and a name's dots
+        become underscores (`nn.ModuleDict` refuses a dot).
+
+    Raises:
+        ValueError: If two different modules end up under one name once the dots are replaced,
+            which would leave one of them out of the optimizer and the checkpoint without a word.
+    """
+    if isinstance(loss_fn, Mapping):
+        candidates = list(loss_fn.items())
+    else:
+        candidates = [("default", loss_fn)]
+    modules: dict[str, nn.Module] = {}
+    seen: set[int] = set()
+    for name, fn in candidates:
+        if isinstance(fn, nn.Module) and id(fn) not in seen:
+            seen.add(id(fn))
+            key = name.replace(".", "_")
+            if key in modules:
+                raise ValueError(
+                    f"Reconstruction names {name!r} and another one both become {key!r} as the "
+                    f"name of a loss module (a dot is replaced by an underscore), and they hold "
+                    f"two different losses. Rename one of the reconstructions."
+                )
+            modules[key] = fn
+    return modules
+
+
 def computeTotalReconstructionLoss(
     reconstructions: dict[str, torch.Tensor],
     targets: dict[str, torch.Tensor],
@@ -134,7 +183,9 @@ def computeTotalReconstructionLoss(
             loss does by default. The regularization term is a sum over the
             latent dimensions, so `"sum"` puts the two terms on the same
             footing. See `docs/adr/0029-loss-scale-convention.md`. Applied
-            before `weights`.
+            before `weights`. For an `AbstractReconstructionLoss` the number `N` is what its
+            `countTerms` says (the tokens of a text, `1` for a Chamfer distance), and its loss
+            is a mean over those terms.
 
     Returns:
         Scalar reconstruction loss, summed across active decoders and
@@ -143,7 +194,9 @@ def computeTotalReconstructionLoss(
     Raises:
         ValueError: If `reconstructions` is empty, if `reduction` is not a
             supported name (or a mapping of supported names), or if a
-            reconstruction and its target differ in shape. `torch.nn.functional`'s own
+            reconstruction and its target differ in shape (not for a loss that sets
+            `requires_matching_shapes` to `False`, which checks what it needs itself).
+            `torch.nn.functional`'s own
             losses only warn about a mismatch and then broadcast, so a
             `(B, 1, H, W)` target against a `(B, H, W)` reconstruction
             would silently become a `(B, B, H, W)` comparison of every
@@ -169,7 +222,12 @@ def computeTotalReconstructionLoss(
         else:
             modality_loss_fn = loss_fn
         target = targets[name]
-        if reconstruction.shape != target.shape:
+        needs_matching_shapes = (
+            modality_loss_fn.requires_matching_shapes
+            if isinstance(modality_loss_fn, AbstractReconstructionLoss)
+            else True
+        )
+        if needs_matching_shapes and reconstruction.shape != target.shape:
             raise ValueError(
                 f"Reconstruction '{name}' has shape {tuple(reconstruction.shape)} but its "
                 f"target has shape {tuple(target.shape)}. A shape mismatch is rejected "
@@ -179,7 +237,12 @@ def computeTotalReconstructionLoss(
             )
         modality_loss = modality_loss_fn(reconstruction, target)
         if resolveReduction(reduction, name) == "sum":
-            modality_loss = modality_loss * math.prod(reconstruction.shape[1:])
+            num_terms = (
+                modality_loss_fn.countTerms(reconstruction, target)
+                if isinstance(modality_loss_fn, AbstractReconstructionLoss)
+                else math.prod(reconstruction.shape[1:])
+            )
+            modality_loss = modality_loss * num_terms
         term = weight * modality_loss
         total = term if total is None else total + term
 

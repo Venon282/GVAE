@@ -89,9 +89,10 @@ and a how-to that shows the part that is yours: the `loader_factory`.
 A few things worth knowing before you pick one:
 
 - **A spectrogram needs no new class.** It is an image, so the 2D classes read it.
-- **Two modalities have a loss a YAML file cannot name.** Time series with gaps and point clouds
-  train through Python with a custom loss function (a masked error and the Chamfer distance).
-  Their how-tos show how. The experiment file of a point cloud says so in its header.
+- **Each modality names the loss that fits its data.** The reconstruction loss is a registry
+  ([ADR 0048](docs/adr/0048-reconstruction-loss-and-metric-registries.md)): `masked_mse` for series with
+  gaps, `chamfer` for point clouds, `token_cross_entropy` for text, `tabular_mixed` for a table with
+  categorical columns, and `evaluate()` reports the metrics that fit the loss.
 - **Each modality has an ADR** with the measurements behind its design
   ([0039](docs/adr/0039-tabular-modality.md) to [0044](docs/adr/0044-point-cloud-modality.md)).
 

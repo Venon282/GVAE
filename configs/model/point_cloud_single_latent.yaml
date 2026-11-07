@@ -29,9 +29,11 @@ modalities:
     decoder:
       name: point_cloud_decoder_v1
       kwargs:
-        # num_points must be the N of configs/data/point_cloud.yaml's sequence_length.point_cloud:
-        # the decoder always writes this many points. It is data-dependent, so it is never filled in
-        # for you, and any positive integer works (nothing has to land on a size).
+        # num_points is how many points the decoder always writes. It need not be the N of
+        # configs/data/point_cloud.yaml's sequence_length.point_cloud, since the `chamfer` loss
+        # compares clouds of any two sizes (ADR 0048), but a loss that compares point by point
+        # (`mse`) needs them equal. It is data-dependent, so it is never filled in for you, and any
+        # positive integer works (nothing has to land on a size).
         num_points: 64
         out_dim: 3
         code_dim: 32

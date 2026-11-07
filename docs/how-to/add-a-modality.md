@@ -102,9 +102,9 @@ The text modality ([ADR 0041](../adr/0041-text-modality.md)) adds:
 - `utils/text_blocks.py`, with the token embedding (which takes ids or one-hot rows) and the padding
   mask.
 
-It is the example of a modality whose loss the YAML cannot name exactly (a cross-entropy is not in
-the loss table), and of how far a registered class and a Python loss function get without touching
-the core. [Train on text](train-on-text.md) shows the `loader_factory` that tokenizes, builds the
+It is the example of a modality whose loss is a registered class of its own
+(`token_cross_entropy`, [ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)), taking
+token ids or one-hot rows as the target. [Train on text](train-on-text.md) shows the `loader_factory` that tokenizes, builds the
 vocabulary, pads and one-hot encodes.
 
 ### Time series: when the decoder already exists
@@ -164,9 +164,11 @@ So the modality has:
   `utils/transformer_blocks.py`;
 - one function that is not a class, `utils/point_cloud_metrics.computeChamferDistance`.
 
-The trainer takes any Python function as its reconstruction loss, so the core did not change. The
-experiment file only composes the model, the data and the optimizer, and its header says its own loss
-is a placeholder.
+The model needs a loss that does not depend on the order of the points. When the example was written, the
+trainer took any Python function as its reconstruction loss and the YAML could not name one, so the experiment
+file carried a placeholder. The loss is now the registered `chamfer`
+([ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)), and the experiment trains through
+`scripts/train.py`.
 
 Copy this example when the hard part is the loss and not the network:
 

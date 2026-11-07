@@ -46,9 +46,11 @@ shared decoder the loss settings stay single values (the comment of that file sa
 `tabular_vae.yaml` (roadmap P3-8, ADR 0039) is the single-modality VAE of a table, `tabular -> z -> tabular`,
 composing `configs/model/tabular_single_latent.yaml`, the data contract `configs/data/tabular.yaml` and
 `configs/training/default.yaml`. It trains through `scripts/train.py`
-(`tests/integration/test_tabular_model_configs.py`) and sets `training.reconstruction_reduction: sum` and
-`reconstruction_weight: 0.5` like the image and transformer ones, with the numbers in the comment of the file.
-`num_features` has to be set in the encoder and the decoder to the width of your rows.
+(`tests/integration/test_tabular_model_configs.py`) and sets `training.reconstruction_loss: tabular_mixed` with
+`reconstruction_reduction: sum` and `reconstruction_weight: 0.5` like the image and transformer ones, with the numbers in
+the comment of the file. `tabular_mixed` (ADR 0048) is a squared error on the numeric columns and a cross-entropy on each
+categorical block, the sizes being read from the decoder's `categorical_sizes`; with none it is the `mse` that the numbers
+were measured with. `num_features` has to be set in the encoder and the decoder to the width of your rows.
 
 `audio_vae.yaml` (roadmap P3-8, ADR 0040) is the single-modality VAE of a raw waveform, `audio -> z -> audio`,
 composing `configs/model/audio_waveform_single_latent.yaml`, the data contract `configs/data/audio.yaml` and
@@ -60,9 +62,10 @@ data file and the `output_length` of the decoder, which have to agree.
 `text_vae.yaml` (roadmap P3-8, ADR 0041) is the single-modality VAE of a text, `text -> z -> text`, composing
 `configs/model/text_transformer_single_latent.yaml`, the data contract `configs/data/text.yaml` and
 `configs/training/default.yaml`. It trains through `scripts/train.py` (`tests/integration/test_text_model_configs.py`)
-and sets `training.reconstruction_loss: bce` with `reconstruction_reduction: sum` and `reconstruction_weight: 2.0`,
-not the `mse` of the others: the decoder returns probabilities over the vocabulary, and the numbers in the comment of
-the file say why `bce` and not `mse`. The length is the `data.sequence_length.text` of the data file and the
+and sets `training.reconstruction_loss: token_cross_entropy` with `reconstruction_reduction: sum` and
+`reconstruction_weight: 2.0` (ADR 0048), not the `mse` of the others: the decoder returns raw scores
+(`output_activation: null`, set by the file) and the loss is the categorical likelihood of a text, on token ids or one-hot
+rows. The numbers in the comment of the file are the sweep over the weight. The length is the `data.sequence_length.text` of the data file and the
 `output_length` of the decoder, and the vocabulary size is the `vocab_size` of the encoder and of the decoder, which
 all have to agree with the loader.
 
@@ -70,9 +73,9 @@ all have to agree with the loader.
 `time_series -> z -> time_series`, composing `configs/model/time_series_single_latent.yaml`, the data contract
 `configs/data/time_series.yaml` and `configs/training/default.yaml`. It trains through `scripts/train.py`
 (`tests/integration/test_time_series_model_configs.py`) and sets `training.reconstruction_loss: mse` with
-`reconstruction_reduction: sum` and `reconstruction_weight: 50.0`, for complete series: the `mse` of a YAML file is `NaN` as
-soon as one value of a batch is a `NaN`, so series with gaps or padding train through Python with
-`computeMaskedSquaredError` (`docs/how-to/train-on-time-series.md`). The weight is the lever (a weight `w` is a `beta` of
+`reconstruction_reduction: sum` and `reconstruction_weight: 50.0`. The loss is `masked_mse` (ADR 0048), which leaves a `NaN`
+target out, so series with gaps or padding train through `scripts/train.py` too; with `sum` it is
+`computeMaskedSquaredError` exactly (`docs/how-to/train-on-time-series.md`). The weight is the lever (a weight `w` is a `beta` of
 `1 / w`) and scales as `0.5 / sigma^2` for a noise `sigma` after standardization, with the numbers in the comment of the
 file. The length is the `data.sequence_length.time_series` of the data file and the `output_length` of the decoder (whose
 `seed_length`, `kernel_sizes` and `paddings` have to land on it exactly), and the number of channels is the encoder's
@@ -91,15 +94,14 @@ have to come in a meaningful order: the model compares matrices position by posi
 
 `point_cloud_vae.yaml` (roadmap P3-8, ADR 0044) is the single-modality VAE of a point cloud, `point_cloud -> z -> point_cloud`,
 composing `configs/model/point_cloud_single_latent.yaml`, the data contract `configs/data/point_cloud.yaml` and
-`configs/training/default.yaml`. **Its `training` block is a placeholder.** A YAML file can name only `mse`, `l1`, `bce` and
-`smooth_l1`, each of which pairs point `i` of a reconstruction with point `i` of the target, which for a set is an unrelated
-point, and on synthetic clouds the model `scripts/train.py` trains that way ended farther from the clouds than one that ignores
-its input (`tests/integration/test_point_cloud_model_configs.py` pins it, and pins `NaN` on a padded cloud). The loss that works
-is the Chamfer distance of `global_vae.utils.point_cloud_metrics`, a Python function: build the trainer from this file (the
-optimizer, the beta schedule and the weight `100.0`, a `beta` of `1 / w`) and set `trainer.reconstruction_loss_fn` to it and
-`trainer.reconstruction_reduction` to `"mean"`, since it is already a sum over points. The number of points is the
-`data.sequence_length.point_cloud` of the data file and the `num_points` of the decoder, which have to be equal
-(`docs/how-to/train-on-point-clouds.md`).
+`configs/training/default.yaml`. It trains through `scripts/train.py` (`tests/integration/test_point_cloud_model_configs.py`)
+and sets `training.reconstruction_loss: chamfer` with `reconstruction_reduction: sum` and `reconstruction_weight: 100.0`
+(ADR 0048), a `beta` of `1 / w`. A cloud is a set, and the losses of 2.0.0 (`mse`, `l1`, `bce`, `smooth_l1`) pair point `i`
+of a reconstruction with point `i` of the target, which for a set is an unrelated point, so the experiment of that release
+carried a placeholder loss and a warning to train from Python. `chamfer` is the distance of `global_vae.utils.point_cloud_metrics`
+with the order of the points forgotten, a row of `NaN` in the target is a point that does not exist, and the two clouds may
+have different numbers of points: the `data.sequence_length.point_cloud` of the data file and the `num_points` of the decoder
+need not be equal (`docs/how-to/train-on-point-clouds.md`).
 
 # Still open
 

@@ -23,14 +23,17 @@ a `Logger` is a journalling service, not a member of this registry, even though
 `AbstractExperimentLogger` happens to subclass `TrainerCallback` for the hook plumbing;
 see `docs/adr/0022-callback-registry.md` for why the two stay apart.
 
-`optimizer.name` and `reconstruction_loss` (a name, or a reconstruction name -> name mapping,
-ADR 0030, ADR 0045) are the two exceptions: they select a plain
-`torch.optim.Optimizer` subclass or a `torch.nn.functional` loss function, neither of
-which is one of this project's own pluggable strategies (spec §10's registry pattern is
-for *this framework's* extension points; wrapping every PyTorch built-in in a registry
-of its own would be pure ceremony). A small name -> class/function lookup covers the
-common cases; nothing stops a caller from constructing a `Trainer` directly (bypassing
-config entirely) for an optimizer or loss this lookup does not cover.
+`optimizer.name` is the one exception: it selects a plain `torch.optim.Optimizer` subclass, which
+is not one of this project's own pluggable strategies (spec §10's registry pattern is for *this
+framework's* extension points; wrapping every PyTorch built-in in a registry of its own would be
+pure ceremony). A small name -> class lookup covers the common cases; nothing stops a caller from
+constructing a `Trainer` directly (bypassing config entirely) for an optimizer this lookup does
+not cover.
+
+`reconstruction_loss` was the other exception until roadmap P5-3 (ADR 0048): it is resolved through
+the `losses.reconstruction` registry, as a name, an entry `{name, kwargs}`, or a reconstruction
+name -> name or entry mapping (ADR 0030, ADR 0045), so a loss that `torch.nn.functional` does not
+have is usable from config like any other strategy.
 """
 
 import inspect
@@ -42,11 +45,17 @@ from pathlib import Path
 from typing import Any
 
 import torch
-import torch.nn.functional as F  # noqa: N812 (torch convention)
-from omegaconf import MISSING
+from omegaconf import MISSING, DictConfig, ListConfig, OmegaConf
 from torch.optim import Optimizer
 
-from global_vae.losses.reconstruction import DEFAULT_REDUCTION, LossFn, validateReduction
+from global_vae.losses.reconstruction import (
+    DEFAULT_REDUCTION,
+    AbstractReconstructionLoss,
+    LossFn,
+    getReconstructionLossClass,
+    listRegisteredReconstructionLosses,
+    validateReduction,
+)
 from global_vae.losses.terms.base import AbstractLossTerm
 from global_vae.losses.terms.registry import getLossTermClass
 from global_vae.models.global_vae import GlobalVae
@@ -64,13 +73,6 @@ _OPTIMIZER_CLASSES: dict[str, type[Optimizer]] = {
     "adamw": torch.optim.AdamW,
     "sgd": torch.optim.SGD,
     "rmsprop": torch.optim.RMSprop,
-}
-
-_RECONSTRUCTION_LOSS_FNS: dict[str, LossFn] = {
-    "mse": F.mse_loss,
-    "l1": F.l1_loss,
-    "bce": F.binary_cross_entropy,
-    "smooth_l1": F.smooth_l1_loss,
 }
 
 DEFAULT_RECONSTRUCTION_LOSS = "mse"
@@ -155,17 +157,19 @@ class TrainingConfig:
     Attributes:
         num_epochs: Forwarded to `Trainer.fit`.
         optimizer: See `OptimizerConfig`.
-        reconstruction_loss: One of `listSupportedReconstructionLossNames()`
-            (`"mse"` (default), `"l1"`, `"bce"`, `"smooth_l1"`) for every
-            modality, or a mapping from a reconstruction name to one of them
-            (roadmap P2-2, ADR 0030; the name of a decoder of one modality, or one modality of a
-            shared decoder, roadmap P5-4), for example `{signal: mse, mask:
-            bce}` for a continuous target next to a binary one. A reconstruction
-            left out of the mapping keeps `"mse"`. Forwarded to
-            `Trainer`'s `reconstruction_loss_fn`. Typed `Any` because a
-            structured config cannot express `str | dict[str, str]`;
-            `buildTrainerFromConfig` validates it and names this field in
-            the error.
+        reconstruction_loss: A registered loss (`listSupportedReconstructionLossNames()`:
+            `"mse"` (default), `"l1"`, `"bce"`, `"smooth_l1"`, `"bce_with_logits"`,
+            `"masked_mse"`, `"token_cross_entropy"`, `"chamfer"`, `"tabular_mixed"`, and any
+            loss registered by a caller, roadmap P5-3, ADR 0048) for every modality, given as a
+            name, or as an entry `{name: smooth_l1, kwargs: {beta: 0.5}}` (`kwargs` optional);
+            or a mapping from a reconstruction name to a name or an entry (roadmap P2-2, ADR
+            0030; the name of a decoder of one modality, or one modality of a shared decoder,
+            roadmap P5-4), for example `{signal: masked_mse, mask: bce}` for a series with gaps
+            next to a binary target. A mapping whose keys are `name` and optionally `kwargs` is
+            an entry. A reconstruction left out of the mapping keeps `"mse"`. Resolved to
+            `Trainer`'s `reconstruction_loss_fn`. Typed `Any` because a structured config cannot
+            express `str | dict[str, str | dict[str, Any]]`; `buildTrainerFromConfig` validates
+            it and names this field in the error.
         reconstruction_weight: A number (at least zero) for every
             modality, or a mapping from a reconstruction name to one, for example
             `{signal: 0.5, image: 2.0}`. A decoder left out of the mapping
@@ -302,12 +306,12 @@ def listSupportedOptimizerNames() -> list[str]:
 
 
 def listSupportedReconstructionLossNames() -> list[str]:
-    """Return every `TrainingConfig.reconstruction_loss` this module knows how to resolve.
+    """Return every `TrainingConfig.reconstruction_loss` name this module can resolve.
 
     Returns:
-        Sorted list of supported reconstruction loss names.
+        Sorted list of the names in the `losses.reconstruction` registry.
     """
-    return sorted(_RECONSTRUCTION_LOSS_FNS)
+    return listRegisteredReconstructionLosses()
 
 
 def resolveOptimizerClass(name: str) -> type[Optimizer]:
@@ -328,22 +332,20 @@ def resolveOptimizerClass(name: str) -> type[Optimizer]:
     return _OPTIMIZER_CLASSES[name]
 
 
-def resolveReconstructionLossFn(name: str) -> LossFn:
-    """Look up a reconstruction loss function by name.
+def resolveReconstructionLossFn(name: str, **kwargs: Any) -> LossFn:
+    """Build a reconstruction loss by registered name.
 
     Args:
         name: One of `listSupportedReconstructionLossNames()`.
+        **kwargs: Forwarded to the loss's constructor (`beta` for `smooth_l1`).
 
     Returns:
-        The loss function.
+        A new loss instance (an `AbstractReconstructionLoss`).
 
     Raises:
         KeyError: If `name` is not supported.
     """
-    if name not in _RECONSTRUCTION_LOSS_FNS:
-        available = ", ".join(listSupportedReconstructionLossNames())
-        raise KeyError(f"Unknown reconstruction_loss '{name}'. Available: {available}")
-    return _RECONSTRUCTION_LOSS_FNS[name]
+    return getReconstructionLossClass(name)(**kwargs)
 
 
 def _checkReconstructionKeys(
@@ -385,13 +387,59 @@ def _checkModalityName(name: Any, field_name: str) -> None:
         raise ValueError(f"{field_name}: a modality name must be a string, got {name!r}.")
 
 
+_LOSS_ENTRY_KEYS = frozenset({"name", "kwargs"})
+
+
+def _isLossEntry(value: Any) -> bool:
+    """Tell an entry `{name, kwargs}` from a reconstruction name -> loss mapping, by its keys.
+
+    The reading is made without the model (ADR 0048): a mapping whose keys are `name`, and
+    optionally `kwargs`, and nothing else, is an entry.
+    """
+    return isinstance(value, Mapping) and "name" in value and set(value) <= _LOSS_ENTRY_KEYS
+
+
+def _toPlain(value: Any) -> Any:
+    """Turn an OmegaConf container into the plain `dict` or `list` it holds, recursively."""
+    if isinstance(value, DictConfig | ListConfig):
+        return OmegaConf.to_container(value, resolve=True)
+    return value
+
+
+def _parseLossSpec(spec: Any, label: str) -> tuple[str, dict[str, Any]]:
+    """Check one loss given as a name or as an entry and return `(name, kwargs)`.
+
+    Raises:
+        KeyError: If the name is not registered.
+        ValueError: If `spec` is neither a name nor an entry, or `kwargs` is not a mapping.
+    """
+    available = ", ".join(listSupportedReconstructionLossNames())
+    if _isLossEntry(spec):
+        name = spec["name"]
+        kwargs = spec.get("kwargs", {})
+        if not isinstance(kwargs, Mapping):
+            raise ValueError(f"{label}: kwargs must be a mapping, got {kwargs!r}.")
+        plain_kwargs = {str(key): _toPlain(item) for key, item in kwargs.items()}
+    else:
+        name, plain_kwargs = spec, {}
+    if not isinstance(name, str):
+        raise ValueError(
+            f"{label}: expected a loss name or an entry {{name, kwargs}}, got {spec!r}."
+        )
+    if name not in listSupportedReconstructionLossNames():
+        raise KeyError(f"{label}: unknown loss '{name}'. Available: {available}")
+    return name, plain_kwargs
+
+
 def validateReconstructionLoss(
     value: Any, field_name: str = "training.reconstruction_loss"
 ) -> None:
-    """Check that `value` is a supported loss name or a mapping reconstruction name -> name.
+    """Check that `value` names supported losses, in one of the three forms.
 
-    This needs no model, so it cannot tell whether a mapping key is a decoder; see
-    `resolveReconstructionLoss` for that.
+    The forms are a name, an entry `{name, kwargs}`, or a mapping reconstruction name -> name or
+    entry (ADR 0048). This needs no model, so it cannot tell whether a mapping key is a decoder;
+    see `resolveReconstructionLoss` for that. It does not build the losses, so it does not check
+    their `kwargs` either.
 
     Args:
         value: The value to check.
@@ -399,27 +447,20 @@ def validateReconstructionLoss(
 
     Raises:
         KeyError: If a loss name is not one of `listSupportedReconstructionLossNames()`.
-        ValueError: If `value` is neither a name nor a mapping, if a mapping key is not a
-            string, or if a mapping value is not a string.
+        ValueError: If `value` is none of the three forms, if a mapping key is not a string, if
+            a mapping value is not a name or an entry, or if `kwargs` is not a mapping.
     """
     available = ", ".join(listSupportedReconstructionLossNames())
-
-    def checkName(name: Any, label: str) -> None:
-        if not isinstance(name, str):
-            raise ValueError(f"{label}: expected a loss name, got {name!r}.")
-        if name not in _RECONSTRUCTION_LOSS_FNS:
-            raise KeyError(f"{label}: unknown loss '{name}'. Available: {available}")
-
-    if isinstance(value, Mapping):
-        for modality, name in value.items():
+    if isinstance(value, str) or _isLossEntry(value):
+        _parseLossSpec(value, field_name)
+    elif isinstance(value, Mapping):
+        for modality, spec in value.items():
             _checkModalityName(modality, field_name)
-            checkName(name, f"{field_name}['{modality}']")
-    elif isinstance(value, str):
-        checkName(value, field_name)
+            _parseLossSpec(spec, f"{field_name}['{modality}']")
     else:
         raise ValueError(
-            f"{field_name}: expected a loss name ({available}), or a mapping from a decoder "
-            f"name to one of them, got {value!r}."
+            f"{field_name}: expected a loss name ({available}), an entry {{name, kwargs}}, or a "
+            f"mapping from a decoder name to one of them, got {value!r}."
         )
 
 
@@ -454,35 +495,99 @@ def validateReconstructionWeight(
         checkNumber(value, field_name)
 
 
+def _buildLoss(
+    name: str,
+    kwargs: dict[str, Any],
+    decoder: Any,
+    decoder_known: bool,
+    label: str,
+) -> AbstractReconstructionLoss:
+    """Build one loss, filling in the constructor arguments the decoder knows (ADR 0048).
+
+    Args:
+        name: A registered loss name.
+        kwargs: The arguments of the YAML, as plain Python containers.
+        decoder: The decoder of the reconstruction the loss is for, when there is exactly one.
+        decoder_known: Whether `decoder` is that decoder. `False` for a loss given to several
+            reconstructions, or for a reconstruction of a shared decoder.
+        label: How the setting is called in error messages.
+
+    Raises:
+        ValueError: If an argument the loss reads from its decoder is not in `kwargs` and the
+            decoder is not known.
+    """
+    loss_class = getReconstructionLossClass(name)
+    arguments = dict(kwargs)
+    absent = [arg for arg in loss_class.decoder_arguments if arg not in arguments]
+    if absent and not decoder_known:
+        raise ValueError(
+            f"{label}: loss '{name}' reads {absent} from the decoder of one reconstruction, and "
+            f"here it is given to several, or to a shared decoder. Give them in `kwargs`, for "
+            f"example `{{name: {name}, kwargs: {{{absent[0]}: ...}}}}`, or give the loss to "
+            f"one reconstruction at a time with a mapping."
+        )
+    for argument in absent:
+        if hasattr(decoder, argument):
+            arguments[argument] = getattr(decoder, argument)
+    try:
+        return loss_class(**arguments)
+    except TypeError as error:
+        raise ValueError(
+            f"{label}: cannot build loss '{name}' with kwargs {kwargs}: {error}"
+        ) from error
+
+
 def resolveReconstructionLoss(
     value: Any, model: GlobalVae, field_name: str = "training.reconstruction_loss"
 ) -> LossFn | dict[str, LossFn]:
     """Turn `TrainingConfig.reconstruction_loss` into `Trainer`'s `reconstruction_loss_fn`.
 
     Args:
-        value: The configured value: a loss name, or a mapping reconstruction name -> loss name.
+        value: The configured value: a loss name, an entry `{name, kwargs}`, or a mapping
+            reconstruction name -> name or entry.
         model: The model the trainer is built for. Its `decoders` give the valid keys.
         field_name: How the setting is called in error messages.
 
     Returns:
-        One loss function for a name. For a mapping, a `dict` with an entry for **every**
-        reconstruction of `model` (`model.output_modalities`): the configured loss, or `"mse"`
-        for a reconstruction the mapping leaves out (`Trainer` raises `KeyError` for a
-        reconstruction that has no entry).
+        One loss, an `AbstractReconstructionLoss`, for a name or an entry: a single instance that
+        every reconstruction shares (so does any parameter it has, ADR 0048). For a mapping, a
+        `dict` with an entry for **every** reconstruction of `model`
+        (`model.output_modalities`), each its own instance: the configured loss, or `"mse"` for a
+        reconstruction the mapping leaves out (`Trainer` raises `KeyError` for a reconstruction
+        that has no entry). An argument a loss reads from its decoder (`categorical_sizes` of
+        `tabular_mixed`) is taken from the decoder of that reconstruction when `kwargs` lacks it.
 
     Raises:
         KeyError: If a loss name is not supported (`validateReconstructionLoss`).
-        ValueError: If `value` has the wrong shape, or a mapping key is not a reconstruction
-            name of `model`.
+        ValueError: If `value` has the wrong shape, if a mapping key is not a reconstruction
+            name of `model`, if an entry `{name: <loss>}` could be a mapping for a reconstruction
+            called `name`, or if a loss cannot be built from its `kwargs`.
     """
     validateReconstructionLoss(value, field_name)
-    if isinstance(value, Mapping):
-        _checkReconstructionKeys(field_name, value, model, repr(DEFAULT_RECONSTRUCTION_LOSS))
-        return {
-            name: _RECONSTRUCTION_LOSS_FNS[value.get(name, DEFAULT_RECONSTRUCTION_LOSS)]
-            for name in model.output_modalities
-        }
-    return _RECONSTRUCTION_LOSS_FNS[value]
+    outputs = list(model.output_modalities)
+    if isinstance(value, str) or _isLossEntry(value):
+        if _isLossEntry(value) and "kwargs" not in value and "name" in model.output_modalities:
+            raise ValueError(
+                f"{field_name}: {dict(value)!r} is ambiguous, since the model has a "
+                f"reconstruction called 'name': it is an entry (one loss for every reconstruction) "
+                f"or a mapping (that loss for 'name' only). Write `kwargs: {{}}` next to `name` "
+                f"to make it an entry, or key every other reconstruction too to make it a mapping."
+            )
+        name, kwargs = _parseLossSpec(value, field_name)
+        decoder = (
+            model.decoders[outputs[0]]
+            if len(outputs) == 1 and outputs[0] in model.decoders
+            else None
+        )
+        return _buildLoss(name, kwargs, decoder, decoder is not None, field_name)
+    _checkReconstructionKeys(field_name, value, model, repr(DEFAULT_RECONSTRUCTION_LOSS))
+    losses: dict[str, LossFn] = {}
+    for reconstruction in outputs:
+        label = f"{field_name}['{reconstruction}']"
+        name, kwargs = _parseLossSpec(value.get(reconstruction, DEFAULT_RECONSTRUCTION_LOSS), label)
+        decoder = model.decoders[reconstruction] if reconstruction in model.decoders else None
+        losses[reconstruction] = _buildLoss(name, kwargs, decoder, decoder is not None, label)
+    return losses
 
 
 def resolveReconstructionWeight(

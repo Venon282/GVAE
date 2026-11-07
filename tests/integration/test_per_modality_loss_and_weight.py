@@ -41,6 +41,9 @@ from global_vae.config.training import (
     resolveReconstructionWeight,
 )
 from global_vae.evaluation.evaluate import evaluate
+from global_vae.losses.reconstruction.l1 import L1Loss
+from global_vae.losses.reconstruction.mse import MseLoss
+from global_vae.losses.reconstruction.smooth_l1 import SmoothL1Loss
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import saveCheckpoint
 from global_vae.training.trainer import Trainer
@@ -58,6 +61,11 @@ _LOADER_FACTORY = "tests.integration._train_script_fixtures:buildDummyDataloader
 _SIGNAL_IMAGE_LOADER_FACTORY = (
     "tests.integration._train_script_fixtures:buildDummySignalImageDataloaders"
 )
+
+
+def _types(losses: Any) -> dict[str, type]:
+    """The class of each reconstruction loss of a resolved mapping."""
+    return {name: type(loss) for name, loss in losses.items()}
 
 
 def _loadSingle(tmp_path: Path, *overrides: str) -> ExperimentConfig:
@@ -117,7 +125,7 @@ class TestConfigToTrainer:
     ) -> None:
         cfg = _loadSingle(tmp_path)
         trainer = buildTrainerFromConfig(buildModelFromConfig(cfg.model), cfg.training)
-        assert trainer.reconstruction_loss_fn is F.mse_loss
+        assert isinstance(trainer.reconstruction_loss_fn, MseLoss)
         assert trainer.reconstruction_weights == 1.0
         assert type(trainer.reconstruction_weights) is float
 
@@ -138,7 +146,7 @@ class TestConfigToTrainer:
     def test_a_loss_name_override_reaches_the_trainer(self, tmp_path: Path) -> None:
         cfg = _loadSingle(tmp_path, "training.reconstruction_loss=l1")
         trainer = buildTrainerFromConfig(buildModelFromConfig(cfg.model), cfg.training)
-        assert trainer.reconstruction_loss_fn is F.l1_loss
+        assert isinstance(trainer.reconstruction_loss_fn, L1Loss)
 
     def test_a_weight_override_reaches_the_trainer(self, tmp_path: Path) -> None:
         cfg = _loadSingle(tmp_path, "training.reconstruction_weight=0.5")
@@ -157,7 +165,7 @@ class TestConfigToTrainer:
         cfg = _loadSignalImage(tmp_path, "training.reconstruction_loss={signal:l1}")
         assert cfg.training.reconstruction_loss == {"signal": "l1"}
         trainer = buildTrainerFromConfig(buildModelFromConfig(cfg.model), cfg.training)
-        assert trainer.reconstruction_loss_fn == {"signal": F.l1_loss, "image": F.mse_loss}
+        assert _types(trainer.reconstruction_loss_fn) == {"signal": L1Loss, "image": MseLoss}
 
     def test_a_weight_mapping_override_reaches_the_trainer_as_a_plain_dict_of_floats(
         self, tmp_path: Path
@@ -185,7 +193,10 @@ class TestConfigToTrainer:
             "training.reconstruction_reduction={image:sum}",
         )
         trainer = buildTrainerFromConfig(buildModelFromConfig(cfg.model), cfg.training)
-        assert trainer.reconstruction_loss_fn == {"signal": F.mse_loss, "image": F.smooth_l1_loss}
+        assert _types(trainer.reconstruction_loss_fn) == {
+            "signal": MseLoss,
+            "image": SmoothL1Loss,
+        }
         assert trainer.reconstruction_weights == {"image": 2.0}
         assert trainer.reconstruction_reduction == {"image": "sum"}
 
@@ -244,16 +255,16 @@ class TestConfigToTrainer:
 class TestResolvers:
     def test_a_loss_name_resolves_to_one_function(self) -> None:
         model = buildTwoModalityModelForScript()
-        assert resolveReconstructionLoss("l1", model) is F.l1_loss
+        assert isinstance(resolveReconstructionLoss("l1", model), L1Loss)
 
     def test_a_loss_mapping_resolves_to_an_entry_for_every_decoder(self) -> None:
         model = buildTwoModalityModelForScript()
         resolved = resolveReconstructionLoss({"y": "l1"}, model)
-        assert resolved == {"x": F.mse_loss, "y": F.l1_loss}
+        assert _types(resolved) == {"x": MseLoss, "y": L1Loss}
 
     def test_an_empty_loss_mapping_resolves_to_the_default_for_every_decoder(self) -> None:
         model = buildTwoModalityModelForScript()
-        assert resolveReconstructionLoss({}, model) == {"x": F.mse_loss, "y": F.mse_loss}
+        assert _types(resolveReconstructionLoss({}, model)) == {"x": MseLoss, "y": MseLoss}
 
     def test_a_weight_resolves_to_a_float(self) -> None:
         model = buildTwoModalityModelForScript()
@@ -279,7 +290,7 @@ class TestResolvers:
             OmegaConf.create({"y": "l1"}), buildTwoModalityModelForScript()
         )
         assert type(resolved) is dict
-        assert resolved == {"x": F.mse_loss, "y": F.l1_loss}
+        assert _types(resolved) == {"x": MseLoss, "y": L1Loss}
 
     @pytest.mark.parametrize(
         ("resolver", "value", "default"),

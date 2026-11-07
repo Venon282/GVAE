@@ -25,12 +25,13 @@ import global_vae.config  # noqa: F401  (registers structured configs with Hydra
 from global_vae.config.data import buildTransformPipeline
 from global_vae.config.experiment import ExperimentConfig, loadExperimentConfig
 from global_vae.config.model import ModelConfig, buildModelFromConfig, validateModelConfig
-from global_vae.config.training import buildTrainerFromConfig
+from global_vae.config.training import buildTrainerFromConfig, resolveReconstructionLoss
 from global_vae.data.transforms.standardize import StandardizeTransform
 from global_vae.decoders.registry import listRegisteredDecoders
 from global_vae.encoders.registry import listRegisteredEncoders
 from global_vae.evaluation.evaluate import evaluate
 from global_vae.evaluation.visual_export import exportEvaluationFigures
+from global_vae.losses.reconstruction.masked_mse import MaskedMseLoss
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import loadCheckpoint
 from global_vae.training.trainer import Trainer
@@ -290,18 +291,35 @@ class TestWhatTheYamlLetsYouChange:
 
 
 class TestTheLossOfTheExperiment:
-    """What `mse` with a sum is on a series, what it is on a gap, and the masked loss."""
+    """What the experiment's `masked_mse` with a sum is on a series, and what it is on a gap."""
 
-    def test_the_experiment_sets_a_squared_error_summed_per_series_with_weight_fifty(self) -> None:
+    def test_the_experiment_sets_a_masked_squared_error_summed_per_series_with_weight_fifty(
+        self,
+    ) -> None:
         training = _experiment().training
-        assert training.reconstruction_loss == "mse"
+        assert training.reconstruction_loss == "masked_mse"
         assert training.reconstruction_reduction == "sum"
         assert training.reconstruction_weight == 50.0
 
-    def test_the_yaml_loss_is_nan_as_soon_as_one_value_is_a_gap(self, tmp_path: Path) -> None:
-        """Pins the finding of ADR 0042: the loss names of a YAML file know no mask."""
+    def test_the_yaml_loss_is_finite_on_a_batch_with_gaps(self, tmp_path: Path) -> None:
+        """The finding of ADR 0042 is closed (ADR 0048): the YAML names a loss with a mask."""
         trainer = buildTrainerFromConfig(_model(), _experiment(output_dir=tmp_path).training)
+        assert isinstance(trainer.reconstruction_loss_fn, MaskedMseLoss)
         assert torch.isfinite(trainer.computeLosses(_batch(), step=0).reconstruction)
+        gappy = trainer.computeLosses(_gappy(), step=0)
+        assert torch.isfinite(gappy.reconstruction)
+        backward(gappy.total)
+        assert all(
+            parameter.grad is not None and torch.isfinite(parameter.grad).all()
+            for parameter in trainer.model.parameters()
+        )
+
+    def test_the_old_mse_of_a_yaml_file_is_still_nan_on_a_gap(self, tmp_path: Path) -> None:
+        """`mse` has no mask, which is why the experiment no longer names it."""
+        overrides = ["training.reconstruction_loss=mse"]
+        trainer = buildTrainerFromConfig(
+            _model(), _experiment(*overrides, output_dir=tmp_path).training
+        )
         assert torch.isnan(trainer.computeLosses(_gappy(), step=0).reconstruction)
 
     def test_the_masked_loss_trains_the_same_model_on_a_batch_with_gaps(self) -> None:
@@ -318,8 +336,32 @@ class TestTheLossOfTheExperiment:
         gradients = [parameter.grad for parameter in model.parameters()]
         assert all(grad is not None and torch.isfinite(grad).all() for grad in gradients)
 
-    def test_on_complete_series_the_masked_loss_is_the_sum_reduction_of_the_mse(self) -> None:
-        """The masked loss is a drop-in where there is no gap: same value as the YAML route."""
+    def test_on_complete_series_the_registered_loss_is_the_sum_reduction_of_the_mse(
+        self, tmp_path: Path
+    ) -> None:
+        """`masked_mse` is a drop-in where there is no gap: the value of `mse` with `sum`."""
+        batch = _batch()
+        training = _experiment(output_dir=tmp_path).training
+
+        def reconstruction(**settings: object) -> float:
+            torch.manual_seed(0)  # the same weights and reparameterisation noise for both
+            trainer = Trainer(_model(), modality_dropout_p=0.0, **settings)  # type: ignore[arg-type]
+            torch.manual_seed(1)
+            return trainer.computeLosses(batch, step=0).reconstruction.item()
+
+        masked = reconstruction(
+            reconstruction_loss_fn=resolveReconstructionLoss(
+                training.reconstruction_loss, _model()
+            ),
+            reconstruction_reduction="sum",
+        )
+        plain = reconstruction(
+            reconstruction_loss_fn=functional.mse_loss, reconstruction_reduction="sum"
+        )
+        assert masked == pytest.approx(plain, rel=1e-4)
+
+    def test_on_complete_series_the_python_helper_is_the_same_value_too(self) -> None:
+        """The helper the loss wraps, passed by hand, as ADR 0042 described the Python route."""
         batch = _batch()
 
         def reconstruction(**settings: object) -> float:

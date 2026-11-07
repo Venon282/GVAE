@@ -54,6 +54,11 @@ Sizes used below: **S** up to half a day, **M** one to two days, **L** three to 
 more than a week. They are rough estimates meant for ordering, not commitments. For scale, the 27
 items of the previous roadmap shipped between 2026-10-04 and 2026-10-31.
 
+**Status of an item.** Every item heading is followed by `**status**: todo` or `**status**: done`.
+An item is `done` when its pull request is merged with its tests, documentation and changelog entry
+(section 11). Change the line in the same pull request that finishes the item, so that the file
+says where the work stands (`grep -n "status" docs/roadmap.md` lists them).
+
 **Needed from the owner first.** Phase 5 can start today: only P5-1 (push rights) and the spec
 edits of P5-2 (approval) need the owner. Phase 6 waits for D-13 (which distance), D-14 (what is
 frozen), D-15 (one run per stage or one driver) and D-16 (equal latent widths). Each has a
@@ -232,6 +237,7 @@ P5-5, P5-6, P5-3, P5-7, P5-9. P5-1, P5-2 and P5-8 are owner tasks that run in pa
 
 ### P5-1. Put the release on `main` (S, owner)
 
+**status**: done
 **Why.** The tag `v2.0.0` (commit `5685c3a`, "v2") is one commit ahead of `main` (`262c9fa`).
 That commit removes the eight CamelCase shim modules, sets `__version__` to 2.0.0, moves the
 unreleased entries of `CHANGELOG.md` into `CHANGELOG_2.0.0_2026-10-31.md` and syncs the README and
@@ -246,6 +252,7 @@ changelog.
 
 ### P5-2. Spec and documentation sync (S, needs the owner's approval and D-4)
 
+**status**: done
 **Do.**
 - Spec §6 and §8: list the six further data kinds, their files and their model configs (the
   facts are in ADR 0039 to 0044).
@@ -267,6 +274,7 @@ change is flagged to the owner as a proposal, since the spec is the ground truth
 
 ### P5-3. Reconstruction loss and metric registries (L)
 
+**status**: done
 **Why.** It is the last family of pluggable components that is a fixed table, although spec §10 and
 §12 say pluggable components go through a registry. The modality work of Phase 3 found the table to
 be the limit in six data kinds (I-2, I-3, I-5, I-13).
@@ -309,6 +317,7 @@ does not opt out), whether the loss
 
 ### P5-4. Settings of a shared decoder keyed by modality (S)
 
+**status**: done
 **Why.** I-1: the three per-decoder settings disagree between two layers, so a shared decoder
 cannot take a loss weight per modality, which is what a signal plus image model needs (one weight
 cannot balance a signal and an image, see P3-3 in the changelog).
@@ -323,6 +332,7 @@ ordinary tests. Configs without a shared decoder give the same results as before
 
 ### P5-5. Encode and decode seams (M)
 
+**status**: done
 **Why.** `GlobalVae.forward` is the only public path, and it always runs encode, fuse, sample,
 assemble and decode. Retrieval evaluation pays a pass through the decoders per modality
 (I-6). Cross decoding (Phase 6), sampling from a prior (P4-2), a latent reconstruction loss (P7-3)
@@ -349,6 +359,7 @@ find the same blocker.
 
 ### P5-6. Extra loss terms at the single loss site (M)
 
+**status**: done
 **Why.** `Trainer.computeLosses` returns `reconstruction + regularization`, and `StepLosses` has
 those two fields (I-7). Every objective that Phases 6 and 7 add (a latent alignment, a cross
 reconstruction, a latent reconstruction, a reference alignment) needs the same place, and the
@@ -374,6 +385,7 @@ test.
 
 ### P5-7. Config and data contract gaps (M)
 
+**status**: todo
 **Why.** I-12.
 **Do.**
 - Accept a list for the `standardize` statistics (turn it into a tensor, and name the field in the
@@ -390,6 +402,7 @@ the first step, and an experiment that sets neither value is unchanged.
 
 ### P5-8. First run on real data (M, owner, the paired part needs D-5)
 
+**status**: todo
 **Why.** P3-1 of the previous roadmap, carried over: spec §6.1 says the signal VAE is "trained end
 to end on SAXS data", and the repository only proves it on synthetic signals (I-15). It also gives
 the first real values for D-6, a first real test of the pairing convention (D-5), and the paired
@@ -402,6 +415,7 @@ data, with a `sum` reduction and a few weights (the recipe of `how-to/choose-bet
 
 ### P5-9. CI hardening, docs toolchain and two investigations (S)
 
+**status**: todo
 **Do.**
 - Read the Actions results of `v2.0.0`, the 3.13 job included.
 - Add a weekly `schedule:` trigger to `ci.yaml`, so that a new release of ruff, mypy, numpy or
@@ -493,6 +507,7 @@ available but leave the default recipe, and the recipe says so.
 
 ### P6-1. Stage manifest and solo recipes (S)
 
+**status**: todo
 **Why.** A solo stage is an ordinary run, so it needs no new training code. But nothing records
 which modality it covers, which latent space and width it has, or which config produced it, and a
 pair run that loads the wrong file would fail late or train on a mismatch.
@@ -507,6 +522,7 @@ end to end on the synthetic pair (with P6-7).
 
 ### P6-2. Warm start: build the pair model from two solo checkpoints (M)
 
+**status**: todo
 **Why.** Stage 3 starts where stages 1 and 2 ended. In PairVAE the pair phase builds on the
 solo-trained VAEs.
 **Do (ADR first).**
@@ -533,6 +549,7 @@ clear message.
 
 ### P6-3. Latent distance registry (M, needs D-13)
 
+**status**: todo
 **Why.** "Minimize the distance between the latent spaces" needs a distance, and the paper's is not
 available (D-13). Several are known, cheap and comparable, which is what a registry is for.
 **Do (ADR first).** A package `losses/distances/` with `AbstractLatentDistance`, an `nn.Module`
@@ -560,6 +577,7 @@ which to try first (proposed: `wasserstein2_diag`, with `mean_mse` as the ablati
 
 ### P6-4. Pair-stage loss terms (M, needs D-13 and D-16)
 
+**status**: todo
 Two loss terms, registered through P5-6 and configured in YAML:
 
 - `latent_alignment`: a list of `pairs` of latent space names, a `distance` from P6-3 with its
@@ -586,6 +604,7 @@ and stage 3 resumes under the guarantee of ADR 0032.
 
 ### P6-5. Freeze and learning-rate policy (M, needs D-14)
 
+**status**: todo
 **Why.** The pair stage can undo what the solo stages learned, especially with few pairs. PairVAE
 trains both VAEs together. A gentler variant is useful in itself, and the same mechanism serves a
 one-sided alignment, a frozen reference (P7-5) and a post-hoc prior (P4-2).
@@ -608,6 +627,7 @@ checkpoint.
 
 ### P6-6. Evaluation across two separate latent spaces, with baselines (M)
 
+**status**: todo
 **Why.** I-8. A distance that goes to zero proves nothing, since two collapsed latent spaces also
 minimize it.
 **Do.** `evaluation/latent_alignment.py`, and flags of `scripts/evaluate.py` that name a pair of
@@ -640,6 +660,7 @@ in one command on the synthetic pair, and the collapse guard fires on a delibera
 
 ### P6-7. Configs, script wiring, how-to and end-to-end test (M, needs D-15)
 
+**status**: todo
 **Do.**
 - Experiment files for the three stages on the synthetic signal plus image pair (`pair_solo_signal`,
   `pair_solo_image`, `pair_align`), and the wiring in `scripts/train.py` of `training.warm_start`
@@ -660,6 +681,7 @@ written.
 
 ### P6-8. Extensions (L, gated, one go-ahead each)
 
+**status**: todo
 - **More than two models.** `pairs` is already a list. Add an anchor mode (every model aligned to
   one), and for a symmetric treatment the multi-way scheme of Achara et al. as a baseline first,
   then as a loss (P7-4).
@@ -728,6 +750,7 @@ Not scheduled, with the trigger that would reopen each:
 
 ### P7-1. Calibrated reconstruction likelihood, the sigma-VAE (M)
 
+**status**: todo
 **Why.** I-4: every model that was checked collapses under the default scale, and each experiment
 hand-sets a weight. The sigma-VAE (Rybkin, Daniilidis and Levine, ICML 2021) learns one Gaussian
 decoder variance shared by the output, or sets it analytically to the mean squared error, so that
@@ -750,6 +773,7 @@ start (begin analytic), and the Gaussian assumption on bounded data.
 
 ### P7-2. Hellinger pooling fusion (S)
 
+**status**: todo
 **Why.** A third way to pool unimodal posteriors beside `poe` and `moe`. The authors
 (Vo and Valera, AISTATS 2026) report that it outperforms the state-of-the-art multimodal VAEs on
 three benchmarks (PolyMNIST, CUB image-captions and bimodal CelebA), judged by generative coherence
@@ -770,6 +794,7 @@ benchmark found no case. The spec §4 row is a proposal for the owner.
 
 ### P7-3. Latent reconstruction loss against posterior collapse (S)
 
+**status**: todo
 **Why.** A second, cheap lever on collapse, with a different mechanism from P7-1.
 Song, Kim and Lee ([arXiv 2508.12530](https://arxiv.org/abs/2508.12530)) add a penalty on the gap
 between a latent code and the encoding of its decoding. It is a preprint, so it is accepted only
@@ -785,6 +810,7 @@ adds nothing, the item closes as "no gain", and the note stays in the how-to.
 
 ### P7-4. Alignment of more than two models (M, gated on need)
 
+**status**: todo
 **Why.** Phase 6 aligns pairs. The multi-way scheme of Achara et al. (ICML 2026,
 [arXiv 2602.06205](https://arxiv.org/abs/2602.06205)) adapts Generalized Procrustes Analysis to
 build one shared orthogonal reference for K models, so the number of maps grows with the number of
@@ -798,6 +824,7 @@ item does not start.
 
 ### P7-5. Alignment to a frozen reference encoder (M, gated on need)
 
+**status**: todo
 **Why.** VA-VAE aligns the latent space with a pretrained vision foundation model, and RAE builds on
 a pretrained representation encoder. Where a pretrained encoder exists for a modality, the same
 alignment term works here.
@@ -830,6 +857,7 @@ answer to D-7), then P4-2 in its post-hoc form, then P4-1, then P4-3.
 
 ### P4-0. Interface readiness audit (M, ADR only)
 
+**status**: todo
 **Goal.** Find which core assumptions block each direction of spec §7, and propose the smallest
 generalization first, with no code.
 
@@ -866,6 +894,7 @@ behavior" is pinned.
 
 ### P4-1. Discrete or VQ latent codes (L, one quantizer at a time)
 
+**status**: todo
 **Why.** Spec §7. A discrete latent gives symbols that can be counted, compared and modeled by a
 second-stage model, and it cannot suffer the KL collapse of a Gaussian latent. Whether the project
 needs one depends on a use case; the gate is the owner's go-ahead.
@@ -902,6 +931,7 @@ exists.
 
 ### P4-2. Learned or autoregressive priors (L)
 
+**status**: todo
 **Why.** Spec §7. The standard normal prior leaves "holes" that a decoder has never seen, and a
 learned prior also makes sampling meaningful. The regularizer registry is already open to priors,
 but a regularizer receives `(mu, logvar)` only (B2), and `GlobalVae` has no way to sample (B6).
@@ -937,6 +967,7 @@ held-out ELBO and the gap are reported, and the model's own tests are unchanged.
 
 ### P4-3. Hierarchical or sequential latents (XL, two sub-items)
 
+**status**: todo
 **Why.** Spec §7, and the "one latent per sample" findings (I-10). This changes the spec: the
 routing graph is bipartite today (B3), and spec §2.2 and §12 say that latent spaces are independent
 by construction. A latent that depends on another is a change to those sentences, so it needs the
@@ -971,6 +1002,7 @@ the same results as before, and the spec text is amended with the owner's approv
 
 ### P4-4. Serving (L, steps 2 and 3 need D-7)
 
+**status**: todo
 **Why.** Spec §1 and §11: serving is in scope, sequenced after the model is functionally complete.
 D-7 (API, batch inference or edge) is unanswered, so the work is laid out as a chain in which the
 answer unlocks the later steps.

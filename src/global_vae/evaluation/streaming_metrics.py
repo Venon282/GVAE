@@ -19,11 +19,17 @@ Everything accumulates in `float64`, so the value agrees with the pooled one to 
 dataset into batches changes nothing. `STREAMING_RECONSTRUCTION_METRICS` has the same names as
 `evaluation.metrics.DEFAULT_RECONSTRUCTION_METRICS`, which `evaluate(..., streaming=True)` relies
 on (`docs/adr/0038-paired-data-evaluation.md`).
+
+Each of the five has a masked form that leaves out the values whose target is `NaN`, as the
+`masked_*` metrics of `evaluation.metrics` do (roadmap P5-3, ADR 0048): the same classes with
+`ignores_unobserved` set. `STREAMING_METRICS` lists the ten, by their registered names. The scores
+of point clouds, graphs and text need the pool and have no streaming form.
 """
 
 import math
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import ClassVar
 
 import torch
 
@@ -33,8 +39,11 @@ class StreamingMetric(ABC):
 
     Subclasses implement `_accumulate`, which receives the flattened `float64` values of one
     batch, and `compute`. `update` does the shape check and the flattening, so a subclass never
-    sees a pair that disagrees.
+    sees a pair that disagrees. With `ignores_unobserved` set, the values whose target is `NaN` are
+    left out before that, and are not counted.
     """
+
+    ignores_unobserved: ClassVar[bool] = False
 
     def __init__(self) -> None:
         """Start with nothing seen."""
@@ -61,12 +70,16 @@ class StreamingMetric(ABC):
                 f"The reconstruction has shape {tuple(reconstruction.shape)} but its target has "
                 f"shape {tuple(target.shape)}: a streaming metric needs the same shape."
             )
-        if reconstruction.numel() == 0:
+        reconstruction_values = reconstruction.detach().flatten().double()
+        target_values = target.detach().flatten().double()
+        if self.ignores_unobserved:
+            observed = ~torch.isnan(target_values)
+            reconstruction_values = reconstruction_values[observed]
+            target_values = target_values[observed]
+        if reconstruction_values.numel() == 0:
             return
-        self._accumulate(
-            reconstruction.detach().flatten().double(), target.detach().flatten().double()
-        )
-        self._count += reconstruction.numel()
+        self._accumulate(reconstruction_values, target_values)
+        self._count += reconstruction_values.numel()
 
     @abstractmethod
     def _accumulate(self, reconstruction: torch.Tensor, target: torch.Tensor) -> None:
@@ -217,6 +230,36 @@ class StreamingPearsonR(StreamingMetric):
         return max(-1.0, min(1.0, self._co_moment / denominator))
 
 
+class StreamingMaskedMse(StreamingMse):
+    """`StreamingMse` over the values whose target is not `NaN`."""
+
+    ignores_unobserved = True
+
+
+class StreamingMaskedRmse(StreamingRmse):
+    """`StreamingRmse` over the values whose target is not `NaN`."""
+
+    ignores_unobserved = True
+
+
+class StreamingMaskedMae(StreamingMae):
+    """`StreamingMae` over the values whose target is not `NaN`."""
+
+    ignores_unobserved = True
+
+
+class StreamingMaskedR2(StreamingR2):
+    """`StreamingR2` over the values whose target is not `NaN`."""
+
+    ignores_unobserved = True
+
+
+class StreamingMaskedPearsonR(StreamingPearsonR):
+    """`StreamingPearsonR` over the values whose target is not `NaN`."""
+
+    ignores_unobserved = True
+
+
 STREAMING_RECONSTRUCTION_METRICS: dict[str, Callable[[], StreamingMetric]] = {
     "mse": StreamingMse,
     "rmse": StreamingRmse,
@@ -228,12 +271,40 @@ STREAMING_RECONSTRUCTION_METRICS: dict[str, Callable[[], StreamingMetric]] = {
 `DEFAULT_RECONSTRUCTION_METRICS`. A factory and not an instance, since a metric holds state: one
 per modality per pass."""
 
+STREAMING_METRICS: dict[str, Callable[[], StreamingMetric]] = {
+    **STREAMING_RECONSTRUCTION_METRICS,
+    "masked_mse": StreamingMaskedMse,
+    "masked_rmse": StreamingMaskedRmse,
+    "masked_mae": StreamingMaskedMae,
+    "masked_r2": StreamingMaskedR2,
+    "masked_pearson_r": StreamingMaskedPearsonR,
+}
+"""The ten metrics that have a streaming form, by the name they are registered under in
+`evaluation.metrics`: the five default ones and their masked forms."""
 
-def buildStreamingMetrics() -> dict[str, StreamingMetric]:
-    """Build one fresh instance of every streaming metric.
+
+def buildStreamingMetrics(
+    names: Mapping[str, str] | None = None,
+) -> dict[str, StreamingMetric]:
+    """Build one fresh instance of each streaming metric asked for.
+
+    Args:
+        names: Report key -> registered metric name, for the metrics to build, for example
+            `{"mse": "masked_mse"}` to report the masked form under the plain key. `None`
+            (default) builds the five default metrics under their own names.
 
     Returns:
-        Metric name -> a `StreamingMetric` that has seen nothing, in the order of
-        `STREAMING_RECONSTRUCTION_METRICS`.
+        Report key -> a `StreamingMetric` that has seen nothing, in the order of `names`.
+
+    Raises:
+        ValueError: If a name has no streaming form (`STREAMING_METRICS`).
     """
-    return {name: factory() for name, factory in STREAMING_RECONSTRUCTION_METRICS.items()}
+    if names is None:
+        names = {name: name for name in STREAMING_RECONSTRUCTION_METRICS}
+    unsupported = sorted(set(names.values()) - set(STREAMING_METRICS))
+    if unsupported:
+        raise ValueError(
+            f"No streaming form for the metric(s) {unsupported}: they need the pooled dataset "
+            f"(evaluate(streaming=False)). Streamable: {sorted(STREAMING_METRICS)}."
+        )
+    return {key: STREAMING_METRICS[name]() for key, name in names.items()}

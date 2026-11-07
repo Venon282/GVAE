@@ -1,11 +1,13 @@
 """Building blocks of the text backbones: token embedding, padding mask and masked mean.
 
 See spec §6 and §10 (the new-modality checklist) and roadmap P3-8, ADR 0041. A text is a sequence
-of token ids, and the batch layout of the framework is fixed by one rule of the loss: a decoder's
-reconstruction and its target (the batch tensor of the same name) must have the same shape
-(`losses.reconstruction.computeTotalReconstructionLoss`). So a text reaches the model as a one-hot
-tensor `(batch, length, vocab_size)`, and the decoder returns a tensor of that shape, a
-distribution over the vocabulary at every position.
+of token ids. A plain `torch.nn.functional` loss needs the reconstruction and its target (the batch
+tensor of the same name) to have the same shape
+(`losses.reconstruction.computeTotalReconstructionLoss`), so with one of those a text reaches the
+model as a one-hot tensor `(batch, length, vocab_size)`, and the decoder returns a tensor of that
+shape, a distribution over the vocabulary at every position.
+The `token_cross_entropy` loss (roadmap P5-3, ADR 0048) opts out of that check, so the batch can
+hold the ids `(batch, length)` that the encoder reads directly.
 
 `TokenEmbedding` reads either form of a token sequence with one table of vectors. Integer ids
 `(batch, length)` are looked up. A one-hot or soft tensor `(batch, length, vocab_size)` is
@@ -18,9 +20,8 @@ it: `computePaddingMask` finds the padded positions, the attention layers skip t
 `computeMaskedMean` leaves them out of the mean.
 
 `computeTokenCrossEntropy` is the exact likelihood of a text, for a decoder built with
-`output_activation=None`. It is a plain function of `(reconstruction, target)`, so it goes to
-`Trainer(reconstruction_loss_fn=...)`, where the loss names of a YAML file (`mse`, `bce`, ...) have
-no cross-entropy (ADR 0041).
+`output_activation=None`. The `token_cross_entropy` loss wraps it (ADR 0048), and
+`computeTokenAccuracy` is the share of tokens a decoder gets right, the metric of the same name.
 """
 
 import torch
@@ -157,10 +158,11 @@ def computeTokenCrossEntropy(scores: torch.Tensor, target: torch.Tensor) -> torc
 
     It is the cross-entropy between the one-hot (or soft) target and the softmax of `scores`,
     summed over the tokens of a text and averaged over the batch, so it is the per-text
-    reconstruction term of the ELBO of a categorical decoder. Pass it as the
-    `reconstruction_loss_fn` of a `Trainer` with the default `"mean"` reduction (the function
-    already sums over the tokens, which the `"sum"` reduction would do a second time), and weight
-    `1.0` for the exact ELBO or another weight to trade it against the KL term (`beta`).
+    reconstruction term of the ELBO of a categorical decoder. Name `token_cross_entropy` in
+    `training.reconstruction_loss` to use it (that loss divides it by the number of tokens, so that
+    `reduction: sum` gives this value again), or pass the function itself as the
+    `reconstruction_loss_fn` of a `Trainer` with the `"mean"` reduction (the function already sums
+    over the tokens, which the `"sum"` reduction would do a second time).
 
     A position whose target row is all zeros adds nothing, so pad with the pad class, which a
     decoder then learns to predict, and not with zeros, if the length of a text is to be learned.
@@ -185,3 +187,37 @@ def computeTokenCrossEntropy(scores: torch.Tensor, target: torch.Tensor) -> torc
     log_probabilities = functional.log_softmax(scores, dim=-1)
     loss: torch.Tensor = -(target * log_probabilities).sum() / scores.shape[0]
     return loss
+
+
+def computeTokenAccuracy(
+    scores: torch.Tensor, target: torch.Tensor, ignore_id: int | None = None
+) -> float:
+    """Return the share of positions where the arg max of the scores is the target token.
+
+    Args:
+        scores: Scores or probabilities `(batch, length, vocab_size)`.
+        target: Token ids `(batch, length)`, or a one-hot (or soft) tensor of the shape of
+            `scores`, whose arg max is the token.
+        ignore_id: A token id whose positions are left out (the pad id, when padding would
+            dominate the number), or `None` (default) to score every position.
+
+    Returns:
+        The accuracy in `[0, 1]`, or `nan` if every position is left out.
+
+    Raises:
+        ValueError: If `scores` is not 3D, or `target` has neither the shape of the ids nor the
+            shape of the scores.
+    """
+    if scores.dim() != 3:
+        raise ValueError(f"scores must be (batch, length, vocab_size), got {tuple(scores.shape)}.")
+    ids = target.argmax(dim=-1) if target.shape == scores.shape else target
+    if ids.shape != scores.shape[:2]:
+        raise ValueError(
+            f"target must be ids {tuple(scores.shape[:2])} or a tensor of the shape of the scores "
+            f"{tuple(scores.shape)}, got {tuple(target.shape)}."
+        )
+    scored = torch.ones_like(ids, dtype=torch.bool) if ignore_id is None else ids != ignore_id
+    if not bool(scored.any()):
+        return float("nan")
+    correct = scores.argmax(dim=-1) == ids
+    return float(correct[scored].double().mean())

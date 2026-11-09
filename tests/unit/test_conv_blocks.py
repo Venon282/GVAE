@@ -216,6 +216,10 @@ class TestResidual1DUpBlock:
         This holds even when the block's own final output is suppressed (the "last
         transition" convention).
         """
+        # Seeded: with the default draw, about one initialization in a thousand gives a block whose
+        # output is positive everywhere, so an unseeded run failed whenever the global state, which
+        # depends on the tests that ran before, landed on one of them.
+        torch.manual_seed(0)
         block = Residual1DUpBlock(
             in_channels=32,
             out_channels=1,

@@ -164,6 +164,76 @@ class TestStandardizeTransform:
         with pytest.raises(ValueError, match="std"):
             StandardizeTransform(mean=0.0, std=torch.tensor([1.0, -0.5]))
 
+    def test_a_list_is_turned_into_a_tensor(self) -> None:
+        """A YAML list is a Python `list` once loaded (roadmap P5-7, finding I-12)."""
+        transform = StandardizeTransform(mean=[1.0, 2.0, 3.0], std=[0.5, 1.0, 2.0])
+        assert isinstance(transform.mean, torch.Tensor)
+        assert isinstance(transform.std, torch.Tensor)
+        assert transform.mean.tolist() == [1.0, 2.0, 3.0]
+        assert transform.std.tolist() == [0.5, 1.0, 2.0]
+
+    def test_a_list_gives_exactly_what_the_same_tensor_gives(self) -> None:
+        values = [[0.5, -1.0, 2.0]]
+        scales = [[1.5, 0.25, 3.0]]
+        from_lists = StandardizeTransform(mean=values, std=scales)
+        from_tensors = StandardizeTransform(mean=torch.tensor(values), std=torch.tensor(scales))
+        x = torch.randn(7, 3)
+        assert torch.equal(from_lists.apply(x), from_tensors.apply(x))
+        assert torch.equal(from_lists.inverse(x), from_tensors.inverse(x))
+
+    def test_a_list_and_a_scalar_can_be_mixed(self) -> None:
+        transform = StandardizeTransform(mean=[1.0, 2.0], std=2.0)
+        x = torch.randn(5, 2)
+        assert torch.allclose(transform.apply(x), (x - torch.tensor([1.0, 2.0])) / 2.0)
+
+    def test_a_tuple_and_integers_are_accepted_too(self) -> None:
+        transform = StandardizeTransform(mean=(0, 1), std=(1, 2))
+        assert transform.std.tolist() == [1.0, 2.0]  # type: ignore[union-attr]
+
+    def test_a_list_round_trips_per_column(self) -> None:
+        mean = [1.0, -2.0, 0.0, 4.0]
+        std = [0.5, 2.0, 1.0, 3.0]
+        transform = StandardizeTransform(mean=mean, std=std)
+        x = torch.randn(32, 4) * torch.tensor(std) + torch.tensor(mean)
+        assert torch.allclose(transform.apply(x), (x - torch.tensor(mean)) / torch.tensor(std))
+        assert torch.allclose(transform.inverse(transform.apply(x)), x, atol=1e-5)
+
+    def test_a_non_positive_element_of_a_list_std_raises(self) -> None:
+        with pytest.raises(ValueError, match="std must be positive"):
+            StandardizeTransform(mean=[0.0, 0.0], std=[1.0, 0.0])
+        with pytest.raises(ValueError, match="std must be positive"):
+            StandardizeTransform(mean=0.0, std=[1.0, -0.5])
+
+    @pytest.mark.parametrize("field_name", ["mean", "std"])
+    def test_an_empty_list_names_the_field(self, field_name: str) -> None:
+        arguments: dict[str, object] = {"mean": [0.0], "std": [1.0]}
+        arguments[field_name] = []
+        with pytest.raises(ValueError, match=f"^{field_name} must not be an empty list"):
+            StandardizeTransform(**arguments)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("field_name", ["mean", "std"])
+    @pytest.mark.parametrize("bad", [[1.0, "a"], [[1.0], [1.0, 2.0]], [None]])
+    def test_a_list_that_is_not_numbers_names_the_field(self, field_name: str, bad: object) -> None:
+        arguments: dict[str, object] = {"mean": [0.0], "std": [1.0]}
+        arguments[field_name] = bad
+        with pytest.raises(ValueError, match=f"^{field_name} must be a list of numbers"):
+            StandardizeTransform(**arguments)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("field_name", ["mean", "std"])
+    @pytest.mark.parametrize("bad", ["0.5", None, {"a": 1.0}, b"1"])
+    def test_a_value_of_another_type_names_the_field(self, field_name: str, bad: object) -> None:
+        arguments: dict[str, object] = {"mean": 0.0, "std": 1.0}
+        arguments[field_name] = bad
+        with pytest.raises(TypeError, match=f"^{field_name} must be a float, a tensor or a list"):
+            StandardizeTransform(**arguments)  # type: ignore[arg-type]
+
+    def test_a_float_and_a_tensor_are_kept_as_they_are(self) -> None:
+        """No conversion for what already worked: the same objects, so the same numbers."""
+        mean = torch.tensor([1.0, 2.0])
+        transform = StandardizeTransform(mean=mean, std=3.0)
+        assert transform.mean is mean
+        assert transform.std == 3.0
+
 
 class TestResampleTransform:
     @pytest.mark.parametrize(

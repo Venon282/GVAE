@@ -32,6 +32,10 @@ class AudioWaveformDecoder(AbstractDecoder):
     whatever the strides (16,000 samples with strides of 4, which no stack of exact doublings
     reaches). The crop removes fewer than `prod(strides)` samples and is the only length
     adjustment: like every decoder here it reconstructs one fixed length, never a resized one.
+
+    `sample_rate` is the one place a model can say which rate it was written for: it is kept and
+    compared with `data.loader_facts.<modality>.sample_rate` before a run
+    (`global_vae.config.data_contract.checkDataContract`), and no computation reads it.
     """
 
     def __init__(
@@ -48,6 +52,7 @@ class AudioWaveformDecoder(AbstractDecoder):
         normalization: str | None = "group",
         output_activation: str | None = "tanh",
         modality_name: str = "audio",
+        sample_rate: int | None = None,
     ) -> None:
         """Build the decoder.
 
@@ -70,12 +75,22 @@ class AudioWaveformDecoder(AbstractDecoder):
                 for an unbounded output (data that is not within `[-1, 1]`, for example
                 standardized).
             modality_name: Name of the modality this decoder reconstructs.
+            sample_rate: Sample rate in Hz this model is written for, or `None` (default) for
+                "not declared". Only a declaration: it changes no layer, no output and no state
+                dict, and it is compared with the loader's rate by the config layer.
 
         Raises:
-            ValueError: If `latent_dim`, `output_length` or `out_channels` is below `1`, or an
-                argument of the stack is out of range (the message names it).
+            ValueError: If `latent_dim`, `output_length` or `out_channels` is below `1`,
+                `sample_rate` is not a positive integer, or an argument of the stack is out of
+                range (the message names it).
         """
         super().__init__()
+        if sample_rate is not None and (
+            isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate < 1
+        ):
+            raise ValueError(
+                f"sample_rate must be a positive integer or None, got {sample_rate!r}."
+            )
         if latent_dim < 1:
             raise ValueError(f"latent_dim must be at least 1, got {latent_dim}.")
         if output_length < 1:
@@ -89,6 +104,7 @@ class AudioWaveformDecoder(AbstractDecoder):
         )
         getNormalizationFactory(normalization)  # fail on an unknown name before building
         self._modality_name = modality_name
+        self._sample_rate = sample_rate
         self._output_length = output_length
         self._latent_dim = latent_dim
         self._out_channels = out_channels
@@ -143,3 +159,8 @@ class AudioWaveformDecoder(AbstractDecoder):
     def modality_name(self) -> str:
         """Name of the modality this decoder reconstructs."""
         return self._modality_name
+
+    @property
+    def sample_rate(self) -> int | None:
+        """Sample rate in Hz the model declares, or `None` when it declares none."""
+        return self._sample_rate

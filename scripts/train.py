@@ -45,6 +45,11 @@ Where, in your own code (anywhere importable on `PYTHONPATH`):
 
 See `global_vae/config/data.py` for the exact `DataConfig`/`DataloaderBundle` contract,
 and `configs/experiment/signal_vae.yaml` for the full default config this script runs.
+
+A run stops before the model is built when `data.loader_facts` (the sample rate of an audio
+modality, the vocabulary size of a text modality, the categorical block sizes of a table)
+contradicts what the model declares; the message starts with the path of the field to change
+(`global_vae/config/data_contract.py`, ADR 0049).
 """
 
 import logging
@@ -54,6 +59,7 @@ from omegaconf import OmegaConf
 
 import global_vae.config  # noqa: F401  (registers structured configs with Hydra's ConfigStore)
 from global_vae.config.data import buildDataloadersFromConfig
+from global_vae.config.data_contract import checkDataContract
 from global_vae.config.experiment import ExperimentConfig
 from global_vae.config.model import buildModelFromConfig
 from global_vae.config.training import buildTrainerFromConfig, resumeTrainerFromConfig
@@ -86,6 +92,10 @@ def main(cfg: ExperimentConfig) -> None:
     resolved_config: ExperimentConfig = OmegaConf.to_object(  # type: ignore[assignment]
         OmegaConf.merge(OmegaConf.structured(ExperimentConfig), cfg)
     )
+
+    # The facts the loader owns (`data.loader_facts`) against what the model declares: a model
+    # written for 16 kHz and a loader at 22.05 kHz stop here, before anything is built (ADR 0049).
+    checkDataContract(resolved_config.model, resolved_config.data)
 
     setGlobalSeed(resolved_config.seed, deterministic=resolved_config.deterministic)
 

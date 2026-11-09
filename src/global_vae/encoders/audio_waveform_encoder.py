@@ -36,7 +36,10 @@ class AudioWaveformEncoder(AbstractEncoder):
 
     The input is a float waveform, normally within `[-1, 1]`, at a sample rate chosen by the
     caller's `loader_factory` (spec §6.2): the model knows a number of samples, not a rate.
-    Decoding, resampling and normalizing audio are not done here.
+    Decoding, resampling and normalizing audio are not done here. `sample_rate` is the one place a
+    model can say which rate it was written for: it is kept and compared with
+    `data.loader_facts.<modality>.sample_rate` before a run
+    (`global_vae.config.data_contract.checkDataContract`), and no computation reads it.
     """
 
     def __init__(
@@ -53,6 +56,7 @@ class AudioWaveformEncoder(AbstractEncoder):
         global_pool: str = "avg",
         head_hidden_dims: Sequence[int] = (),
         modality_name: str = "audio",
+        sample_rate: int | None = None,
     ) -> None:
         """Build the encoder.
 
@@ -72,12 +76,22 @@ class AudioWaveformEncoder(AbstractEncoder):
             head_hidden_dims: Hidden widths of an optional MLP between the pooled features and
                 the `mu` and `logvar` layers. Empty (default) goes straight to them.
             modality_name: Name of the modality this encoder handles.
+            sample_rate: Sample rate in Hz this model is written for, or `None` (default) for
+                "not declared". Only a declaration: it changes no layer, no output and no state
+                dict, and it is compared with the loader's rate by the config layer.
 
         Raises:
             ValueError: If `latent_dim` or `in_channels` is below `1`, `global_pool` is not a
-                known choice, or an argument of the stack is out of range (the message names it).
+                known choice, `sample_rate` is not a positive integer, or an argument of the stack
+                is out of range (the message names it).
         """
         super().__init__()
+        if sample_rate is not None and (
+            isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate < 1
+        ):
+            raise ValueError(
+                f"sample_rate must be a positive integer or None, got {sample_rate!r}."
+            )
         if latent_dim < 1:
             raise ValueError(f"latent_dim must be at least 1, got {latent_dim}.")
         if in_channels < 1:
@@ -95,6 +109,7 @@ class AudioWaveformEncoder(AbstractEncoder):
         self._in_channels = in_channels
         self._global_pool = global_pool
         self._modality_name = modality_name
+        self._sample_rate = sample_rate
 
         layers: list[nn.Module] = [
             nn.Conv1d(in_channels, channels[0], stem_kernel_size, padding=stem_kernel_size // 2)
@@ -152,6 +167,11 @@ class AudioWaveformEncoder(AbstractEncoder):
     def modality_name(self) -> str:
         """Name of the modality this encoder handles."""
         return self._modality_name
+
+    @property
+    def sample_rate(self) -> int | None:
+        """Sample rate in Hz the model declares, or `None` when it declares none."""
+        return self._sample_rate
 
     @property
     def minimal_input_length(self) -> int:

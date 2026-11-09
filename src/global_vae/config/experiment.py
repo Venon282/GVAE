@@ -24,6 +24,7 @@ from hydra import compose, initialize_config_dir
 from omegaconf import MISSING, OmegaConf
 
 from global_vae.config.data import DataConfig
+from global_vae.config.data_contract import checkDataContract
 from global_vae.config.model import ModelConfig
 from global_vae.config.training import TrainingConfig
 
@@ -108,6 +109,10 @@ def loadExperimentConfig(
             YAML files or `overrides`.
         hydra.errors.MissingConfigException: If `config_name` does not
             resolve to an existing YAML file under `config_dir`.
+        ValueError: If `data.loader_facts` contradicts what the model declares (a sample rate,
+            a vocabulary size or categorical block sizes), see
+            `global_vae.config.data_contract.checkDataContract`. The message starts with the
+            dotted path of the offending field. A config with no `loader_facts` is not checked.
     """
     resolved_config_dir = (
         str(Path(config_dir).resolve()) if config_dir is not None else str(_DEFAULT_CONFIG_DIR)
@@ -117,4 +122,5 @@ def loadExperimentConfig(
 
     validated = OmegaConf.merge(OmegaConf.structured(ExperimentConfig), composed)
     config: ExperimentConfig = OmegaConf.to_object(validated)  # type: ignore[assignment]
+    checkDataContract(config.model, config.data)
     return config

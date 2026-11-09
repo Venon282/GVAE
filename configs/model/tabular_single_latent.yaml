@@ -38,7 +38,10 @@ modalities:
         # score of that column (docs/adr/0039-tabular-modality.md), and `tabular_mixed`, the loss of
         # experiment/tabular_vae.yaml, is its cross-entropy: it reads these sizes from this decoder,
         # so they are written once (docs/adr/0048-reconstruction-loss-and-metric-registries.md).
-        # Left out, every output is a linear value, which is right for an all-numeric table.
+        # Left out, every output is a linear value, which is right for an all-numeric table. Write
+        # the loader's blocks in data.loader_facts.tabular.categorical_sizes too and a decoder that
+        # disagrees, or that leaves them out, stops the run before the model is built
+        # (docs/adr/0049-loader-facts-in-the-data-config.md).
 
 single_latent:
   dim: 8

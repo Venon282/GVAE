@@ -8,6 +8,25 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Loader facts in the data config (roadmap P5-7, finding I-12,
+  [ADR 0049](../adr/0049-loader-facts-in-the-data-config.md)). `DataConfig.loader_facts`, a typed,
+  optional block keyed by modality name (`LoaderFactsConfig`: `sample_rate`, `vocab_size`,
+  `categorical_sizes`), states what the loader fixes and a model repeats. `checkDataContract` (new
+  module `config/data_contract.py`) compares it with the arguments of the encoders and decoders of
+  that modality, at the end of `loadExperimentConfig` and in `scripts/train.py` before the model is
+  built, so a disagreement stops a run before its first step. The message starts with the path of
+  the model field, as in ADR 0025: `model.modalities.audio.encoder.kwargs.sample_rate: the model
+  declares 16000, but data.loader_facts.audio.sample_rate says the loader gives 22050 ...`. An
+  argument left out is compared on the default of its class (a decoder with no `categorical_sizes`
+  for a table that has blocks disagrees), an entry for a name the model does not have is refused,
+  and a config with no `loader_facts` is not checked at all. `audio_waveform_encoder_v1` and
+  `audio_waveform_decoder_v1` gain `sample_rate: int | None = None`, a declaration that changes no
+  weight, no state dict key and no output. `StandardizeTransform` takes a list or a tuple of numbers
+  for `mean` and `std` (a YAML list is one value per column) and turns it into a `float32` tensor,
+  and its errors name the argument; the strict `xfail` test of `test_tabular_model_configs.py`
+  passes and loses its marker. The three data files show the block as a comment, and the how-to
+  pages for audio, text and a table say where the values go. A run that sets none of them is
+  unchanged.
 - Reconstruction loss and metric registries (roadmap P5-3,
   [ADR 0048](../adr/0048-reconstruction-loss-and-metric-registries.md)). `losses/reconstruction/` is
   a package with `AbstractReconstructionLoss` (an `nn.Module`), `registerReconstructionLoss`,

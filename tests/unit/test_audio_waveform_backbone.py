@@ -371,3 +371,44 @@ class TestEncoderAndDecoderTogether:
             backward(loss())
             optimizer.step()
         assert loss().item() < first / 2
+
+
+class TestTheDeclaredSampleRate:
+    """`sample_rate` is a declaration the config layer compares with the loader's (ADR 0049)."""
+
+    def test_it_is_not_declared_by_default(self) -> None:
+        assert _encoder().sample_rate is None
+        assert _decoder().sample_rate is None
+
+    @pytest.mark.parametrize("rate", [8000, 16000, 22050, 44100])
+    def test_it_is_kept_as_given(self, rate: int) -> None:
+        assert _encoder(sample_rate=rate).sample_rate == rate
+        assert _decoder(sample_rate=rate).sample_rate == rate
+
+    @pytest.mark.parametrize("bad", [0, -16000, 16000.0, "16k", True])
+    def test_it_must_be_a_positive_integer_or_none(self, bad: object) -> None:
+        with pytest.raises(ValueError, match="sample_rate must be a positive integer"):
+            _encoder(sample_rate=bad)
+        with pytest.raises(ValueError, match="sample_rate must be a positive integer"):
+            _decoder(sample_rate=bad)
+
+    def test_it_changes_no_parameter_and_no_output(self) -> None:
+        """A declaration only: weights, their names and outputs are those of a model without."""
+        torch.manual_seed(0)
+        plain_encoder = _encoder()
+        torch.manual_seed(0)
+        declared_encoder = _encoder(sample_rate=16000)
+        torch.manual_seed(0)
+        plain_decoder = _decoder()
+        torch.manual_seed(0)
+        declared_decoder = _decoder(sample_rate=16000)
+
+        assert list(plain_encoder.state_dict()) == list(declared_encoder.state_dict())
+        assert list(plain_decoder.state_dict()) == list(declared_decoder.state_dict())
+        waveform = torch.randn(3, LENGTH)
+        latent = torch.randn(3, LATENT)
+        for plain, declared in zip(
+            plain_encoder(waveform), declared_encoder(waveform), strict=True
+        ):
+            assert torch.equal(plain, declared)
+        assert torch.equal(plain_decoder(latent), declared_decoder(latent))

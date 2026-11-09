@@ -39,16 +39,18 @@ decoder is ignored.
 `configs/data/tabular.yaml` is the contract of the tabular model (`configs/experiment/tabular_vae.yaml`, roadmap
 P3-8): a `loader_factory` of your own whose batches carry one key, `tabular`, of shape
 `(batch, num_features)` (numeric columns standardized, then one-hot blocks, no missing value), and a per-modality
-`transforms` entry for `tabular` (an identity `standardize` to replace). Per-column statistics are tensors, which
-YAML cannot write, so the loader builds the transform in code (`docs/how-to/train-on-a-table.md`). It has no
-`sequence_length`: the width of a row is `num_features` in the model file.
+`transforms` entry for `tabular` (an identity `standardize` to replace). Per-column statistics are lists in YAML
+(`mean: [0.5, 12.0, ...]`), which `standardize` turns into tensors (`docs/how-to/train-on-a-table.md`). It has no
+`sequence_length`: the width of a row is `num_features` in the model file. The number of categories of each one-hot
+block can be stated once as `loader_facts.tabular.categorical_sizes` and is then checked against the decoder.
 
 `configs/data/audio.yaml` is the contract of the audio model (`configs/experiment/audio_vae.yaml`, roadmap P3-8): a
 `loader_factory` of your own whose batches carry one key, `audio`, of shape `(batch, samples)` (or `(batch, channels,
 samples)`), float, within `[-1, 1]`, at one sample rate, with `samples` equal to `sequence_length.audio`. Its
 `transforms` entry for `audio` is empty on purpose (the decoder's `tanh` bounds the waveform, which a `standardize`
 would leave), and decoding, resampling, normalizing the level and cutting to a length are the loader's
-(`docs/how-to/train-on-audio.md`). The sample rate is not a field of `DataConfig`: it is the loader's choice.
+(`docs/how-to/train-on-audio.md`). The sample rate is the loader's choice, and it can be stated as
+`loader_facts.audio.sample_rate`, which is then checked against the `sample_rate` the model declares.
 
 `configs/data/text.yaml` is the contract of the text model (`configs/experiment/text_vae.yaml`, roadmap P3-8): a
 `loader_factory` of your own whose batches carry one key, `text`, a one-hot float tensor `(batch, length,
@@ -56,8 +58,9 @@ vocab_size)` (a row of the pad class or of zeros is padding), with `length` equa
 one-hot because the loss compares the decoder's output with this very tensor, which must have its shape. Its
 `transforms` entry for `text` is empty and has to stay so (every transform acts on numbers, and a one-hot row is
 not a quantity). Tokenizing, the vocabulary, cutting or padding to a length and the one-hot encoding are the
-loader's (`docs/how-to/train-on-text.md`). The vocabulary size is not a field of `DataConfig`: it is the last axis
-of the tensor and the `vocab_size` of the encoder and the decoder.
+loader's (`docs/how-to/train-on-text.md`). The vocabulary size is the last axis of the tensor and the `vocab_size`
+of the encoder and the decoder, and it can be stated as `loader_facts.text.vocab_size`, which is then checked
+against both.
 
 `configs/data/time_series.yaml` is the contract of the time series model (`configs/experiment/time_series_vae.yaml`,
 roadmap P3-7 and P3-8): a `loader_factory` of your own whose batches carry one key, `time_series`, a float tensor
@@ -102,3 +105,8 @@ call it. The first concrete dataset/task (spec §11's still-open pairing-mechani
 question) determines what a real `loader_factory` implementation looks like, not
 anything in this repository; that question is independent of, and does not block,
 the transform pipeline above, which is already fully implemented.
+
+`loader_facts` (ADR 0049) is a typed, optional block of `DataConfig`, keyed by modality name, for the three numbers
+that the loader fixes and a model repeats: `sample_rate` (audio), `vocab_size` (text) and `categorical_sizes` (a
+table). A run whose model declares another value stops before the model is built, with the path of the model field
+first. A run that sets none of them is checked against nothing. The data files above carry the block as a comment.

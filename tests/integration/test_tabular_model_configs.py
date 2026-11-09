@@ -286,23 +286,33 @@ class TestTheDataContract:
         assert torch.allclose(standardized.std(dim=0), torch.ones(NUM_FEATURES), atol=1e-5)
         assert torch.allclose(transform.inverse(standardized), table, atol=1e-4)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=TypeError,
-        reason="roadmap P3-8: StandardizeTransform takes a float or a tensor, not a YAML list",
-    )
     def test_a_per_column_mean_and_std_written_in_yaml_build_the_pipeline(self) -> None:
-        """What the data file cannot say today: per-column statistics have to be built in code.
+        """Per-column statistics are written in the data file as lists (roadmap P5-7, I-12).
 
-        A YAML list reaches `StandardizeTransform` as a Python `list`, which it rejects with a
-        `TypeError` that does not name the cause. The fix is a change to `data/transforms`
-        (accept a sequence), so it is flagged and not made here. When it is made this test passes
-        and `strict` asks for the marker to be removed.
+        A YAML list reaches `StandardizeTransform` as a Python `list`, which it turns into a
+        tensor. This was a strict `xfail` while the transform took only a float or a tensor.
         """
         config = _experiment().data
-        config.transforms["tabular"][0].kwargs = {"mean": [0.0] * NUM_FEATURES, "std": [1.0] * 16}
+        config.transforms["tabular"][0].kwargs = {
+            "mean": [0.0] * NUM_FEATURES,
+            "std": [1.0] * NUM_FEATURES,
+        }
         pipeline = buildTransformPipeline(config)["tabular"]
         assert pipeline(torch.randn(2, NUM_FEATURES)).shape == (2, NUM_FEATURES)
+
+    def test_per_column_statistics_standardize_each_column_and_invert(self) -> None:
+        """The list is one value per column: each column is standardized with its own."""
+        table = torch.randn(64, NUM_FEATURES) * torch.arange(1, NUM_FEATURES + 1) + 3.0
+        config = _experiment().data
+        config.transforms["tabular"][0].kwargs = {
+            "mean": table.mean(dim=0).tolist(),
+            "std": table.std(dim=0).tolist(),
+        }
+        pipeline = buildTransformPipeline(config)["tabular"]
+        standardized = pipeline(table)
+        assert torch.allclose(standardized.mean(dim=0), torch.zeros(NUM_FEATURES), atol=1e-4)
+        assert torch.allclose(standardized.std(dim=0), torch.ones(NUM_FEATURES), atol=1e-4)
+        assert torch.allclose(pipeline.inverse(standardized), table, atol=1e-3)
 
 
 def _runTrain(tmp_path: Path) -> tuple[subprocess.CompletedProcess[str], Path]:

@@ -11,8 +11,8 @@ A batch is a dict with one key, `audio`, holding a float tensor within `[-1, 1]`
 
 - `(batch, samples)` for mono, or `(batch, channels, samples)` for stereo and more;
 - **one sample rate** for the whole dataset, chosen by you (16 kHz for speech, 22.05 or 44.1 kHz for
-  music, 8 kHz to keep a first run small). The model never sees it. Remember it when you turn a
-  reconstruction back into sound;
+  music, 8 kHz to keep a first run small). No layer of the model reads it, but you can state it and have
+  it checked against the model (below). Remember it when you turn a reconstruction back into sound;
 - **one number of samples**, equal to `sequence_length.audio` in the data file and to `output_length` in
   the decoder: 2048 samples are 0.128 s at 16 kHz. Longer clips are cut and shorter ones padded by the
   loader, because the decoder reconstructs one fixed length and never resizes it.
@@ -101,6 +101,37 @@ recording in the training and the validation set would make the validation loss 
 
 The encoder takes a clip of any length, from one sample up, since it averages over time. The decoder
 always gives `output_length` samples.
+
+### Say the sample rate once, and let the run check it
+
+The model knows a number of samples, and 2048 samples are 0.128 s at 16 kHz and 0.093 s at 22.05 kHz, so a
+model written for one rate and fed clips at another trains without an error. To make that a mistake that stops
+the run, state the rate of your loader in the data file and the rate the model is written for in the model
+file ([ADR 0049](../adr/0049-loader-facts-in-the-data-config.md)):
+
+```yaml
+data:
+  loader_facts:
+    audio:
+      sample_rate: 22050
+model:
+  modalities:
+    audio:
+      encoder:
+        kwargs: {sample_rate: 22050}
+      decoder:
+        kwargs: {sample_rate: 22050}
+```
+
+From the command line: `++data.loader_facts.audio.sample_rate=22050
++model.modalities.audio.encoder.kwargs.sample_rate=22050
++model.modalities.audio.decoder.kwargs.sample_rate=22050`. A model that declares another rate, 16 kHz here,
+stops the run before the model is built, with the field to change at the start of the message:
+`model.modalities.audio.encoder.kwargs.sample_rate: the model declares 16000, but
+data.loader_facts.audio.sample_rate says the loader gives 22050`. The model's `sample_rate` changes no weight
+and no output, so a model that declares it is the model that does not. Both values are optional: set neither
+and nothing is compared, set only the loader's and there is nothing to compare it with. The key is the name of
+the modality (`audio`), and the rate is a positive whole number of hertz.
 
 ## Train
 

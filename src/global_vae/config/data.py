@@ -33,6 +33,14 @@ know about modalities; the per-modality *mapping* lives here, one layer up,
 purely so two modalities/datasets can be configured independently. See
 `docs/adr/0015-per-modality-data-transforms.md`.
 
+`DataConfig.loader_facts` is the typed, optional place for the few facts the loader owns and
+a model has to agree with: the sample rate of an audio modality, the vocabulary size of a text
+modality and the categorical block sizes of a table (`LoaderFactsConfig`). This module only
+holds them; the comparison with what the model declares is
+`global_vae.config.data_contract.checkDataContract`, in a module of its own so that this one
+keeps knowing nothing about the model
+(see `docs/adr/0049-loader-facts-in-the-data-config.md`).
+
 The other piece of indirection that makes this config actually *usable* end
 to end without the framework owning any data-loading code is `loader_factory`:
 a `"module.path:function_name"` reference (the same convention
@@ -71,6 +79,32 @@ class TransformConfig:
 
     name: str = MISSING
     kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class LoaderFactsConfig:
+    """Facts about one modality that the loader owns and the model must agree with.
+
+    Each one is a number the loader fixes when it builds the batches (the rate it resamples to,
+    the vocabulary it tokenizes with, the columns it one-hot encodes) and that a model repeats in
+    its own arguments, so the two can drift apart. Every field is optional, and an unset field says
+    nothing: a model is compared only with the facts that are given
+    (`global_vae.config.data_contract.checkDataContract`).
+
+    Attributes:
+        sample_rate: Sample rate in Hz of an audio modality (`16000`, `22050`, `44100`). The model
+            side is the `sample_rate` argument of an audio encoder or decoder that declares one.
+        vocab_size: Number of token ids of a text modality, the padding token included. The model
+            side is the `vocab_size` argument of a text encoder or decoder.
+        categorical_sizes: Number of categories of each one-hot block of a table, in column order
+            (the last `sum(categorical_sizes)` columns). The model side is the
+            `categorical_sizes` argument of a tabular decoder. Each size is at least 2, like the
+            decoder's.
+    """
+
+    sample_rate: int | None = None
+    vocab_size: int | None = None
+    categorical_sizes: list[int] | None = None
 
 
 @dataclass
@@ -143,6 +177,15 @@ class DataConfig:
             value by hand, for that same modality, since
             `config/model.py` deliberately knows nothing about the data
             domain (see that module's docstring).
+        loader_facts: Modality name -> `LoaderFactsConfig`, the facts the loader owns and the
+            model must agree with (the sample rate of an audio modality, the vocabulary size of a
+            text modality, the categorical block sizes of a table). `None` (default) declares
+            nothing, and a run that sets no fact is the run it was before this field existed. The
+            values are checked against the model by
+            `global_vae.config.data_contract.checkDataContract`, which `loadExperimentConfig` and
+            `scripts/train.py` call before any model is built; this class only holds them. Keyed
+            per modality, like `transforms` and `sequence_length`. See
+            `docs/adr/0049-loader-facts-in-the-data-config.md`.
         seed: Seed for any train/val/test split randomization the
             caller's own `loader_factory` performs. Kept separate from
             `ExperimentConfig.seed` (spec §10's global seed) so a data
@@ -162,6 +205,7 @@ class DataConfig:
     transforms: dict[str, list[TransformConfig]] = field(default_factory=dict)
     sequence_length: dict[str, int] | None = None
     seed: int = 0
+    loader_facts: dict[str, LoaderFactsConfig] | None = None
 
     def __post_init__(self) -> None:
         """Repair `self.transforms`' leaf entries after Hydra/OmegaConf composition.

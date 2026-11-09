@@ -29,10 +29,18 @@ transforms:
 
 # Number of tokens of a text after the loader's cutting and padding, the padding token included. It
 # must match configs/model/text_transformer_single_latent.yaml's decoder.kwargs.output_length,
-# which is never filled in for you. The size of the vocabulary is not part of this contract (there
-# is no field for it in `DataConfig`): it is the last axis of the batch tensor and the `vocab_size`
-# of the encoder and the decoder.
+# which is never filled in for you. The size of the vocabulary is the last axis of the batch tensor
+# and the `vocab_size` of the encoder and the decoder.
 sequence_length:
   text: 8
+
+# Facts the loader owns and the model must agree with (docs/adr/0049-loader-facts-in-the-data-config.md).
+# Optional, and off here: a run that sets none of them is checked against nothing. To have the
+# vocabulary checked, write its size here (padding and unknown tokens counted, as in the batch): a
+# `vocab_size` of the encoder or the decoder that differs stops the run, before the model is built,
+# with the path of the field to change.
+# loader_facts:
+#   text:
+#     vocab_size: 32
 
 seed: 0

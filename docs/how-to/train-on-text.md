@@ -19,7 +19,8 @@ tensor, because it asks the reconstruction and the target to have one shape. The
 embedding table, so no one-hot tensor has to be in memory to encode with a trained model.
 
 - **`vocab_size`** counts every token the model can see, the padding token included. It is written in the
-  encoder and in the decoder, and it is the last axis of the batch. Nothing fills it in for you.
+  encoder and in the decoder, and it is the last axis of the batch. Nothing fills it in for you, but you can
+  state the loader's value in the data file and have a run check the model against it (below).
 - **One length**, equal to `sequence_length.text` in the data file and to `output_length` in the decoder.
   Longer texts are cut and shorter ones padded by the loader, because the decoder reconstructs one fixed
   length and never resizes it.
@@ -42,7 +43,7 @@ from torch.utils.data import DataLoader
 from global_vae.config.data import DataConfig, DataloaderBundle
 
 PAD, UNKNOWN = 0, 1  # the first two ids of the vocabulary
-VOCAB_SIZE = 32  # must equal vocab_size in the model file: it counts PAD and UNKNOWN
+VOCAB_SIZE = 32  # must equal vocab_size in the model file (data.loader_facts checks it): counts PAD and UNKNOWN
 
 
 def buildVocabulary(texts: list[list[str]]) -> dict[str, int]:
@@ -102,7 +103,9 @@ Keep `buildVocabulary` and the file of the model in step: the number of tokens i
 
 - **`vocab_size`** in the encoder and in the decoder, to the width of your one-hot rows. From the command
   line: `model.modalities.text.encoder.kwargs.vocab_size=5000
-  model.modalities.text.decoder.kwargs.vocab_size=5000`.
+  model.modalities.text.decoder.kwargs.vocab_size=5000`. It is one number written in three places (the
+  loader, the encoder, the decoder), so state the loader's in the data file as well, which has the run
+  compare the three (next section).
 - **`output_length`** in the decoder, to the number of tokens of a text, and the same number as
   `data.sequence_length.text`.
 - **`pad_token_id`** in the encoder, `0` here, or `null` if your texts all have the same length and need no
@@ -117,6 +120,26 @@ The encoder takes a text of any length from one token up. The decoder always giv
 produced all at once from the latent vector, with no token feeding the next. A decoder that reads the tokens
 before it is the usual way a text VAE learns to ignore its latent vector, and this one has nothing else to
 read.
+
+### Say the vocabulary once, and let the run check it
+
+The size of the vocabulary is the width of every one-hot row your loader builds and the `vocab_size` of the
+encoder and of the decoder: three copies of one number, and a vocabulary rebuilt from a larger corpus
+changes the first and not the others. State the loader's in the data file
+([ADR 0049](../adr/0049-loader-facts-in-the-data-config.md)):
+
+```yaml
+data:
+  loader_facts:
+    text:
+      vocab_size: 5000   # the padding and unknown tokens counted, as in the batch
+```
+
+A run then compares it with the encoder's and the decoder's before it builds the model. A model that
+disagrees stops the run with the field to change at the start of the message:
+`model.modalities.text.decoder.kwargs.vocab_size: the model declares 4999, but data.loader_facts.text.vocab_size
+says the loader gives 5000`. The block is optional: leave it out and nothing is compared, as before. The key
+is the name of the modality (`text`), and the size is a positive whole number.
 
 ## Train
 

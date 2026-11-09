@@ -5,7 +5,9 @@
 # A batch key `audio` holds a float waveform, `(batch, samples)` for mono or `(batch, channels,
 # samples)`, within [-1, 1], at one sample rate. Decoding, resampling to that rate, normalizing and
 # cutting clips to one length are the caller's `loader_factory` (spec §6.2). The model knows a
-# number of samples, not a rate: 2048 samples are 0.128 s at 16 kHz.
+# number of samples, not a rate: 2048 samples are 0.128 s at 16 kHz. It can still say which rate it
+# was written for: `sample_rate` below is a declaration, compared with
+# `data.loader_facts.audio.sample_rate` before a run (docs/adr/0049-loader-facts-in-the-data-config.md).
 #
 # The encoder is a stack of stages, each a few dilated residual units and one strided convolution,
 # then a mean over time: any clip length is encoded, and one latent vector describes the clip. The
@@ -22,6 +24,7 @@ modalities:
         hidden_channels: [8, 16, 32, 64] # one entry per stage, so four stages
         strides: 4 # per stage, or one value for all: here 4 * 4 * 4 * 4 = 256 samples per frame
         dilations: [1, 3] # one residual unit per dilation in every stage (add 9 for a wider view)
+        # sample_rate: 16000 # optional, in Hz: a declaration that changes nothing in the model
         # activation: elu | gelu | relu | silu | leaky_relu | tanh; normalization: group | batch | null
         #
         # latent_dim is intentionally omitted: buildModelFromConfig fills it in from
@@ -34,6 +37,7 @@ modalities:
         # ceil(output_length / 256) frames and the surplus of the upsampled waveform is cropped.
         output_length: 2048
         out_channels: 1
+        # sample_rate: 16000 # optional, the same value as in the encoder and in data.loader_facts
         hidden_channels: [64, 32, 16, 8]
         strides: 4
         dilations: [1, 3]

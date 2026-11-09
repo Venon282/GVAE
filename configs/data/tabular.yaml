@@ -19,12 +19,12 @@ shuffle_train: true
 # Generic, invertible preprocessing (spec §6.2), per modality (ADR 0015). The value below is a
 # placeholder, an identity `standardize`. A real table needs one mean and one standard deviation
 # per numeric column, computed on the training split only (this framework never computes them,
-# see StandardizeTransform), and those are tensors, which YAML cannot write: build the pipeline in
-# your `loader_factory` with
-# `StandardizeTransform(mean=torch.tensor([...]), std=torch.tensor([...]))` for the numeric
-# columns. One-hot encoding of the categorical columns, and the imputation of missing values
-# (a NaN makes every output NaN), are the `loader_factory`'s job too: there is no transform for
-# either, and a table has no common recipe for them.
+# see StandardizeTransform), and a list is how YAML writes them: `mean: [0.5, 12.0, ...]` and
+# `std: [1.1, 30.0, ...]`, one value per column of the row (a list becomes a tensor, and a
+# non-positive `std` is refused). A column that is not standardized, such as a one-hot one, takes
+# a mean of 0 and a std of 1. One-hot encoding of the categorical columns, and the imputation of
+# missing values (a NaN makes every output NaN), are the `loader_factory`'s job: there is no
+# transform for either, and a table has no common recipe for them.
 transforms:
   tabular:
     - name: standardize
@@ -35,5 +35,14 @@ transforms:
 # No `sequence_length`: it is the length of a 1D signal. The width of a row is `num_features` in
 # the encoder and decoder kwargs of configs/model/tabular_single_latent.yaml, and the two must
 # match the rows your loader yields.
+
+# Facts the loader owns and the model must agree with (docs/adr/0049-loader-facts-in-the-data-config.md).
+# Optional, and off here: a run that sets none of them is checked against nothing. For a table with
+# one-hot columns, write the number of categories of each block, in column order, and give the
+# decoder the same `categorical_sizes`: a decoder with other blocks, or with none, stops the run,
+# before the model is built, with the path of the field to change.
+# loader_facts:
+#   tabular:
+#     categorical_sizes: [3, 5]
 
 seed: 0

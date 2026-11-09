@@ -75,10 +75,23 @@ def buildTabularDataloaders(config: DataConfig) -> DataloaderBundle:
     )
 ```
 
-The per-column `mean` and `std` are tensors on purpose: `StandardizeTransform` takes a float or a
-tensor, and a list written in the YAML file fails (the finding of the ADR). Keep the transform around
-if you want to read reconstructions in the original units: `transform.inverse` undoes it for the
-numeric columns.
+The per-column `mean` and `std` are tensors here because the loader computes them. When you already
+know them, write them in the data file instead, one value per column of the row, as lists
+([ADR 0049](../adr/0049-loader-facts-in-the-data-config.md)):
+
+```yaml
+transforms:
+  tabular:
+    - name: standardize
+      kwargs:
+        mean: [0.5, 12.0, 3.2, 0.0, 0.0]   # one value per column; 0 for a column left as it is
+        std: [1.1, 30.0, 0.7, 1.0, 1.0]    # strictly positive
+```
+
+`StandardizeTransform` turns a list into a tensor, and an empty list, a list that is not numbers or a
+`std` that is not positive is refused with the name of the argument. Keep the transform around if you
+want to read reconstructions in the original units: `transform.inverse` undoes it for the numeric
+columns.
 
 ## The model
 
@@ -108,6 +121,25 @@ modalities:
   applied inside each block, so a block is a probability vector, and the `tabular_mixed` loss of the
   experiment reads these sizes from the decoder: a cross-entropy on each block. Leave it out for an
   all-numeric table.
+
+### Say the blocks once, and let the run check them
+
+`CATEGORICAL_SIZES` of the loader and `categorical_sizes` of the decoder are one fact written twice. State
+the loader's in the data file and a run compares it with the decoder before it builds the model:
+
+```yaml
+data:
+  loader_facts:
+    tabular:
+      categorical_sizes: [3, 5]
+```
+
+A decoder with other sizes, or with none (it then treats every column as numeric), stops the run at the
+start with a message that begins with the field to change, for example
+`model.modalities.tabular.decoder.kwargs.categorical_sizes: the model leaves unset, so the class uses (), but
+data.loader_facts.tabular.categorical_sizes says the loader gives [3, 5]`. The block is optional: leave it
+out and nothing is compared, as before. The key is the name of the modality (`tabular`), and each size is at
+least 2.
 - **The network**: `hidden_dims`, `activation` (`relu`, `gelu`, `silu`, `leaky_relu`, `tanh`),
   `normalization` (`layer`, `batch` or none) and `dropout`. An empty `hidden_dims` is a linear VAE.
   `batch` normalization fails in training on a batch of one row.

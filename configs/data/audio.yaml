@@ -30,10 +30,20 @@ transforms:
 
 # Number of samples of a clip after the loader's cutting and padding: 2048 samples are 0.128 s at
 # 16 kHz. It must match configs/model/audio_waveform_single_latent.yaml's
-# decoder.kwargs.output_length, which is never filled in for you. The sample rate is not part of
-# this contract, since the model knows a number of samples: it is a choice of the loader, and the
-# one to remember when you decode a reconstruction back to sound.
+# decoder.kwargs.output_length, which is never filled in for you. The model knows a number of
+# samples, not a rate, so the sample rate is a choice of the loader, and the one to remember when
+# you decode a reconstruction back to sound.
 sequence_length:
   audio: 2048
+
+# Facts the loader owns and the model must agree with (docs/adr/0049-loader-facts-in-the-data-config.md).
+# Optional, and off here: a run that sets none of them is checked against nothing. To have a rate
+# checked, write it here and declare the same one in the model
+# (`sample_rate` in configs/model/audio_waveform_single_latent.yaml, in the encoder and the
+# decoder): a model declaring another rate stops the run, before the model is built, with the path
+# of the field to change.
+# loader_facts:
+#   audio:
+#     sample_rate: 16000
 
 seed: 0

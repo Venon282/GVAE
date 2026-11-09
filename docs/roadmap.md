@@ -385,7 +385,7 @@ test.
 
 ### P5-7. Config and data contract gaps (M)
 
-**status**: todo
+**status**: done
 **Why.** I-12.
 **Do.**
 - Accept a list for the `standardize` statistics (turn it into a tensor, and name the field in the

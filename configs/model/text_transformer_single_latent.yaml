@@ -21,7 +21,9 @@ modalities:
       name: text_transformer_encoder_v1
       kwargs:
         # vocab_size is data-dependent, so it is never filled in for you. It counts the padding token
-        # and must equal the decoder's, and the last axis of the batch tensor.
+        # and must equal the decoder's, and the last axis of the batch tensor. Write the loader's
+        # value in data.loader_facts.text.vocab_size too and a mismatch stops the run before the
+        # model is built (docs/adr/0049-loader-facts-in-the-data-config.md).
         vocab_size: 32
         pad_token_id: 0 # skipped as an attention key and left out of the mean; null for no padding
         d_model: 64

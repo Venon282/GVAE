@@ -47,3 +47,4 @@
 - [0046: Encode and decode seams](0046-encode-and-decode-seams.md)
 - [0047: Extra loss terms at the single loss site](0047-extra-loss-terms.md)
 - [0048: Reconstruction loss and metric registries](0048-reconstruction-loss-and-metric-registries.md)
+- [0049: Loader facts in the data config](0049-loader-facts-in-the-data-config.md)

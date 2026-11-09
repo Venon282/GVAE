@@ -180,12 +180,15 @@ Same pattern: subclass `AbstractFusion` (`fusion/`), `AbstractAssembler` (`assem
 ruff check .
 ruff format --check .
 mypy
-pytest --cov=global_vae --cov-fail-under=95
+pytest --cov=global_vae --cov-fail-under=97
 ```
 
-CI (`.github/workflows/ci.yaml`) runs the same three blocking jobs on every push and pull request:
-`lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest`, Python 3.11 and 3.13). The
-coverage floor is 95%, one point below the measured value.
+CI (`.github/workflows/ci.yaml`) runs the same three blocking jobs on every push and pull request,
+and once a week on the default branch, so that a new release of a tool is caught between two
+pushes: `lint` (`ruff`), `types` (`mypy`, Python 3.11) and `tests` (`pytest`, Python 3.11 and 3.13).
+The coverage floor is 97% of statements, one point below the measured value. A fourth job, run by
+the weekly schedule and by a manual dispatch only, writes a branch coverage table for `latent/`,
+`models/` and `training/` to the summary of the run. It is a report and gates nothing.
 
 > **About `mypy`.** With no arguments it checks `src/`, `scripts/`, `examples/` and `tests/` in
 > strict mode. Run it on Python 3.11, the version CI uses: on 3.12 or newer, pip installs numpy 2.5

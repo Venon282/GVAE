@@ -57,11 +57,11 @@ See [Train a model](how-to/train.md) and
 ruff check .
 ruff format --check .
 mypy
-pytest --cov=global_vae --cov-fail-under=95
+pytest --cov=global_vae --cov-fail-under=97
 ```
 
-The same four commands run in CI on every push and pull request
-(`.github/workflows/ci.yaml`). `pytest` must keep coverage at or above the 95% floor, and the
+The same four commands run in CI on every push and pull request, and once a week
+(`.github/workflows/ci.yaml`). `pytest` must keep coverage at or above the 97% floor, and the
 `ruff` job is blocking like the other two.
 
 `mypy` with no arguments checks `src/`, `scripts/`, `examples/` and `tests/` in strict mode, on

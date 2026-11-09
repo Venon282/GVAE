@@ -1,16 +1,25 @@
 name: CI
 
-# Lint, type-check and tests on every push and every pull request (spec section 10,
-# roadmap P0-1). The docs build and deploy live in docs.yaml and are unchanged.
+# Lint, type-check and tests on every push and every pull request, and once a week (spec
+# section 10, roadmap P0-1 and P5-9). The docs build and deploy live in docs.yaml and are
+# unchanged.
 #
 # Required checks on `main` (a repository setting, not a file): lint, types,
 # tests (3.11) and tests (3.13). All four are blocking: `ruff check .` and `ruff format --check .`
 # exit 0 since the CamelCase module names were renamed (roadmap P0-2, decision D-9, ADR 0023).
+# The `branch-coverage` job is a report and is not a required check (ADR 0050).
 
 on:
   push:
   pull_request:
   workflow_dispatch: {}
+  # Every Monday, so that a new release of ruff, mypy, numpy or torch (pyproject.toml bounds
+  # none of them below the next major version) turns a run red between two pushes and not at the
+  # next one (roadmap P5-9). GitHub runs a schedule only on the default branch, and switches
+  # the schedule of a public repository off after 60 days without repository activity: if the
+  # Monday runs stop appearing, enable the workflow again in the Actions tab.
+  schedule:
+    - cron: "17 5 * * 1"
 
 permissions:
   contents: read
@@ -22,9 +31,11 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
-  # Coverage floor, in percent. The measured value is 96.25% (roadmap section 2.1), so the
-  # floor sits one point below it. Raise it as coverage improves, never lower it.
-  COVERAGE_FLOOR: "95"
+  # Coverage floor, in percent of statements (branches are reported by the `branch-coverage`
+  # job and are not part of this number). The last measured value is 98.67% on Python 3.13
+  # (roadmap P5-9; 98.51% in the session of roadmap section 2.1, 96.25% at v1.2.0), so the floor
+  # sits one point below it, rounded down. Raise it as coverage improves, never lower it.
+  COVERAGE_FLOOR: "97"
   # Dependencies are resolved once per job from pyproject.toml. The CPU wheel of torch is
   # installed first: the default PyPI wheel drags in several GB of CUDA libraries that a
   # GPU-less runner never uses. The second pip call then finds torch already satisfied.
@@ -120,9 +131,51 @@ jobs:
       # There is no `-m "not slow"` here on purpose: CI runs the whole suite, unit and
       # integration, slow tests included. The fast loops (`pytest tests/unit`,
       # `pytest -m "not slow"`) are for local work only, see README.md.
+      # --durations=15 prints the 15 slowest tests, so that the duration of this job and the
+      # tests that set it are in every log (roadmap P5-9). The job has 30 minutes: the suite
+      # takes 8 to 11 minutes on 2 vCPUs, install excluded. Shard it when a log shows more
+      # than 15 minutes for the pytest step.
       - name: pytest
         run: >
           pytest -rs
+          --durations=15
           --cov=global_vae
           --cov-report=term-missing:skip-covered
           --cov-fail-under="$COVERAGE_FLOOR"
+
+  # Branch coverage of the three packages that hold the most decisions (latent/, models/,
+  # training/), roadmap P5-9. A report, not a gate: the table goes to the summary of the run and
+  # nothing is compared with a number. It runs on the weekly schedule and on a manual dispatch
+  # only, since branch tracing slows the suite and the statement floor of `tests` is measured
+  # without it (the two percentages are different quantities, so the floor is not touched).
+  branch-coverage:
+    name: branch coverage
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url "$TORCH_CPU_INDEX"
+          pip install -e ".[dev,docs]"
+
+      - name: pytest with branch tracing
+        run: pytest -q --cov=global_vae --cov-branch --cov-report=
+
+      - name: Branch coverage of latent, models and training
+        run: |
+          {
+            echo "### Branch coverage of latent/, models/ and training/ (a report, not a gate)"
+            echo
+            coverage report --format=markdown --skip-empty --include="*/global_vae/latent/*,*/global_vae/models/*,*/global_vae/training/*"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -437,6 +437,15 @@ data, with a `sum` reduction and a few weights (the recipe of `how-to/choose-bet
   is not found.
 **Done when.** The 3.13 result is known, the schedule runs, the floor and its comment are current,
 the docs toolchain has a recorded plan (D-18), and I-14 has a recorded cause.
+**State.** Delivered with [ADR 0050](adr/0050-ci-hardening-docs-toolchain-and-the-causes-behind-i-14.md): the
+weekly schedule, the floor at 97 with a current comment, `--durations=15`, the branch coverage job, the test of
+`utils/seed.py`, the bound on `mkdocs-material`, the trial and plan for D-18 (ProperDocs is a drop-in, Zensical cannot
+build the API reference yet), and the causes of I-14 (the scale of the embedding for the text pair, the number of steps
+for the series decoder, partly). Left open, because they need the Actions page and the session had no access to it:
+read the `v2.0.0` run, 3.13 job included (the full suite passes on Python 3.13.18 here, 5,832 tests, 98.67%); see that the
+first Monday run appears once the workflow is on `main`; and compare the duration of the `pytest` step and the list of
+slowest tests of a real runner with the 15-minute threshold written next to the step. Change the status to `done` once
+those three are read.
 
 ---
 

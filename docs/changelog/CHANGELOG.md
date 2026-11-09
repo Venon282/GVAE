@@ -8,6 +8,21 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- CI hardening, a docs toolchain plan and the causes behind I-14 (roadmap P5-9, findings I-14 and I-16, decision
+  D-18, [ADR 0050](../adr/0050-ci-hardening-docs-toolchain-and-the-causes-behind-i-14.md)). `ci.yaml` runs every Monday
+  at 05:17 UTC as well as on a push, so a new release of ruff, mypy, numpy, torch or the docs toolchain turns a run red
+  between two pushes. A `branch-coverage` job, run by the schedule and by a manual dispatch only, writes the branch
+  coverage of `latent/`, `models/` and `training/` to the summary of the run; it is a report with no floor. The `pytest`
+  step prints the 15 slowest tests (`--durations=15`). `tests/unit/test_seed.py` covers `utils/seed.py` (11 tests,
+  including the `deterministic=True` branch, `warn_only`, the `CUBLAS_WORKSPACE_CONFIG` variable and the reset by a
+  later default call, with a fixture that restores every process-wide flag). `test_ci_workflow.py` guards the schedule,
+  the floor and its comment, the durations, and the branch job. The ADR records a trial of ProperDocs (a drop-in: the
+  same site byte for byte, no change to `mkdocs.yml`) and of Zensical (it cannot build the `reference/` tree yet), and a
+  plan for the owner. It also records the two causes of I-14: the 1D transformer pair on one-hot text trails the text
+  pair because its embedding starts at a tenth of the scale (62.6% against 99.0% of the tokens, 97.8% once the scale
+  is the table's), and the series decoder's gap is a gap of convergence (0.52 against 0.78 of the variance at the 60 epochs of the
+  benchmark, 0.86 against 0.84 at 240), not of seed or kernel, and part of it is the scale at which the latent
+  vector enters the decoder.
 - Loader facts in the data config (roadmap P5-7, finding I-12,
   [ADR 0049](../adr/0049-loader-facts-in-the-data-config.md)). `DataConfig.loader_facts`, a typed,
   optional block keyed by modality name (`LoaderFactsConfig`: `sample_rate`, `vocab_size`,
@@ -62,6 +77,8 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The coverage floor is 97 (it was 95, with a comment that quoted the 96.25% of v1.2.0), one point below the 98.67% of statements measured on Python 3.13; the README and `docs/getting-started.md` say 97, and a test keeps the three
+  places and the quoted value together (roadmap P5-9). The `docs` extra takes `mkdocs-material>=9.5,<10`.
 - The experiment configs name the loss that fits their data (roadmap P5-3). `text_vae.yaml` uses
   `token_cross_entropy` (the decoder returns raw scores, `output_activation: null`; it trained with
   `bce` as a stand-in), `time_series_vae.yaml` uses `masked_mse`, so a series with gaps no longer

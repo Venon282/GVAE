@@ -12,8 +12,9 @@ drifts, or a new one that forgets part of the pattern, fails here:
 * looking up an unknown name raises `KeyError`, and the message lists the available names;
 * the `listRegistered*` function returns names in sorted order;
 * importing the registry's subpackage registers at least one built-in, for a registry that has
-  any: the loss terms of roadmap P5-6 ship none, since the terms are the objectives of Phases 6
-  and 7 (`ships_built_ins=False`, which skips the two checks that need one and nothing else).
+  any. The loss terms shipped none when the registry arrived (roadmap P5-6) and ship the two terms
+  of the pair stage since P6-4 (ADR 0054); the flag `ships_built_ins=False`, which skips the two
+  checks that need one and nothing else, stays for a registry added empty.
 
 A registry added later joins by adding one `_RegistrySpec` to `_REGISTRIES` (the latent head
 registry of roadmap P1-1, the loss term registry of P5-6 and the reconstruction loss registry of
@@ -115,8 +116,9 @@ class _RegistrySpec:
         register: The `registerX(name)` class decorator.
         get: The `getXClass(name)` lookup.
         list_names: The `listRegisteredX()` function.
-        ships_built_ins: Whether importing the subpackage registers any built-in. `False` for the
-            loss terms (roadmap P5-6, ADR 0047), which ship none.
+        ships_built_ins: Whether importing the subpackage registers any built-in. `False` only
+            for a registry added empty, as the loss terms were (roadmap P5-6, ADR 0047) until the
+            two terms of the pair stage (P6-4, ADR 0054).
     """
 
     label: str
@@ -243,7 +245,6 @@ _REGISTRIES: tuple[_RegistrySpec, ...] = (
         registerLossTerm,
         getLossTermClass,
         listRegisteredLossTerms,
-        ships_built_ins=False,
     ),
     _RegistrySpec(
         "reconstruction_losses",

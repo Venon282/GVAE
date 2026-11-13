@@ -889,6 +889,76 @@ class GlobalVae(nn.Module):
                     f"it needs equal latent widths."
                 )
 
+    def modalitiesEncodedInto(self, latent_name: str) -> tuple[str, ...]:
+        """Return the batch keys that the encoders feeding a latent space ingest.
+
+        A loss term that needs a latent space to be encoded from all of its inputs (a pair stage,
+        ADR 0054) asks this which modalities a batch must carry. It reads the routing graph and
+        runs nothing.
+
+        Args:
+            latent_name: A latent space of this model.
+
+        Returns:
+            The modality names the feeding encoders ingest, in the order of the encoders, each
+            once. A shared encoder contributes every modality it declares.
+
+        Raises:
+            KeyError: If `latent_name` is not a latent space of this model. The message lists the
+                real ones.
+        """
+        if latent_name not in self.latent_spaces:
+            raise KeyError(
+                f"'{latent_name}' is not a latent space of this model "
+                f"(latent spaces: {sorted(self.latent_spaces)})."
+            )
+        modalities: list[str] = []
+        for encoder_name in self._feeding_encoders[latent_name]:
+            for modality in self._encoder_modalities[encoder_name]:
+                if modality not in modalities:
+                    modalities.append(modality)
+        return tuple(modalities)
+
+    def modalitiesDecodedFrom(self, latent_names: Sequence[str]) -> tuple[str, ...]:
+        """Return the reconstructions `decode` gives when only some latent spaces are passed.
+
+        It applies the rules of `decode` without running a decoder: a decoder none of whose
+        latent spaces is present is left out, one with no assembler runs from its one space, and
+        one with an assembler runs from a strict subset of its spaces only when that assembler
+        handles a subset (`handlesMissingLatents`, spec §5). A test compares it with the keys that
+        `decode` returns, so the two cannot drift apart.
+
+        Args:
+            latent_names: The latent spaces that would be passed to `decode`.
+
+        Returns:
+            The names of the reconstructions, in decoder order. A shared decoder contributes every
+            modality it declares. Empty when no decoder can run.
+
+        Raises:
+            KeyError: If a name is not a latent space of this model. The message lists the real
+                ones.
+        """
+        unknown = sorted(set(latent_names) - set(self.latent_spaces))
+        if unknown:
+            raise KeyError(
+                f"{unknown} are not latent spaces of this model "
+                f"(latent spaces: {sorted(self.latent_spaces)})."
+            )
+        present = set(latent_names)
+        reconstructed: list[str] = []
+        for decoder_name in self.decoders:
+            required = self._decoder_inputs.get(decoder_name, [])
+            consumed = [name for name in required if name in present]
+            if not consumed:
+                continue
+            if decoder_name in self.assemblers:
+                assembler = cast(AbstractAssembler, self.assemblers[decoder_name])
+                if len(consumed) < len(required) and not assembler.handlesMissingLatents:
+                    continue
+            reconstructed.extend(self._decoder_modalities[decoder_name])
+        return tuple(reconstructed)
+
     def encode(self, inputs: dict[str, torch.Tensor], use_mean: bool = False) -> EncodeOutput:
         """Run the encode, fuse, sample half of `forward` and stop at the latent spaces.
 

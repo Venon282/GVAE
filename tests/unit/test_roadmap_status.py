@@ -51,5 +51,6 @@ class TestTheStatusOfTheItems:
             "P6-1",
             "P6-2",
             "P6-3",
+            "P6-4",
         ):
             assert "**status**: done" in items[item], item

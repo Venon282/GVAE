@@ -6,12 +6,13 @@ what the six that ship compute, what each one ignores, which to try first, and h
 reasoning is in [ADR 0053](../adr/0053-latent-distance-registry.md) and in
 [Phase 6 of the roadmap](../roadmap.md).
 
-!!! note "Nothing in a training run calls a distance yet"
-    The registry is here (roadmap P6-3). The loss terms that apply a distance to two latent spaces
-    during training, `latent_alignment` and `cross_reconstruction`, are roadmap item P6-4. Until then
-    a distance is a function you call by hand: in a notebook, in an evaluation, or in a test of your
-    own. The page holds no number from a real run, and which distance stage 3 trains with is roadmap
-    decision D-13, which stays open until the measurements of P6-6.
+!!! note "Which distance stage 3 trains with is still open"
+    The loss term `latent_alignment` (roadmap P6-4, [ADR 0054](../adr/0054-pair-stage-loss-terms.md))
+    applies one of these distances to the pairs of latent spaces you list, and it has **no default
+    distance**: you name one in `distance`, so the choice is in your config and not in the code. Which
+    one to train with is roadmap decision D-13, which stays open until the measurements of P6-6. The
+    page holds no number from a real run. [Train in stages](train-in-stages.md#pull-the-two-latent-spaces-together)
+    shows the term in a stage 3 config.
 
 **On this page**
 

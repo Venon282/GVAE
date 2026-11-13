@@ -52,3 +52,4 @@
 - [0051: Stage manifest and solo recipes](0051-stage-manifest-and-solo-recipes.md)
 - [0052: Warm start of the pair model from two solo checkpoints](0052-warm-start-from-solo-checkpoints.md)
 - [0053: Latent distance registry](0053-latent-distance-registry.md)
+- [0054: Pair-stage loss terms](0054-pair-stage-loss-terms.md)

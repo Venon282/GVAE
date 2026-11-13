@@ -9,6 +9,9 @@ It makes what a warm start is tested on:
 - structured data (a sine of a random frequency and phase for the signal, a Gaussian blob at a
   random place for the image), because a model trained on noise collapses and the guard of ADR
   0052 would refuse it;
+- a linked pair of those two (`makeLinkedBatches`), where the image is a function of the signal's
+  frequency and phase, for the pair-stage loss terms of roadmap P6-4, which have something to
+  align only if the two modalities describe the same thing;
 - two real solo checkpoints, each written by the real recipe (`experiment/pair_solo_signal` and
   `experiment/pair_solo_image`, with their stage manifest), after a few seconds of training;
 - the pair model of `configs/model/signal_image_pair.yaml`.
@@ -74,6 +77,37 @@ def makePairedBatches(num_batches: int, seed: int) -> list[dict[str, torch.Tenso
         }
         for _ in range(num_batches)
     ]
+
+
+def makeLinkedBatches(num_batches: int, seed: int) -> list[dict[str, torch.Tensor]]:
+    """Return batches of linked samples: the image is a function of the signal's two numbers.
+
+    The signal is a sine of a random frequency and phase, and the image is a Gaussian blob whose
+    place is set by that frequency (horizontal) and that phase (vertical), so the two modalities
+    of a row describe the same two numbers. `makePairedBatches` pairs a signal with an image that
+    has nothing to do with it, which is all that the warm start needs and too little for a term
+    that makes two latent spaces say the same thing (roadmap I-9, I-15: it is still synthetic).
+
+    Args:
+        num_batches: How many batches.
+        seed: Seeds a private generator, so the batches are the same on every call.
+
+    Returns:
+        `num_batches` dicts of a `signal` `(16, 256)` and an `image` `(16, 64, 64)`.
+    """
+    generator = torch.Generator().manual_seed(seed)
+    time = torch.linspace(0.0, 1.0, SIGNAL_LENGTH)
+    axis = torch.linspace(-1.0, 1.0, IMAGE_SIZE)
+    batches = []
+    for _ in range(num_batches):
+        frequency = torch.rand(BATCH_SIZE, 1, generator=generator) * 8.0 + 1.0
+        phase = torch.rand(BATCH_SIZE, 1, generator=generator) * 3.14
+        signal = torch.sin(2.0 * 3.14159 * frequency * time + phase)
+        center_x = ((frequency - 5.0) / 4.0 * 0.8).unsqueeze(-1)
+        center_y = ((phase - 1.57) / 1.57 * 0.8).unsqueeze(-1)
+        squared = (axis[None, None, :] - center_x) ** 2 + (axis[None, :, None] - center_y) ** 2
+        batches.append({"signal": signal, "image": torch.exp(-squared / 0.05)})
+    return batches
 
 
 def buildStructuredPairDataloaders(config: DataConfig) -> DataloaderBundle:

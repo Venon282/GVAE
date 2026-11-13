@@ -16,14 +16,16 @@ checks them against that manifest. The motivation and the full plan are in
 [Phase 6 of the roadmap](../roadmap.md), in [ADR 0051](../adr/0051-stage-manifest-and-solo-recipes.md)
 and in [ADR 0052](../adr/0052-warm-start-from-solo-checkpoints.md).
 
-!!! note "Stage 3 is only half shipped"
+!!! note "Stage 3 can pull the two spaces together; the experiment file is still to come"
     The warm start, the pair model file and the guard against a collapsed solo model are here
-    (roadmap P6-2) and the distances are registered (P6-3). The pair loss terms and the `pair_align`
-    experiment are roadmap items P6-4 to P6-7, so a stage 3 run today trains the two modalities from their solo weights with the
-    reconstruction and regularization terms only, and no term that pulls the two latent spaces
-    together. Nothing on this page pretends otherwise. The distances those terms will use are
-    already registered (roadmap P6-3): [Choose a latent distance](choose-a-latent-distance.md)
-    says what each one compares and which to try first.
+    (roadmap P6-2), the distances are registered (P6-3) and the two pair loss terms,
+    `latent_alignment` and `cross_reconstruction`, are registered built-ins (P6-4,
+    [ADR 0054](../adr/0054-pair-stage-loss-terms.md)). Without them a stage 3 run trains the two
+    modalities from their solo weights with the reconstruction and regularization terms only, and
+    nothing pulls the two latent spaces together; you ask for the terms in `training.loss_terms`
+    ([below](#pull-the-two-latent-spaces-together)). The freeze policy and the `pair_align`
+    experiment file are roadmap items P6-5 to P6-7. [Choose a latent distance](choose-a-latent-distance.md)
+    says what each distance compares and which to try first.
 
 **On this page**
 
@@ -34,6 +36,7 @@ and in [ADR 0052](../adr/0052-warm-start-from-solo-checkpoints.md).
 - [Start the pair stage from the two solo checkpoints](#start-the-pair-stage-from-the-two-solo-checkpoints)
 - [What the warm start refuses](#what-the-warm-start-refuses)
 - [What it copies, and what it does not](#what-it-copies-and-what-it-does-not)
+- [Pull the two latent spaces together](#pull-the-two-latent-spaces-together)
 
 ## Run the two solo stages
 
@@ -166,7 +169,7 @@ If you change a kwarg in a solo model file, change it in the pair file too, or t
 refuses the checkpoint (below).
 
 `training.warm_start` is a list of entries, one per solo checkpoint, and is empty by default. Until
-`pair_align` lands, compose the pair stage from the solo experiment file and the pair model:
+`pair_align` lands (P6-7), compose the pair stage from the solo experiment file and the pair model:
 
 ```bash
 PYTHONPATH=. python scripts/train.py --config-name experiment/pair_solo_signal \
@@ -244,5 +247,94 @@ decoder you name, parameters and buffers (the running statistics of a batch norm
 included). Not copied: the optimizer state, the step and epoch counters, the history, the
 random-number state and the callbacks' state. Stage 3 is a new run, with its own optimizer, its
 own seed and a step counter at 0, and its checkpoints carry its own manifest (`stage: pair`, two
-modalities, two spaces). Freezing the copied modules, a lower learning rate for them and the pair
-loss terms are later roadmap items (P6-4 and P6-5).
+modalities, two spaces). Freezing the copied modules and a lower learning rate for them are a later roadmap item
+(P6-5); the pair loss terms are [the next section](#pull-the-two-latent-spaces-together).
+
+## Pull the two latent spaces together
+
+Warm-started and left alone, the two spaces of the pair model stay where the solo runs put them:
+nothing in the loss asks `z_signal` and `z_image` to agree about the same sample. Two loss terms
+do, and you list them in `training.loss_terms` like any other term
+([ADR 0047](../adr/0047-extra-loss-terms.md), [ADR 0054](../adr/0054-pair-stage-loss-terms.md)):
+
+```yaml
+training:
+  stage: pair
+  modality_dropout_p: 0.0              # required: see "What the terms refuse"
+  reconstruction_reduction: sum        # the scale the solo stages used (finding I-4)
+  loss_terms:
+    - name: latent_alignment
+      kwargs:
+        pairs: [[z_signal, z_image]]
+        distance: {name: wasserstein2_diag, kwargs: {squared: true}}
+      schedule: {strategy: linear_warmup, kwargs: {warmup_steps: 100, end_value: 0.3}}
+    - name: cross_reconstruction
+      kwargs:
+        pairs: [[z_signal, z_image], [z_image, z_signal]]
+      schedule: {strategy: linear_warmup, kwargs: {warmup_steps: 100, end_value: 0.3}}
+```
+
+The weight `lambda` of a term is the `weight` of its entry, or a `schedule` instead (never both); a
+ramp from zero protects the solo solutions at the start, because a distance that is large at the
+start would otherwise pull on weights that are already good.
+
+| Term | What it adds | Arguments |
+|---|---|---|
+| `latent_alignment` | For each pair, the distance between the two posteriors of the **same sample**, averaged over the batch, summed over the pairs. Nothing is encoded again: it reads the posteriors the step already computed. | `pairs`: a list of `[first, second]` latent space names. `distance`: required, a name from [Choose a latent distance](choose-a-latent-distance.md) or `{name, kwargs}`. `stop_gradient`: `none` (default), `source` or `target`. |
+| `cross_reconstruction` | For each **ordered** pair `[source, target]`, the sample of the source space is decoded by the decoders that read the target space, and compared with the target modality of the batch. The loss, the weight and the reduction are the trainer's own for that modality (`training.reconstruction_loss`, `reconstruction_weight`, `reconstruction_reduction`), so a modality is scored the same way whichever space it is rebuilt from. | `pairs`: a list of `[source, target]`, both orders for both directions. `stop_gradient`: `none` (default), `source` or `target`. |
+
+`stop_gradient: source` cuts the gradient on the first name of every pair, `target` on the second,
+which makes one side an anchor that the other is trained toward. For `cross_reconstruction`,
+`source` detaches the sample (only the decoders learn to read the other space) and `target` keeps
+the decoders out of this term's gradient (only the encoders learn to write what the decoders read).
+The setting is one per term; a different one for each pair is not offered.
+
+### What the terms refuse
+
+Each of these stops the run with a message that says what to change. The first three are refused
+when the trainer is built, before the first step:
+
+| You get | Because |
+|---|---|
+| `modality dropout must be off in this stage` | `several_latents` sets `modality_dropout_p: 0.15`. A pair stage has no fusion to be robust for, and a term that compares two spaces needs both encoded in every step. Set `training.modality_dropout_p=0`. |
+| `has latent widths 16 and 8 ... must have the same width (roadmap D-16)` | The two spaces of a pair have different `dim`. Set the same width for both in the model's `latent.spaces`; nothing projects one onto the other. |
+| `names 'z_picture', which is not a latent space of this model` | A typo, or a space of another model. The message lists the real ones. |
+| `needs paired batches` | A batch that lacks a modality of a pair. The term raises instead of skipping the pair, because a skipped term would change the objective without a trace in the numbers, and the likeliest cause is a loader that does not pair its samples. The message names the missing modality and says which pair needs it. It applies to the validation loader too. |
+
+Every batch of both loaders must therefore carry both modalities, with row `i` of one describing
+the same sample as row `i` of the other. A loader that pairs by sample id, as
+`examples/04_paired_loader.py` does, gives that. A `distance` is not defaulted either: leave it out
+and the term raises a `TypeError` naming it.
+
+### Watch it
+
+Each term is logged as `train/loss/latent_alignment`, `val/loss/latent_alignment` and the same for
+`cross_reconstruction` (in the history, the CSV file and any other logger), and it is added to
+`loss/total`. The logged value is the one **after the weight**, so with a ramp it starts near zero
+even though the distance is largest then; to read the distance itself, measure it on held-out
+batches with the posterior means, or watch the curve with a constant weight.
+
+A falling distance is not enough to call the spaces aligned. Under the KL term both spaces also
+drift toward the prior, so the distance falls without the terms too, and an alignment that has
+collapsed both spaces drives it to zero. What separates an aligned pair is that **a modality can be
+rebuilt from the other's code**: the cross reconstruction error, and the self reconstruction errors
+staying where the solo stages left them. Measure the three before and after the stage
+([Evaluate and visualize a checkpoint](evaluate.md)).
+
+!!! warning "What the measurements say, and do not say"
+    On a small synthetic pair (a signal and an image that describe the same frequency and phase),
+    stage 3 with the two terms brought the latent distance to under a tenth of its start and under
+    half of the same stage without them, kept both self reconstructions within 10 % of where they
+    started, and rebuilt the image from the signal's code far better than the control did
+    ([ADR 0054](../adr/0054-pair-stage-loss-terms.md) gives the table and the four seeds). These are
+    the numbers of a toy, not a recommendation for a weight or a distance: a constant weight of 1 on
+    both terms at the default `beta` of 1 was worse. Which distance to train with is roadmap decision
+    D-13, open until P6-6.
+
+Two things to know. The cross reconstruction runs the decoders in training mode, so their batch
+normalization layers update their running statistics with activations that come from the other
+modality's codes; a long stage with a small momentum should check the self reconstruction in
+evaluation mode (the freeze policy of P6-5 will put frozen modules in evaluation mode). And a run
+with the terms resumes like any other (`training.resume_from`): the terms have no parameters, and
+the random-number state of the checkpoint is what makes a stochastic distance such as `mixture_jsd`
+resume to the same curve.

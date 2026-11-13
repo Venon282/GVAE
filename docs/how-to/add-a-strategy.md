@@ -88,8 +88,8 @@ whose `forward` receives the model, the batch, what the model produced for the s
 returns a **scalar**:
 
 ```python
-@registerLossTerm("latent_alignment")
-class LatentAlignment(AbstractLossTerm):
+@registerLossTerm("projected_alignment")
+class ProjectedAlignment(AbstractLossTerm):
     def __init__(self, pairs: list[list[str]]) -> None:
         super().__init__()
         self.pairs = pairs
@@ -99,7 +99,7 @@ class LatentAlignment(AbstractLossTerm):
         for pair in self.pairs:
             for name in pair:
                 if name not in model.latent_spaces:
-                    raise ValueError(f"latent_alignment: no latent space '{name}'")
+                    raise ValueError(f"projected_alignment: no latent space '{name}'")
 
     def forward(self, model, batch, outputs, step):
         a, b = (outputs["latent_params"][name][0] for name in self.pairs[0])
@@ -119,7 +119,12 @@ class LatentAlignment(AbstractLossTerm):
   A checkpoint can only be resumed with the terms it was saved with.
 - **The name is the key.** It is the registry name, a term is listed once in `loss_terms`, and it cannot be
   `total`, `reconstruction` or `regularization`.
-- The registry ships empty on purpose: the terms are the objectives of Phases 6 and 7, each with its own ADR.
+- **A term can learn what the trainer does, once.** `bindTrainerSettings(settings)` is called after `validateModel`
+  with a frozen `TrainerSettings` (the trainer's reconstruction loss, weights, reduction and `modality_dropout_p`,
+  ADR 0054). Keep what you need as a plain attribute, never as a submodule, and raise a `ValueError` there for a
+  setup the term cannot run with. The default does nothing.
+- The registry ships the two terms of the pair stage, `latent_alignment` and `cross_reconstruction` (ADR 0054); the
+  other objectives of Phases 6 and 7 each come with their own ADR.
 
 ## A note specific to reconstruction losses
 

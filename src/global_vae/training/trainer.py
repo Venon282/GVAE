@@ -53,7 +53,7 @@ from global_vae.losses.reconstruction import (
     computeTotalReconstructionLoss,
     validateReduction,
 )
-from global_vae.losses.terms.base import AbstractLossTerm
+from global_vae.losses.terms.base import AbstractLossTerm, TrainerSettings
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.beta_schedule_resolution import resolveBetaSchedules
 from global_vae.training.beta_schedules.base import AbstractBetaSchedule
@@ -401,7 +401,8 @@ class Trainer:
                 `accumulate_grad_batches` is below 1, if a loss term has a name that is
                 reserved (`total`, `reconstruction`, `regularization`) or has a dot in it,
                 if `loss_term_weights` names something that is not in `loss_terms` or holds a
-                negative or non-finite number, or if a term's `validateModel` refuses `model`.
+                negative or non-finite number, or if a term's `validateModel` refuses `model`
+                or its `bindTrainerSettings` refuses the trainer's setup (ADR 0054).
         """
         if not (0.0 <= modality_dropout_p <= 1.0):
             raise ValueError(f"modality_dropout_p must be in [0, 1], got {modality_dropout_p}.")
@@ -438,8 +439,15 @@ class Trainer:
         ).to(self.device)
         self.loss_term_weights = term_weights
         self.stage_manifest = stage_manifest
+        term_settings = TrainerSettings(
+            reconstruction_loss_fn=reconstruction_loss_fn,
+            reconstruction_weights=reconstruction_weights,
+            reconstruction_reduction=reconstruction_reduction,
+            modality_dropout_p=modality_dropout_p,
+        )
         for term in terms.values():
             term.validateModel(self.model)
+            term.bindTrainerSettings(term_settings)
 
         if isinstance(optimizer, Optimizer):
             self.optimizer = optimizer

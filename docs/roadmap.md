@@ -563,7 +563,7 @@ clear message.
 `scripts/train.py` applies the entries and a resumed run skips them.
 `tests/integration/test_warm_start.py` pins the bit-for-bit reconstruction and each refusal, and
 `tests/integration/test_warm_start_script.py` runs the three stages through the script. The pair loss
-terms and the `pair_align` experiment are P6-4 to P6-7 (the distances they use are P6-3).
+terms are P6-4 (the distances they use are P6-3), and the `pair_align` experiment is P6-7.
 **Depends on.** P6-1.
 
 ### P6-3. Latent distance registry (M, needs D-13)
@@ -596,13 +596,13 @@ which to try first (proposed: `wasserstein2_diag`, with `mean_mse` as the ablati
 **Delivered.** ADR 0053; `losses/distances/` (`AbstractLatentDistance`, the registry, one file per
 distance and `numerics.py` for the reductions, the safe root and the log-variance clamp);
 `tests/unit/test_latent_distances.py`; the thirteenth registry in `test_registry_contract.py`;
-`docs/how-to/choose-a-latent-distance.md`. D-13 stays open: nothing calls a distance yet (the loss
-terms are P6-4), and the choice waits for the measurements of P6-6 and the paper's supplementary
-information.
+`docs/how-to/choose-a-latent-distance.md`. D-13 stays open: the loss terms that call a distance are
+P6-4, which takes it by name with no default, and the choice waits for the measurements of P6-6 and the
+paper's supplementary information.
 
 ### P6-4. Pair-stage loss terms (M, needs D-13 and D-16)
 
-**status**: todo
+**status**: done
 Two loss terms, registered through P5-6 and configured in YAML:
 
 - `latent_alignment`: a list of `pairs` of latent space names, a `distance` from P6-3 with its
@@ -625,6 +625,20 @@ Two loss terms, registered through P5-6 and configured in YAML:
 **Done when.** On the synthetic pair, stage 3 lowers the latent distance over the epochs without
 raising any self-reconstruction loss by more than a stated tolerance, each term shows in the logs,
 and stage 3 resumes under the guarantee of ADR 0032.
+**Delivered.** ADR 0054; `losses/terms/latent_alignment.py`, `losses/terms/cross_reconstruction.py` and the
+checks they share in `losses/terms/pairs.py`; the hook `AbstractLossTerm.bindTrainerSettings` with the frozen
+`TrainerSettings` (how a term learns the trainer's reconstruction loss, weights, reduction and dropout);
+`GlobalVae.modalitiesEncodedInto` and `GlobalVae.modalitiesDecodedFrom`;
+`tests/unit/test_pair_loss_terms.py`, `tests/integration/test_pair_stage_model_methods.py` and
+`tests/integration/test_pair_stage.py` (stage 3 on a linked synthetic pair, warm-started from two solo
+checkpoints: the distance falls to under a tenth of its start and under half of the control's, no self
+reconstruction ends more than 10 % above its start, the cross decoding beats the control's, each term is in
+the history and the CSV, and a resumed stage reproduces the uninterrupted one, with `mixture_jsd` too).
+D-13 stays open: the terms take the distance by name and have no default, and the choice waits for the
+measurements of P6-6. D-16 is enforced as a build check and not a conversion. The numbers are those of a
+small synthetic pair (I-15). Flagged and not fixed: the logged alignment value is the weighted one, the cross
+decoding runs the decoders in training mode (their BatchNorm statistics see the other modality; the freeze
+policy of P6-5 is the tool for it), and `stop_gradient: target` flips `requires_grad` for one decoding.
 **Depends on.** P5-4, P5-5, P5-6, P6-2, P6-3.
 
 ### P6-5. Freeze and learning-rate policy (M, needs D-14)

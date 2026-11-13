@@ -23,7 +23,11 @@ Both halves of the objective are implemented here.
 
 - `terms/`: the extra terms of the training loss (`AbstractLossTerm`, registry in
   `terms/registry.py`, roadmap P5-6, `docs/adr/0047-extra-loss-terms.md`). The registry ships
-  empty: the terms are the objectives of Phases 6 and 7. `Trainer.computeLosses` weights each
+  the two terms of the pair stage (roadmap P6-4, `docs/adr/0054-pair-stage-loss-terms.md`):
+  `latent_alignment` and `cross_reconstruction`, with what they share (the pair checks) in
+  `terms/pairs.py`; the other objectives of Phases 6 and 7 come with their own ADRs. A term learns
+  the trainer's reconstruction loss, weights, reduction and dropout once, through
+  `AbstractLossTerm.bindTrainerSettings`. `Trainer.computeLosses` weights each
   one, adds it to the total and logs it as `loss/<name>`.
 
 - `distances/`: the latent distance registry (`AbstractLatentDistance`, registry in
@@ -32,9 +36,10 @@ Both halves of the objective are implemented here.
   one value per sample; the batch average is the caller's, as for the regularizers. Registered:
   `mean_mse`, `wasserstein2_diag`, `symmetric_kl`, `cosine`, `mixture_jsd` (Monte Carlo) and
   `info_nce` (contrastive). `numerics.py` holds what they share (the reduction over dimensions, a
-  root with a finite gradient at 0, the log-variance clamp). Nothing in the trainer calls one yet:
-  the loss terms that apply a distance to two latent spaces are P6-4. Which distance stage 3 uses
-  is roadmap decision D-13; see `docs/how-to/choose-a-latent-distance.md`.
+  root with a finite gradient at 0, the log-variance clamp). The loss term `latent_alignment`
+  (`terms/latent_alignment.py`, P6-4) is what calls one, by the name in its `distance` argument,
+  which has no default. Which distance stage 3 uses is roadmap decision D-13; see
+  `docs/how-to/choose-a-latent-distance.md`.
 
 Beta weighting lives outside this package, in `training/beta_schedules/` (`constant`,
 `linear_warmup`, `cyclical_annealing`; see `docs/adr/0004-pluggable-beta-schedules.md`).

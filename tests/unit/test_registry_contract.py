@@ -1,8 +1,9 @@
 """Contract test shared by every self-registration registry (spec §10, roadmap P0-4(c)).
 
-The codebase has twelve registries (encoders, decoders, fusion strategies, latent heads,
+The codebase has thirteen registries (encoders, decoders, fusion strategies, latent heads,
 assemblers, latent regularizers, data transforms, beta schedules, callbacks, experiment loggers,
-loss terms and reconstruction losses), each a small module with the same three functions. This file
+loss terms, reconstruction losses and latent distances), each a small module with the same three
+functions. This file
 states the behaviour they all promise and checks it once per registry, so that a registry that
 drifts, or a new one that forgets part of the pattern, fails here:
 
@@ -16,7 +17,8 @@ drifts, or a new one that forgets part of the pattern, fails here:
 
 A registry added later joins by adding one `_RegistrySpec` to `_REGISTRIES` (the latent head
 registry of roadmap P1-1, the loss term registry of P5-6 and the reconstruction loss registry of
-P5-3 did); `test_twelve_registries_are_covered` makes forgetting that visible.
+P5-3 and the latent distance registry of P6-3 did); `test_thirteen_registries_are_covered` makes
+forgetting that visible.
 Behaviour that belongs to one registry only (which built-ins exist, what each does) stays in that
 registry's own tests, such as `test_callback_registry.py`, `test_assemblers.py` and
 `test_heads.py`.
@@ -54,6 +56,12 @@ from global_vae.fusion.base import AbstractFusion
 from global_vae.fusion.registry import getFusionClass, listRegisteredFusions, registerFusion
 from global_vae.heads.base import AbstractLatentHead
 from global_vae.heads.registry import getHeadClass, listRegisteredHeads, registerHead
+from global_vae.losses.distances.base import AbstractLatentDistance
+from global_vae.losses.distances.registry import (
+    getLatentDistanceClass,
+    listRegisteredLatentDistances,
+    registerLatentDistance,
+)
 from global_vae.losses.reconstruction.base import AbstractReconstructionLoss
 from global_vae.losses.reconstruction.registry import (
     getReconstructionLossClass,
@@ -247,6 +255,16 @@ _REGISTRIES: tuple[_RegistrySpec, ...] = (
         getReconstructionLossClass,
         listRegisteredReconstructionLosses,
     ),
+    _RegistrySpec(
+        "latent_distances",
+        "global_vae.losses.distances",
+        "global_vae.losses.distances.registry",
+        "_LATENT_DISTANCE_REGISTRY",
+        AbstractLatentDistance,
+        registerLatentDistance,
+        getLatentDistanceClass,
+        listRegisteredLatentDistances,
+    ),
 )
 
 _IDS = [spec.label for spec in _REGISTRIES]
@@ -290,10 +308,10 @@ def spec(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> _Re
     return registry_spec
 
 
-def test_twelve_registries_are_covered() -> None:
-    """The contract runs over all twelve registries; adding a thirteenth means adding a spec."""
-    assert len(_REGISTRIES) == 12
-    assert len({s.registry_attr for s in _REGISTRIES}) == 12
+def test_thirteen_registries_are_covered() -> None:
+    """The contract runs over all thirteen registries; adding a fourteenth means adding a spec."""
+    assert len(_REGISTRIES) == 13
+    assert len({s.registry_attr for s in _REGISTRIES}) == 13
 
 
 class TestRegisterAndLookUp:

@@ -563,12 +563,12 @@ clear message.
 `scripts/train.py` applies the entries and a resumed run skips them.
 `tests/integration/test_warm_start.py` pins the bit-for-bit reconstruction and each refusal, and
 `tests/integration/test_warm_start_script.py` runs the three stages through the script. The pair loss
-terms and the `pair_align` experiment are P6-3 to P6-7.
+terms and the `pair_align` experiment are P6-4 to P6-7 (the distances they use are P6-3).
 **Depends on.** P6-1.
 
 ### P6-3. Latent distance registry (M, needs D-13)
 
-**status**: todo
+**status**: done
 **Why.** "Minimize the distance between the latent spaces" needs a distance, and the paper's is not
 available (D-13). Several are known, cheap and comparable, which is what a registry is for.
 **Do (ADR first).** A package `losses/distances/` with `AbstractLatentDistance`, an `nn.Module`
@@ -593,6 +593,12 @@ between N(0, 1^2) and N(1, 2^2) is the square root of 2); finite gradients at ze
 mixed precision.
 **Done when.** The registry joins the contract test, all six pass those tests, and the how-to says
 which to try first (proposed: `wasserstein2_diag`, with `mean_mse` as the ablation).
+**Delivered.** ADR 0053; `losses/distances/` (`AbstractLatentDistance`, the registry, one file per
+distance and `numerics.py` for the reductions, the safe root and the log-variance clamp);
+`tests/unit/test_latent_distances.py`; the thirteenth registry in `test_registry_contract.py`;
+`docs/how-to/choose-a-latent-distance.md`. D-13 stays open: nothing calls a distance yet (the loss
+terms are P6-4), and the choice waits for the measurements of P6-6 and the paper's supplementary
+information.
 
 ### P6-4. Pair-stage loss terms (M, needs D-13 and D-16)
 

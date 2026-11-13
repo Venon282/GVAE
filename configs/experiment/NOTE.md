@@ -110,7 +110,7 @@ one loader serves every stage; each model reads its own batch key and ignores th
 `configs/training/default.yaml`. What they add is `training.stage` (`solo_signal`, `solo_image`), which makes every checkpoint
 carry a stage manifest: the label, the modalities, the latent space with its width and a digest of the model config. The image
 one sets the loss scale of `image_vae.yaml` (`sum`, weight 0.5). They train through `scripts/train.py`
-(`tests/integration/test_stage_manifest.py`). The third stage (`pair_align`, with the pair loss terms) is P6-3 to P6-7; its
+(`tests/integration/test_stage_manifest.py`). The third stage (`pair_align`, with the pair loss terms) is P6-4 to P6-7; its
 model is `configs/model/signal_image_pair.yaml` and its start is `training.warm_start` (roadmap P6-2, ADR 0052). Until
 `pair_align` lands, compose it from `pair_solo_signal`, `model=signal_image_pair`, `training=several_latents` and
 `training.stage=pair` (`docs/how-to/train-in-stages.md`, `tests/integration/test_warm_start_script.py`). The keys of

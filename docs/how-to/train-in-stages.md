@@ -18,10 +18,12 @@ and in [ADR 0052](../adr/0052-warm-start-from-solo-checkpoints.md).
 
 !!! note "Stage 3 is only half shipped"
     The warm start, the pair model file and the guard against a collapsed solo model are here
-    (roadmap P6-2). The pair loss terms and the `pair_align` experiment are roadmap items P6-3 to
-    P6-7, so a stage 3 run today trains the two modalities from their solo weights with the
+    (roadmap P6-2) and the distances are registered (P6-3). The pair loss terms and the `pair_align`
+    experiment are roadmap items P6-4 to P6-7, so a stage 3 run today trains the two modalities from their solo weights with the
     reconstruction and regularization terms only, and no term that pulls the two latent spaces
-    together. Nothing on this page pretends otherwise.
+    together. Nothing on this page pretends otherwise. The distances those terms will use are
+    already registered (roadmap P6-3): [Choose a latent distance](choose-a-latent-distance.md)
+    says what each one compares and which to try first.
 
 **On this page**
 
@@ -243,4 +245,4 @@ included). Not copied: the optimizer state, the step and epoch counters, the his
 random-number state and the callbacks' state. Stage 3 is a new run, with its own optimizer, its
 own seed and a step counter at 0, and its checkpoints carry its own manifest (`stage: pair`, two
 modalities, two spaces). Freezing the copied modules, a lower learning rate for them and the pair
-loss terms are later roadmap items (P6-3 to P6-5).
+loss terms are later roadmap items (P6-4 and P6-5).

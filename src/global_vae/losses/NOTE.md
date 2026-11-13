@@ -26,6 +26,16 @@ Both halves of the objective are implemented here.
   empty: the terms are the objectives of Phases 6 and 7. `Trainer.computeLosses` weights each
   one, adds it to the total and logs it as `loss/<name>`.
 
+- `distances/`: the latent distance registry (`AbstractLatentDistance`, registry in
+  `distances/registry.py`, roadmap P6-3, `docs/adr/0053-latent-distance-registry.md`). A distance
+  takes the `(mu, logvar)` pair of each latent space for one batch of the same samples and returns
+  one value per sample; the batch average is the caller's, as for the regularizers. Registered:
+  `mean_mse`, `wasserstein2_diag`, `symmetric_kl`, `cosine`, `mixture_jsd` (Monte Carlo) and
+  `info_nce` (contrastive). `numerics.py` holds what they share (the reduction over dimensions, a
+  root with a finite gradient at 0, the log-variance clamp). Nothing in the trainer calls one yet:
+  the loss terms that apply a distance to two latent spaces are P6-4. Which distance stage 3 uses
+  is roadmap decision D-13; see `docs/how-to/choose-a-latent-distance.md`.
+
 Beta weighting lives outside this package, in `training/beta_schedules/` (`constant`,
 `linear_warmup`, `cyclical_annealing`; see `docs/adr/0004-pluggable-beta-schedules.md`).
 `Trainer` resolves the schedules each step and passes the result to

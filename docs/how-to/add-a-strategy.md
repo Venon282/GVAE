@@ -11,6 +11,7 @@ runs.
 | Latent head | `AbstractLatentHead` | `@registerHead("name")` | `heads/` | `heads/__init__.py` |
 | Assembler | `AbstractAssembler` | `@registerAssembler("name")` | `assemblers/` | `assemblers/__init__.py` |
 | Latent regularizer | `AbstractLatentRegularizer` | `@registerRegularizer("name")` | `losses/regularizers/` | `losses/regularizers/__init__.py` |
+| Latent distance | `AbstractLatentDistance` | `@registerLatentDistance("name")` | `losses/distances/` | `losses/distances/__init__.py` |
 | Loss term | `AbstractLossTerm` | `@registerLossTerm("name")` | `losses/terms/` | `losses/terms/__init__.py` |
 | Reconstruction loss | `AbstractReconstructionLoss` | `@registerReconstructionLoss("name")` | `losses/reconstruction/` | `losses/reconstruction/__init__.py` |
 | Metric | a function `(reconstruction, target) -> float` | `@registerMetric("name")` | `evaluation/` | `evaluation/__init__.py` |

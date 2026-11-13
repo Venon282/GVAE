@@ -50,3 +50,4 @@
 - [0049: Loader facts in the data config](0049-loader-facts-in-the-data-config.md)
 - [0050: CI hardening, the docs toolchain plan and the causes behind I-14](0050-ci-hardening-docs-toolchain-and-the-causes-behind-i-14.md)
 - [0051: Stage manifest and solo recipes](0051-stage-manifest-and-solo-recipes.md)
+- [0052: Warm start of the pair model from two solo checkpoints](0052-warm-start-from-solo-checkpoints.md)

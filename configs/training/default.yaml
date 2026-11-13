@@ -59,6 +59,14 @@ resume_from: null
 # before it loads a solo checkpoint. `null` records nothing and the checkpoints are what they
 # always were (docs/adr/0051-stage-manifest-and-solo-recipes.md, docs/how-to/train-in-stages.md).
 stage: null
+# Start the run from the modules of solo checkpoints, the pair stage of a staged recipe: a list of
+# entries `{checkpoint: <path of a solo best.pt>, modules: [signal]}` (`modules` is a modality name,
+# for its encoder and its decoder, or `encoders.<name>` / `decoders.<name>`; `latent_space`,
+# `check_manifest` and `min_active_units` are optional). Each file is checked against its stage
+# manifest, the keys and the shapes, and for a collapsed encoder before a weight is copied; the
+# optimizer, the seed and the step counter are not taken. `[]` copies nothing. See
+# configs/experiment/ and docs/adr/0052-warm-start-from-solo-checkpoints.md.
+warm_start: []
 
 loggers:
   - name: csv

@@ -1,0 +1,71 @@
+# The pair model of the staged recipe (roadmap P6-2, docs/how-to/train-in-stages.md, ADR 0052):
+# a signal and an image, each encoded into a latent space of its own and each decoded from its
+# own space only, so the two reconstruct themselves and nothing crosses between them.
+#
+#   signal -> 1d_cnn_encoder_v1 -> z_signal -> 1d_cnn_decoder_v1 -> signal
+#   image  -> 2d_cnn_encoder_v1 -> z_image  -> 2d_cnn_decoder_v1 -> image
+#
+# The encoders and the decoders carry the names the solo models give them (`signal` and `image`),
+# with the registry names and the kwargs of signal_single_latent.yaml and image_single_latent.yaml,
+# because that is what lets `training.warm_start` copy a solo checkpoint into them: a module has
+# the same name, the same keys and the same shapes in both models. Keep the two files in step. If
+# you change a kwarg of a solo model, change it here too, or the warm start refuses the file (the
+# manifest of a solo checkpoint records a digest of each module's config).
+#
+# The two latent spaces have the same width, 16, which is the width of the solo models' one space
+# (`z_fused` there, renamed here). Each is fed by exactly one encoder through an identity edge, so
+# neither needs a fusion strategy, and each decoder reads one space, so none needs an assembler.
+# The regularizer is the solo one, declared with each space. The names of the spaces are the keys
+# of `training.beta_schedules`; this file declares no schedule, so stage 3 weights both spaces by
+# the constant `training.beta` and does not restart a warm-up (use `training: several_latents`).
+# Validated against global_vae.config.model.ModelConfig (see src/global_vae/config/model.py).
+name: global_vae_signal_image_pair
+latent_mode: several
+
+encoders:
+  signal:
+    name: 1d_cnn_encoder_v1
+    kwargs:
+      hidden_channels: [8, 16, 32, 64, 128]
+      kernel_sizes: 5
+      # latent_dim is intentionally omitted: each encoder takes the `dim` of the space it feeds.
+  image:
+    name: 2d_cnn_encoder_v1
+    kwargs:
+      hidden_channels: [16, 32, 64]
+
+decoders:
+  signal:
+    name: 1d_cnn_decoder_v1
+    kwargs:
+      # output_length must match configs/data/signal_image.yaml's sequence_length.signal: five
+      # hidden_channels entries take the default 8 seed to 256.
+      output_length: 256
+      hidden_channels: [128, 64, 32, 16, 8]
+      upsample_modes: conv_transpose
+  image:
+    name: 2d_cnn_decoder_v1
+    kwargs:
+      # output_shape must match the images your own loader_factory yields (height, width): three
+      # hidden_channels entries take the default 8 x 8 seed to 64 x 64.
+      output_shape: [64, 64]
+      hidden_channels: [64, 32, 16]
+      upsample_modes: conv_transpose
+
+latent:
+  spaces:
+    z_signal:
+      dim: 16
+      fed_by: [signal] # exactly one encoder: no fusion needed
+      regularizer:
+        strategy: kl_standard_normal
+    z_image:
+      dim: 16
+      fed_by: [image] # exactly one encoder: no fusion needed
+      regularizer:
+        strategy: kl_standard_normal
+  decoders_consume:
+    signal:
+      spaces: [z_signal] # one space: no assembler needed
+    image:
+      spaces: [z_image]

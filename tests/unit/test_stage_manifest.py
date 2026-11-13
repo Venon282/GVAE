@@ -37,6 +37,7 @@ class TestStageManifest:
         assert manifest.modalities == ()
         assert manifest.latent_spaces == {}
         assert manifest.config_digest is None
+        assert manifest.module_digests == {}
 
     def test_to_dict_is_made_of_plain_values(self) -> None:
         manifest = StageManifest(
@@ -44,6 +45,7 @@ class TestStageManifest:
             modalities=("signal",),
             latent_spaces={"z_fused": 16},
             config_digest="ab" * 32,
+            module_digests={"encoders.signal": "cd" * 32},
         )
         data = manifest.toDict()
         assert data == {
@@ -51,14 +53,37 @@ class TestStageManifest:
             "modalities": ["signal"],
             "latent_spaces": {"z_fused": 16},
             "config_digest": "ab" * 32,
+            "module_digests": {"encoders.signal": "cd" * 32},
         }
         assert isinstance(data["modalities"], list)
         assert json.loads(json.dumps(data)) == data
 
     def test_to_dict_does_not_share_the_manifest_dict(self) -> None:
-        manifest = StageManifest(latent_spaces={"z": 4})
+        manifest = StageManifest(latent_spaces={"z": 4}, module_digests={"encoders.a": "d"})
         manifest.toDict()["latent_spaces"]["z"] = 99
+        manifest.toDict()["module_digests"]["encoders.a"] = "other"
         assert manifest.latent_spaces == {"z": 4}
+        assert manifest.module_digests == {"encoders.a": "d"}
+
+    def test_the_round_trip_keeps_the_module_digests(self) -> None:
+        manifest = StageManifest(
+            "solo_signal",
+            ("signal",),
+            {"z_fused": 16},
+            "a" * 64,
+            {"encoders.signal": "b" * 64, "decoders.signal": "c" * 64},
+        )
+        assert StageManifest.fromDict(manifest.toDict()) == manifest
+        assert StageManifest.fromDict(json.loads(json.dumps(manifest.toDict()))) == manifest
+
+    def test_a_manifest_written_before_module_digests_existed_reads_with_none(self) -> None:
+        data = {
+            "stage": "solo_signal",
+            "modalities": ["signal"],
+            "latent_spaces": {"z_fused": 16},
+            "config_digest": "a" * 64,
+        }
+        assert StageManifest.fromDict(data).module_digests == {}
 
     def test_the_round_trip_gives_the_same_manifest(self) -> None:
         manifest = StageManifest(
@@ -99,6 +124,9 @@ class TestStageManifest:
             ({"latent_spaces": {"z": True}}, "latent_spaces"),
             ({"latent_spaces": {3: 4}}, "latent_spaces"),
             ({"config_digest": 12}, "config_digest"),
+            ({"module_digests": ["encoders.a"]}, "module_digests"),
+            ({"module_digests": {"encoders.a": 3}}, "module_digests"),
+            ({"module_digests": {3: "d"}}, "module_digests"),
         ],
     )
     def test_a_field_of_the_wrong_type_is_refused_and_named(

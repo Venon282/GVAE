@@ -39,7 +39,7 @@ have is usable from config like any other strategy.
 import inspect
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -48,6 +48,8 @@ import torch
 from omegaconf import MISSING, DictConfig, ListConfig, OmegaConf
 from torch.optim import Optimizer
 
+from global_vae.config.model_resolution import resolveModelConfig
+from global_vae.config.model_schema import ModelConfig
 from global_vae.losses.reconstruction import (
     DEFAULT_REDUCTION,
     AbstractReconstructionLoss,
@@ -64,8 +66,13 @@ from global_vae.training.beta_schedules.registry import getBetaScheduleClass
 from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.callbacks.registry import getCallbackClass
 from global_vae.training.loggers.registry import getLoggerClass
-from global_vae.training.stage_manifest import StageManifest, buildStageManifest
+from global_vae.training.stage_manifest import (
+    StageManifest,
+    buildStageManifest,
+    computeConfigDigest,
+)
 from global_vae.training.trainer import Trainer
+from global_vae.training.warm_start import WarmStartEntry, WarmStartReport, applyWarmStart
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +157,35 @@ class LoggerEntryConfig:
 
 
 @dataclass
+class WarmStartEntryConfig:
+    """One solo checkpoint whose modules the run starts from (roadmap P6-2, ADR 0052).
+
+    Attributes:
+        checkpoint: Path of the solo checkpoint (`best.pt` of a solo stage). Only its model
+            weights and its stage manifest are read, in the safe mode.
+        modules: What to copy out of it. A modality name (`signal`) stands for the encoder and the
+            decoder of that name (`encoders.signal` and `decoders.signal`); `encoders.signal` or
+            `decoders.signal` names one module. All the modules of one entry belong to one
+            modality, and each has the same name in the solo model and in this one.
+        latent_space: The latent space of this model that the solo latent space becomes
+            (`z_signal`). `None` (default) takes the one space the copied encoder feeds.
+        check_manifest: `True` (default) requires the checkpoint's stage manifest and refuses a
+            file that is not the solo model of that modality, with a latent space of the same
+            width and the same module config. `False` leaves the shape checks and the collapse
+            guard only, for a file written before the manifest existed.
+        min_active_units: The fewest active latent units the copied encoder may show over a
+            sample of the training data. `1` (default) refuses a collapsed solo model, `0`
+            switches the guard off.
+    """
+
+    checkpoint: str = MISSING
+    modules: list[str] = field(default_factory=list)
+    latent_space: str | None = None
+    check_manifest: bool = True
+    min_active_units: int = 1
+
+
+@dataclass
 class TrainingConfig:
     """Top-level training configuration, matching `Trainer`'s constructor almost field-for-field.
 
@@ -223,10 +259,21 @@ class TrainingConfig:
         stage: A free label for the stage of a staged recipe this run is (`solo_signal`,
             `pair`, ...), or `None` (default) for a run that records none (roadmap P6-1, ADR
             0051). When it is set, `buildTrainerFromConfig` builds a stage manifest (the label,
-            the model's input modalities, the width of each latent space and a digest of the
-            model config) and every checkpoint the run writes carries it, whichever callback or
+            the model's input modalities, the width of each latent space, a digest of the
+            model config and a digest of each encoder and decoder config, which a warm start
+            checks) and every checkpoint the run writes carries it, whichever callback or
             call writes it. When it is `None` no manifest is built and the checkpoints are what
             they were before the field existed. The framework never interprets the label.
+        warm_start: Solo checkpoints to build this run's model from, a list of
+            `WarmStartEntryConfig` (`checkpoint`, `modules`, `latent_space`, `check_manifest`,
+            `min_active_units`; roadmap P6-2, ADR 0052). Empty (default): nothing is read and
+            the model starts from its initial weights, as before. Each entry copies the encoder
+            and the decoder of one modality from a solo checkpoint into this model, after
+            checking its stage manifest (modality, latent width, module config), the keys and
+            the shapes, and that the solo encoder has not collapsed. Only the weights are
+            copied: this run has its own optimizer, its own seed and a step counter at 0.
+            Applied by `applyWarmStartFromConfig` (`scripts/train.py` calls it), and not when
+            `resume_from` is set.
         loggers: Experiment loggers to attach (spec §10 "Experiment
             tracking"). Empty (default) means no logger; several may
             be listed at once (`docs/adr/0008-experiment-loggers.md`).
@@ -303,6 +350,7 @@ class TrainingConfig:
     compile_kwargs: dict[str, Any] = field(default_factory=dict)
     resume_from: str | None = None
     stage: str | None = None
+    warm_start: list[WarmStartEntryConfig] = field(default_factory=list)
 
 
 def listSupportedOptimizerNames() -> list[str]:
@@ -798,6 +846,40 @@ def buildCallbacksFromConfig(
     return callbacks
 
 
+def computeModuleDigests(model_config: ModelConfig) -> dict[str, str]:
+    """Fingerprint the resolved config of every encoder and decoder of a model config.
+
+    The digest of a module is `computeConfigDigest` of `{"name": registry name, "kwargs": kwargs}`
+    **after resolution** (`resolveModelConfig`), so the `latent_dim` that the model builder fills
+    in is part of it. The same encoder written in a solo model file and in a pair model file, with
+    the same kwargs and a latent space of the same width, gets the same digest, which is what the
+    warm start compares (roadmap P6-2, ADR 0052). The two files that write it differently (another
+    kwargs layout, a width spelled out in one) get two digests: it errs on the side of refusing.
+
+    Args:
+        model_config: The `ModelConfig` of a model.
+
+    Returns:
+        Module path (`"encoders.signal"`, `"decoders.signal"`, the keys of the model's state dict
+        without the parameter name) to the 64-character digest, encoders first.
+
+    Raises:
+        ValueError: If `resolveModelConfig` rejects the config.
+        KeyError: If a name of the config is not registered.
+        TypeError: If a module's kwargs hold a value `computeConfigDigest` refuses.
+    """
+    resolved = resolveModelConfig(model_config)
+    digests: dict[str, str] = {}
+    for kind, names, kwargs in (
+        ("encoders", resolved.encoder_configs, resolved.encoder_kwargs),
+        ("decoders", resolved.decoder_configs, resolved.decoder_kwargs),
+    ):
+        for instance, registry_name in names.items():
+            payload = {"name": registry_name, "kwargs": _toPlain(kwargs.get(instance, {}))}
+            digests[f"{kind}.{instance}"] = computeConfigDigest(payload)
+    return digests
+
+
 def buildStageManifestFromConfig(
     model: GlobalVae, config: TrainingConfig, model_config: Any = None
 ) -> StageManifest | None:
@@ -806,8 +888,10 @@ def buildStageManifestFromConfig(
     Args:
         model: The model the run trains.
         config: The training config; its `stage` is the switch.
-        model_config: The `ModelConfig` that built `model`, for the digest of the manifest.
-            `None` leaves the digest out.
+        model_config: The `ModelConfig` that built `model`, for the digest of the manifest and,
+            when it is a `ModelConfig`, the digest of each of its modules (`computeModuleDigests`,
+            roadmap P6-2). `None` leaves them out; so does a plain mapping, which cannot be
+            resolved into modules.
 
     Returns:
         `None` when `config.stage` is `None` (a run that records no stage), otherwise the
@@ -824,7 +908,96 @@ def buildStageManifestFromConfig(
             f"training.stage must be a non-empty string or null, got {config.stage!r}. "
             f"Leave it null for a run that records no stage."
         )
-    return buildStageManifest(model, stage=config.stage, model_config=model_config)
+    module_digests = (
+        computeModuleDigests(model_config) if isinstance(model_config, ModelConfig) else None
+    )
+    return buildStageManifest(
+        model, stage=config.stage, model_config=model_config, module_digests=module_digests
+    )
+
+
+def buildWarmStartEntries(config: TrainingConfig) -> list[WarmStartEntry]:
+    """Turn `config.warm_start` into the entries `applyWarmStart` takes.
+
+    Args:
+        config: The training config.
+
+    Returns:
+        One `WarmStartEntry` per element of `config.warm_start`, in order.
+
+    Raises:
+        ValueError: If an element is invalid (empty `checkpoint`, `modules` empty or holding an
+            empty name, a negative `min_active_units`, ...). The message starts with
+            `training.warm_start[i]`.
+    """
+    entries: list[WarmStartEntry] = []
+    for index, item in enumerate(config.warm_start):
+        try:
+            entries.append(
+                WarmStartEntry(
+                    checkpoint=item.checkpoint,
+                    modules=tuple(item.modules),
+                    latent_space=item.latent_space,
+                    check_manifest=item.check_manifest,
+                    min_active_units=item.min_active_units,
+                )
+            )
+        except ValueError as error:
+            raise ValueError(f"training.warm_start[{index}]: {error}") from error
+    return entries
+
+
+def applyWarmStartFromConfig(
+    model: GlobalVae,
+    config: TrainingConfig,
+    model_config: Any = None,
+    probe_dataloader: Iterable[Any] | None = None,
+) -> WarmStartReport:
+    """Build the model's starting weights from the solo checkpoints `config.warm_start` lists.
+
+    Does nothing when `config.warm_start` is empty (the default), and when `config.resume_from`
+    is set: a resumed run restores the weights of the run it continues, which already started
+    from the solo files, and those files need not exist any more (ADR 0052). Otherwise it
+    calls `applyWarmStart`, which copies the modules and refuses a wrong file, and logs one line
+    per entry. It reads the model weights and the stage manifest of each checkpoint, in the safe
+    mode, and nothing else: no optimizer state, no counter, no random-number state.
+
+    Args:
+        model: The model the run trains, built from `model_config`. Call this before
+            `buildTrainerFromConfig`, so that the optimizer is built over the model that
+            starts from these weights.
+        config: The training config.
+        model_config: The `ModelConfig` that built `model`, for the digest of each copied
+            module. Required when an entry checks its manifest (the default). `None` skips that
+            one check, with a warning, and keeps the key, shape and collapse checks.
+        probe_dataloader: The run's training loader, for the collapse guard. `None` runs no
+            guard, with a warning.
+
+    Returns:
+        The `WarmStartReport`; empty when nothing was applied.
+
+    Raises:
+        FileNotFoundError: If a checkpoint does not exist.
+        ValueError: If an entry is invalid or `applyWarmStart` refuses it; the message names
+            `training.warm_start[i]` and the file.
+    """
+    if not config.warm_start:
+        return WarmStartReport()
+    if config.resume_from is not None:
+        logger.info(
+            "training.warm_start is not applied: training.resume_from is set, and the checkpoint "
+            "it resumes holds the weights of this run."
+        )
+        return WarmStartReport()
+    entries = buildWarmStartEntries(config)
+    module_digests = (
+        computeModuleDigests(model_config)
+        if isinstance(model_config, ModelConfig) and any(entry.check_manifest for entry in entries)
+        else None
+    )
+    return applyWarmStart(
+        model, entries, module_digests=module_digests, probe_dataloader=probe_dataloader
+    )
 
 
 def buildTrainerFromConfig(

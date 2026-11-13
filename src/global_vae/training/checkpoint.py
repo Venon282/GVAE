@@ -40,10 +40,12 @@ without any training state at all:
   which have none, so their files are what they were.
 - `stage_manifest`: only present when the saving `Trainer` had one (`training.stage` is set,
   roadmap P6-1, ADR 0051). A dict of plain values saying which stage of a staged recipe the file
-  is: a free label, the modalities, the latent spaces with their widths, and a digest of the model
-  config (`training/stage_manifest.py`). `loadCheckpoint` returns them as optional fields of
+  is: a free label, the modalities, the latent spaces with their widths, a digest of the model
+  config and a digest of each encoder and decoder config (`module_digests`, roadmap P6-2, ADR
+  0052; `training/stage_manifest.py`). `loadCheckpoint` returns them as optional fields of
   `CheckpointMetadata`, which keep their "nothing recorded" defaults for a file with no manifest,
-  2.0.0 files included.
+  2.0.0 files included. `readCheckpointWeights` returns the weights and the manifest alone, for a
+  warm start.
 
 Every entry is made of tensors, numbers, strings, `None` and plain containers
 (`dict`, `list`, `tuple`), never of an object of this framework or of NumPy. That is what
@@ -124,6 +126,9 @@ class CheckpointMetadata:
             checkpoint saved without a manifest.
         config_digest: The digest of the model config the manifest records
             (`stage_manifest.computeConfigDigest`), or `None`.
+        module_digests: Module path to the digest of that module's resolved config, as the
+            manifest records it (roadmap P6-2, ADR 0052), `{}` for a checkpoint saved without a
+            manifest or by a run that recorded none.
     """
 
     global_step: int = 0
@@ -138,6 +143,7 @@ class CheckpointMetadata:
     modalities: list[str] = field(default_factory=list)
     latent_spaces: dict[str, int] = field(default_factory=dict)
     config_digest: str | None = None
+    module_digests: dict[str, str] = field(default_factory=dict)
 
 
 def _captureRngState() -> dict[str, Any]:
@@ -417,6 +423,101 @@ def _readStageManifest(saved: Any, path: Path) -> StageManifest:
         raise ValueError(f"Checkpoint '{path}' has a malformed stage_manifest: {error}") from error
 
 
+def _readCheckpointFile(
+    path: Path, map_location: str | torch.device | None, weights_only: bool
+) -> Any:
+    """Open a checkpoint file, with the errors `loadCheckpoint` and `readCheckpointWeights` share.
+
+    Args:
+        path: The checkpoint file.
+        map_location: Forwarded to `torch.load`.
+        weights_only: Forwarded to `torch.load`.
+
+    Returns:
+        What `torch.load` returns: the saved dict.
+
+    Raises:
+        FileNotFoundError: If `path` does not exist.
+        pickle.UnpicklingError: If `weights_only` is `True` and the file holds something the
+            restricted unpickler refuses. The message names the two usual causes and the
+            `upgradeCheckpoint` and `weights_only=False` remedies for a trusted file.
+    """
+    if not path.exists():
+        raise FileNotFoundError(f"No checkpoint found at '{path}'.")
+    try:
+        return torch.load(path, map_location=map_location, weights_only=weights_only)
+    except pickle.UnpicklingError as error:
+        if not weights_only:
+            raise
+        raise pickle.UnpicklingError(
+            f"Checkpoint '{path}' could not be read with the restricted unpickler "
+            f"(weights_only=True). Either it was saved by an earlier version of this framework "
+            f"(its RNG state holds a NumPy array), or its `config` snapshot is not made of plain "
+            f"values (dict, list, tuple, str, number, None). If you trust the file, rewrite it "
+            f"once with `upgradeCheckpoint` (global_vae.training.checkpoint), or read it as it "
+            f"is with weights_only=False (--trust-checkpoint for scripts/evaluate.py and "
+            f"scripts/visualize_latent.py). Original error: {error}"
+        ) from error
+
+
+@dataclass
+class CheckpointWeights:
+    """The model weights of a checkpoint and its stage manifest, read without a model.
+
+    Attributes:
+        state_dict: The checkpoint's `model_state_dict`: parameter and buffer name to tensor.
+        manifest: The stage manifest the file carries (roadmap P6-1, ADR 0051), or `None` when it
+            has none (a 2.0.0 file, or a run that set no `training.stage`).
+        global_vae_version: The framework version that wrote the file, or `None`.
+    """
+
+    state_dict: dict[str, torch.Tensor]
+    manifest: StageManifest | None = None
+    global_vae_version: str | None = None
+
+
+def readCheckpointWeights(
+    path: str | Path, map_location: str | torch.device = "cpu"
+) -> CheckpointWeights:
+    """Read the model weights and the stage manifest of a checkpoint, and nothing else.
+
+    This is what a warm start needs (roadmap P6-2, ADR 0052): the tensors of a model that is
+    not the one that will receive them, and the record of what they are. The optimizer state,
+    the step and epoch counters, the history, the random-number state, the callbacks' state and
+    the `config` are not returned and not used. The file is read in the safe mode
+    (`weights_only=True`, ADR 0034), with no option to read it otherwise.
+
+    Args:
+        path: The checkpoint file.
+        map_location: Where the tensors are loaded. Defaults to `"cpu"`.
+
+    Returns:
+        A `CheckpointWeights`.
+
+    Raises:
+        FileNotFoundError: If `path` does not exist.
+        pickle.UnpicklingError: If the safe mode refuses the file. The message names the usual
+            causes and `upgradeCheckpoint` as the remedy for a trusted file.
+        ValueError: If the file holds no `model_state_dict`, or its `stage_manifest` is
+            malformed (the message names the file).
+    """
+    resolved_path = Path(path)
+    checkpoint = _readCheckpointFile(resolved_path, map_location, weights_only=True)
+    if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
+        raise ValueError(
+            f"Checkpoint '{resolved_path}' holds no model_state_dict, so there are no weights to "
+            f"read. Is it a file written by saveCheckpoint?"
+        )
+    saved_manifest = checkpoint.get("stage_manifest")
+    return CheckpointWeights(
+        state_dict=checkpoint["model_state_dict"],
+        manifest=None
+        if saved_manifest is None
+        else _readStageManifest(saved_manifest, resolved_path),
+        global_vae_version=checkpoint.get("global_vae_version"),
+    )
+
+
 def loadCheckpoint(
     path: str | Path,
     model: nn.Module,
@@ -490,23 +591,7 @@ def loadCheckpoint(
             `stage_manifest` is malformed (the message names the file).
     """
     resolved_path = Path(path)
-    if not resolved_path.exists():
-        raise FileNotFoundError(f"No checkpoint found at '{resolved_path}'.")
-
-    try:
-        checkpoint = torch.load(resolved_path, map_location=map_location, weights_only=weights_only)
-    except pickle.UnpicklingError as error:
-        if not weights_only:
-            raise
-        raise pickle.UnpicklingError(
-            f"Checkpoint '{resolved_path}' could not be read with the restricted unpickler "
-            f"(weights_only=True). Either it was saved by an earlier version of this framework "
-            f"(its RNG state holds a NumPy array), or its `config` snapshot is not made of plain "
-            f"values (dict, list, tuple, str, number, None). If you trust the file, rewrite it "
-            f"once with `upgradeCheckpoint` (global_vae.training.checkpoint), or read it as it "
-            f"is with weights_only=False (--trust-checkpoint for scripts/evaluate.py and "
-            f"scripts/visualize_latent.py). Original error: {error}"
-        ) from error
+    checkpoint = _readCheckpointFile(resolved_path, map_location, weights_only)
 
     model.load_state_dict(checkpoint["model_state_dict"], strict=strict)
 
@@ -565,4 +650,5 @@ def loadCheckpoint(
         modalities=list(manifest.modalities),
         latent_spaces=dict(manifest.latent_spaces),
         config_digest=manifest.config_digest,
+        module_digests=dict(manifest.module_digests),
     )

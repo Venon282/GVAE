@@ -535,7 +535,7 @@ test of the three stages together, are P6-7.
 
 ### P6-2. Warm start: build the pair model from two solo checkpoints (M)
 
-**status**: todo
+**status**: done
 **Why.** Stage 3 starts where stages 1 and 2 ended. In PairVAE the pair phase builds on the
 solo-trained VAEs.
 **Do (ADR first).**
@@ -558,6 +558,12 @@ solo-trained VAEs.
 reconstruction of each modality from its own input equals the solo model's bit for bit. A wrong
 shape, a wrong modality or a collapsed solo checkpoint (no active latent unit) is refused with a
 clear message.
+**Delivered.** ADR 0052; `configs/model/signal_image_pair.yaml`; `training.warm_start`;
+`training/warm_start.py`; `readCheckpointWeights`; `module_digests` in the stage manifest;
+`scripts/train.py` applies the entries and a resumed run skips them.
+`tests/integration/test_warm_start.py` pins the bit-for-bit reconstruction and each refusal, and
+`tests/integration/test_warm_start_script.py` runs the three stages through the script. The pair loss
+terms and the `pair_align` experiment are P6-3 to P6-7.
 **Depends on.** P6-1.
 
 ### P6-3. Latent distance registry (M, needs D-13)

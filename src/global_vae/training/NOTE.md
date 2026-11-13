@@ -29,8 +29,16 @@ checkpoint of a staged recipe says about itself: a free `stage` label, the modal
 with their widths and `computeConfigDigest` of the model config, as plain values. It is opt-in (`training.stage`, `null` by
 default): `buildTrainerFromConfig` builds it, the `Trainer` holds it (`Trainer.stage_manifest`) and `Trainer.saveCheckpoint`
 writes it under the key `stage_manifest`, so the checkpoint callbacks write it without a change. `loadCheckpoint` returns it
-in four optional fields of `CheckpointMetadata`, which keep their defaults for a file with no manifest. Checking a manifest
-against a model is the warm start of P6-2, not built.
+in five optional fields of `CheckpointMetadata`, which keep their defaults for a file with no manifest. The manifest also
+carries `module_digests`, one fingerprint per encoder and decoder config.
+
+The warm start (roadmap P6-2, `docs/adr/0052-warm-start-from-solo-checkpoints.md`, `warm_start.py`) builds a pair model from
+solo checkpoints: `applyWarmStart` copies the encoder and the decoder of each modality after checking the manifest (solo
+model, modality, latent width, `module_digests`), the keys and the shapes, and, by probing the loaded encoder on the
+training data, that it has not collapsed; a failure leaves the model as it was. It reads only the weights
+(`readCheckpointWeights`, safe mode) and none of the optimizer, counter or random-number state. The field
+`training.warm_start` and `applyWarmStartFromConfig` are in `config/training.py` (training must not import config); the
+mechanism knows nothing of Hydra.
 
 `beta_schedules/` predates `trainer.py` and does not depend on it: see
 `beta_schedules/base.py`, `beta_schedule_resolution.py`, and

@@ -39,6 +39,12 @@ class StageManifest:
             model.
         config_digest: `computeConfigDigest` of the model config that built the model, or `None`
             when the manifest was built without one.
+        module_digests: Module path (`"encoders.signal"`, `"decoders.signal"`) to the digest of
+            that module's resolved config (registry name and kwargs, `latent_dim` filled in), `{}`
+            when the manifest was built without them (roadmap P6-2, ADR 0052). A pair model's
+            config differs from a solo one by construction, so its `config_digest` never equals
+            a solo's; the digest of one module does, when the two describe it the same way, and
+            it is what the warm start compares.
 
     Raises:
         ValueError: If `stage` is given and is not a non-empty string.
@@ -48,6 +54,7 @@ class StageManifest:
     modalities: tuple[str, ...] = ()
     latent_spaces: dict[str, int] = field(default_factory=dict)
     config_digest: str | None = None
+    module_digests: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Refuse a stage label that is empty or not a string."""
@@ -60,14 +67,16 @@ class StageManifest:
         """Return the manifest as a dict of plain values, the form stored in a checkpoint.
 
         Returns:
-            `{"stage", "modalities", "latent_spaces", "config_digest"}` with `modalities` as a
-            list, so that the dict is the same before and after a round trip through JSON.
+            `{"stage", "modalities", "latent_spaces", "config_digest", "module_digests"}` with
+            `modalities` as a list, so that the dict is the same before and after a round trip
+            through JSON.
         """
         return {
             "stage": self.stage,
             "modalities": list(self.modalities),
             "latent_spaces": dict(self.latent_spaces),
             "config_digest": self.config_digest,
+            "module_digests": dict(self.module_digests),
         }
 
     @classmethod
@@ -85,13 +94,15 @@ class StageManifest:
 
         Raises:
             ValueError: If a field it knows has the wrong type (`modalities` not a list of
-                strings, `latent_spaces` not a mapping from a string to an integer, `stage` or
+                strings, `latent_spaces` not a mapping from a string to an integer,
+                `module_digests` not a mapping from a string to a string, `stage` or
                 `config_digest` neither `None` nor a string).
         """
         stage = data.get("stage")
         config_digest = data.get("config_digest")
         modalities = data.get("modalities", ())
         latent_spaces = data.get("latent_spaces", {})
+        module_digests = data.get("module_digests", {})
         if config_digest is not None and not isinstance(config_digest, str):
             raise ValueError(
                 f"The manifest's config_digest must be a string or None, got {config_digest!r}."
@@ -110,11 +121,20 @@ class StageManifest:
                 f"The manifest's latent_spaces must map a name to an integer width, "
                 f"got {latent_spaces!r}."
             )
+        if not isinstance(module_digests, Mapping) or not all(
+            isinstance(path, str) and isinstance(digest, str)
+            for path, digest in module_digests.items()
+        ):
+            raise ValueError(
+                f"The manifest's module_digests must map a module path to a digest string, "
+                f"got {module_digests!r}."
+            )
         return cls(
             stage=stage,
             modalities=tuple(modalities),
             latent_spaces=dict(latent_spaces),
             config_digest=config_digest,
+            module_digests=dict(module_digests),
         )
 
 
@@ -154,7 +174,10 @@ def computeConfigDigest(config: Any) -> str:
 
 
 def buildStageManifest(
-    model: "GlobalVae", stage: str | None = None, model_config: Any = None
+    model: "GlobalVae",
+    stage: str | None = None,
+    model_config: Any = None,
+    module_digests: Mapping[str, str] | None = None,
 ) -> StageManifest:
     """Describe a built model as the manifest of one stage.
 
@@ -163,10 +186,14 @@ def buildStageManifest(
         stage: The free label of the stage, or `None`.
         model_config: The `ModelConfig` (or a mapping of plain values) that built `model`, for
             the digest. `None` (default) leaves `config_digest` at `None`.
+        module_digests: Module path to the digest of that module's resolved config, as
+            `global_vae.config.training.computeModuleDigests` builds it from a `ModelConfig`
+            (this module cannot, the config package depends on it). `None` (default) records
+            none (roadmap P6-2, ADR 0052).
 
     Returns:
         The manifest: the model's input modalities, the width of each of its latent spaces and,
-        when `model_config` is given, its digest.
+        when they are given, the digest of the model config and of each module.
 
     Raises:
         ValueError: If `stage` is given and is not a non-empty string.
@@ -177,4 +204,5 @@ def buildStageManifest(
         modalities=tuple(model.input_modalities),
         latent_spaces={name: space.dim for name, space in model.latent_spaces.items()},
         config_digest=None if model_config is None else computeConfigDigest(model_config),
+        module_digests={} if module_digests is None else dict(module_digests),
     )

@@ -29,7 +29,11 @@ import torch
 
 from global_vae.config.experiment import ExperimentConfig, loadExperimentConfig
 from global_vae.config.model import buildModelFromConfig
-from global_vae.config.training import buildTrainerFromConfig, resumeTrainerFromConfig
+from global_vae.config.training import (
+    buildTrainerFromConfig,
+    computeModuleDigests,
+    resumeTrainerFromConfig,
+)
 from global_vae.models.global_vae import GlobalVae
 from global_vae.training.checkpoint import CheckpointMetadata, loadCheckpoint, saveCheckpoint
 from global_vae.training.stage_manifest import (
@@ -412,6 +416,7 @@ class TestTheSoloRecipesRunThroughTheTrainScript:
             "modalities": [modality],
             "latent_spaces": {"z_fused": 16},
             "config_digest": computeConfigDigest(experiment.model),
+            "module_digests": computeModuleDigests(experiment.model),
         }
         metadata = loadCheckpoint(
             output / "checkpoints" / "best.pt", buildModelFromConfig(experiment.model)

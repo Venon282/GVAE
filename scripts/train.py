@@ -51,6 +51,14 @@ every checkpoint: the label, the modalities, the latent spaces with their widths
 the model config. It is how the stages of a staged recipe tell one another apart
 (`configs/experiment/pair_solo_signal.yaml`, `docs/how-to/train-in-stages.md`, ADR 0051).
 
+A run with `training.warm_start` set (a list of `{checkpoint, modules}` entries, empty by default)
+starts from the encoders and decoders of solo checkpoints: the pair stage of a staged recipe copies
+the modules of two solo models into one pair model, after checking each file against the stage
+manifest, the keys and the shapes, and that the solo encoder has not collapsed. Only the weights
+are used: the run keeps its own optimizer, seed and step counter. A resumed run
+(`training.resume_from`) does not apply it (`configs/model/signal_image_pair.yaml`,
+`docs/how-to/train-in-stages.md`, ADR 0052).
+
 A run stops before the model is built when `data.loader_facts` (the sample rate of an audio
 modality, the vocabulary size of a text modality, the categorical block sizes of a table)
 contradicts what the model declares; the message starts with the path of the field to change
@@ -67,7 +75,11 @@ from global_vae.config.data import buildDataloadersFromConfig
 from global_vae.config.data_contract import checkDataContract
 from global_vae.config.experiment import ExperimentConfig
 from global_vae.config.model import buildModelFromConfig
-from global_vae.config.training import buildTrainerFromConfig, resumeTrainerFromConfig
+from global_vae.config.training import (
+    applyWarmStartFromConfig,
+    buildTrainerFromConfig,
+    resumeTrainerFromConfig,
+)
 from global_vae.utils.seed import setGlobalSeed
 
 logger = logging.getLogger("global_vae.scripts.train")
@@ -106,6 +118,16 @@ def main(cfg: ExperimentConfig) -> None:
 
     model = buildModelFromConfig(resolved_config.model)
     dataloaders = buildDataloadersFromConfig(resolved_config.data)
+
+    # A run that lists `training.warm_start` starts from the modules of solo checkpoints (the pair
+    # stage of a staged recipe, ADR 0052). It is applied before the trainer is built, so that the
+    # optimizer is created over the weights the run starts from, and not when the run resumes.
+    applyWarmStartFromConfig(
+        model,
+        resolved_config.training,
+        model_config=resolved_config.model,
+        probe_dataloader=dataloaders.train,
+    )
     trainer = buildTrainerFromConfig(
         model,
         resolved_config.training,

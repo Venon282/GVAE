@@ -398,6 +398,12 @@ spaces with their widths and a digest of the model config) in every checkpoint, 
 `loadCheckpoint` returns in `CheckpointMetadata`. A file without one, 2.0.0 files included, loads
 as before. See [train in stages](train-in-stages.md#read-the-manifest).
 
+`training.warm_start` (empty by default) starts a run from the encoders and decoders of solo
+checkpoints, the pair stage of a staged recipe: each file is checked against its manifest, its keys
+and shapes and for a collapsed encoder before a weight is copied, and the optimizer, the seed and the
+step counter are not taken. See
+[train in stages](train-in-stages.md#start-the-pair-stage-from-the-two-solo-checkpoints).
+
 ## Choose the reconstruction reduction
 
 The reconstruction term is a per-element mean by default, while the KL is a sum over the latent

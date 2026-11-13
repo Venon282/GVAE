@@ -13,6 +13,7 @@ working file for each case below, and `buildModelFromConfig` turns any of them i
 | One latent space; every modality is encoded and decoded back to itself | `latent_mode: single`, `modalities`, `single_latent` | `signal_single_latent.yaml`, `default.yaml` |
 | One latent space; a decoder whose target is not an encoder input | `latent_mode: single`, `encoders`, `decoders`, `single_latent` | `signal_image_to_image.yaml` |
 | Several independent latent spaces | `latent_mode: several`, `latent` | `signal_image_independent_latents.yaml` |
+| One space per modality, each decoder reading its own (the pair model of a staged recipe) | `latent_mode: several`, `latent` | `signal_image_pair.yaml`, see [train in stages](train-in-stages.md) |
 | Shared plus private latent spaces (encoder fan-out) | `latent_mode: several`, `latent` with a `head` on some `fed_by` edges | `signal_image_shared_private.yaml` |
 | One encoder over several modalities, or one decoder reconstructing several | `encoders` or `decoders` naming a shared module, in either `latent_mode` | `signal_image_shared_transformer.yaml` |
 

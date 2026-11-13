@@ -40,5 +40,5 @@ class TestTheStatusOfTheItems:
 
     def test_the_items_delivered_so_far_are_marked_done(self) -> None:
         items = _items()
-        for item in ("P5-1", "P5-2", "P5-3", "P5-4", "P5-5", "P5-6", "P5-7", "P6-1"):
+        for item in ("P5-1", "P5-2", "P5-3", "P5-4", "P5-5", "P5-6", "P5-7", "P6-1", "P6-2"):
             assert "**status**: done" in items[item], item

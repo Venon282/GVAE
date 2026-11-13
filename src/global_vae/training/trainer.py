@@ -61,6 +61,7 @@ from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.checkpoint import loadCheckpoint as loadCheckpointFile
 from global_vae.training.checkpoint import saveCheckpoint as saveCheckpointFile
 from global_vae.training.learning_rate import isLearningRateKey, learningRateMetrics
+from global_vae.training.stage_manifest import StageManifest
 from global_vae.utils.autograd import backward
 
 logger = logging.getLogger(__name__)
@@ -246,6 +247,9 @@ class Trainer:
             modality), an empty `nn.ModuleDict` when every loss is a plain function. The
             trainer holds them, so a loss that owns parameters has them in the optimizer and in
             the checkpoint (`reconstruction_loss_state_dict`).
+        stage_manifest: The manifest of the stage this run is (roadmap P6-1, ADR 0051), or `None`
+            (default), the run of 2.0.0. `saveCheckpoint` writes it into every checkpoint, so the
+            files of the checkpoint callbacks carry it too.
     """
 
     def __init__(
@@ -269,6 +273,7 @@ class Trainer:
         compile_kwargs: dict[str, Any] | None = None,
         loss_terms: dict[str, AbstractLossTerm] | None = None,
         loss_term_weights: dict[str, float | AbstractBetaSchedule] | None = None,
+        stage_manifest: StageManifest | None = None,
     ) -> None:
         """Build a `Trainer` around an already-constructed `GlobalVae`.
 
@@ -381,6 +386,10 @@ class Trainer:
                 `AbstractBetaSchedule` resolved at the step (it takes the place of a number,
                 as a beta schedule takes the place of `beta`). A term with no entry has weight
                 `1.0`.
+            stage_manifest: The manifest of the stage this run is (`stage_manifest.py`,
+                `buildStageManifest` builds one from the model). Written into every checkpoint
+                `saveCheckpoint` makes, and so into those of the checkpoint callbacks. `None`
+                (default) writes none, and the file is what it was before the manifest existed.
 
         Raises:
             ValueError: If `modality_dropout_p` is not in `[0, 1]`, if
@@ -428,6 +437,7 @@ class Trainer:
             collectReconstructionLossModules(reconstruction_loss_fn)
         ).to(self.device)
         self.loss_term_weights = term_weights
+        self.stage_manifest = stage_manifest
         for term in terms.values():
             term.validateModel(self.model)
 
@@ -833,7 +843,8 @@ class Trainer:
 
         Thin wrapper around `training.checkpoint.saveCheckpoint`, using
         this instance's own model/optimizer/step/epoch/history; see
-        that function for the exact checkpoint contents.
+        that function for the exact checkpoint contents. The trainer's `stage_manifest`, when it
+        has one, is written too (ADR 0051).
 
         Args:
             path: Destination file path. Parent directories are
@@ -858,6 +869,7 @@ class Trainer:
             scaler_state_dict=self.scaler.state_dict() if self.scaler is not None else None,
             loss_terms=self.loss_terms,
             reconstruction_losses=self.reconstruction_losses,
+            stage_manifest=self.stage_manifest,
         )
 
     def loadCheckpoint(

@@ -51,6 +51,12 @@ compile_kwargs: {}
 # total of the run, so only the epochs after the checkpoint's are trained
 # (docs/adr/0032-resume-from-the-training-script.md).
 resume_from: null
+# A free label for the stage of a staged recipe this run is (`solo_signal`, `pair`, ...). When it is
+# set, every checkpoint the run writes carries a stage manifest: the label, the modalities, the
+# latent spaces with their widths and a digest of the model config, which the pair stage checks
+# before it loads a solo checkpoint. `null` records nothing and the checkpoints are what they
+# always were (docs/adr/0051-stage-manifest-and-solo-recipes.md, docs/how-to/train-in-stages.md).
+stage: null
 
 loggers:
   - name: csv

@@ -516,7 +516,7 @@ available but leave the default recipe, and the recipe says so.
 
 ### P6-1. Stage manifest and solo recipes (S)
 
-**status**: todo
+**status**: done
 **Why.** A solo stage is an ordinary run, so it needs no new training code. But nothing records
 which modality it covers, which latent space and width it has, or which config produced it, and a
 pair run that loads the wrong file would fail late or train on a mismatch.
@@ -528,6 +528,10 @@ pair run that loads the wrong file would fail late or train on a mismatch.
   `docs/how-to/train-in-stages.md` with the three-command recipe.
 **Done when.** A solo run writes the manifest, a 2.0.0 checkpoint still loads, and the recipe runs
 end to end on the synthetic pair (with P6-7).
+**Delivered.** ADR 0051; `training/stage_manifest.py`; `training.stage`; `pair_solo_signal` and
+`pair_solo_image`; `docs/how-to/train-in-stages.md`. `tests/integration/test_stage_manifest.py` runs the two
+solo stages through `scripts/train.py` on the synthetic pair. The third command of the recipe, and the
+test of the three stages together, are P6-7.
 
 ### P6-2. Warm start: build the pair model from two solo checkpoints (M)
 

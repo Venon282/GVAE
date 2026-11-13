@@ -36,6 +36,7 @@ nav:
       - Choose and configure a fusion strategy: how-to/choose-a-fusion-strategy.md
       - Configure encoders, decoders and latent spaces: how-to/configure-latent-spaces.md
       - Train a model (Hydra config): how-to/train.md
+      - Train in stages (solo VAEs, then a pair): how-to/train-in-stages.md
       - Train on a table (tabular modality): how-to/train-on-a-table.md
       - Train on audio (waveform modality): how-to/train-on-audio.md
       - Train on text (token modality): how-to/train-on-text.md

@@ -46,6 +46,11 @@ Where, in your own code (anywhere importable on `PYTHONPATH`):
 See `global_vae/config/data.py` for the exact `DataConfig`/`DataloaderBundle` contract,
 and `configs/experiment/signal_vae.yaml` for the full default config this script runs.
 
+A run with `training.stage` set (a free label, `null` by default) writes a stage manifest into
+every checkpoint: the label, the modalities, the latent spaces with their widths and a digest of
+the model config. It is how the stages of a staged recipe tell one another apart
+(`configs/experiment/pair_solo_signal.yaml`, `docs/how-to/train-in-stages.md`, ADR 0051).
+
 A run stops before the model is built when `data.loader_facts` (the sample rate of an audio
 modality, the vocabulary size of a text modality, the categorical block sizes of a table)
 contradicts what the model declares; the message starts with the path of the field to change
@@ -102,7 +107,10 @@ def main(cfg: ExperimentConfig) -> None:
     model = buildModelFromConfig(resolved_config.model)
     dataloaders = buildDataloadersFromConfig(resolved_config.data)
     trainer = buildTrainerFromConfig(
-        model, resolved_config.training, config_snapshot=OmegaConf.to_container(cfg)
+        model,
+        resolved_config.training,
+        config_snapshot=OmegaConf.to_container(cfg),
+        model_config=resolved_config.model,
     )
 
     # `training.num_epochs` is the total of the run: with `training.resume_from` only the

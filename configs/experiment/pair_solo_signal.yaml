@@ -1,0 +1,33 @@
+# @package _global_
+# Stage 1 of the staged pair recipe (roadmap P6-1, docs/how-to/train-in-stages.md): a solo VAE of
+# the signal, `signal -> z -> signal`, trained as an ordinary run. The model is the single-latent
+# signal model of signal_vae.yaml; what is new is `training.stage`, which makes every checkpoint
+# of the run carry a stage manifest (the label, the modalities, the latent space and its width, a
+# digest of the model config), so that the pair stage can check it loaded the file it meant to
+# (docs/adr/0051-stage-manifest-and-solo-recipes.md).
+#
+# It reads the data contract of the signal plus image pair (batches with `signal` and `image`), so
+# the same loader and the same data folder serve the three stages. The model uses the `signal` key
+# only and ignores `image`. For a real recipe, give this stage a loader that yields EVERY sample
+# that has a signal, paired or not: the solo stages are where the unpaired samples are used, and
+# the scarce pairs are kept for the pair stage. The shipped loader
+# (examples/04_paired_loader.py) yields the pairs only, which is enough to run the recipe.
+#
+# Run with (the repository root on PYTHONPATH so that `examples.04_paired_loader` imports):
+#   PYTHONPATH=. python scripts/train.py --config-name experiment/pair_solo_signal \
+#       data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
+#       data.train_path=/path/to/paired_dataset
+# The checkpoints are written to `outputs/pair_solo_signal/checkpoints/` (`best.pt` is the one the
+# pair stage should take).
+defaults:
+  - /model: signal_single_latent
+  - /data: signal_image
+  - /training: default
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/pair_solo_signal
+
+training:
+  stage: solo_signal

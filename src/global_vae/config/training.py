@@ -64,6 +64,7 @@ from global_vae.training.beta_schedules.registry import getBetaScheduleClass
 from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.callbacks.registry import getCallbackClass
 from global_vae.training.loggers.registry import getLoggerClass
+from global_vae.training.stage_manifest import StageManifest, buildStageManifest
 from global_vae.training.trainer import Trainer
 
 logger = logging.getLogger(__name__)
@@ -219,6 +220,13 @@ class TrainingConfig:
             more. (`Trainer.fit(num_epochs)` is unchanged: it trains that many more.) Loggers
             that accept `append` (`csv`) are opened in append mode, so the file of the first
             part of the run is kept.
+        stage: A free label for the stage of a staged recipe this run is (`solo_signal`,
+            `pair`, ...), or `None` (default) for a run that records none (roadmap P6-1, ADR
+            0051). When it is set, `buildTrainerFromConfig` builds a stage manifest (the label,
+            the model's input modalities, the width of each latent space and a digest of the
+            model config) and every checkpoint the run writes carries it, whichever callback or
+            call writes it. When it is `None` no manifest is built and the checkpoints are what
+            they were before the field existed. The framework never interprets the label.
         loggers: Experiment loggers to attach (spec §10 "Experiment
             tracking"). Empty (default) means no logger; several may
             be listed at once (`docs/adr/0008-experiment-loggers.md`).
@@ -294,6 +302,7 @@ class TrainingConfig:
     compile_model: bool = False
     compile_kwargs: dict[str, Any] = field(default_factory=dict)
     resume_from: str | None = None
+    stage: str | None = None
 
 
 def listSupportedOptimizerNames() -> list[str]:
@@ -789,8 +798,40 @@ def buildCallbacksFromConfig(
     return callbacks
 
 
+def buildStageManifestFromConfig(
+    model: GlobalVae, config: TrainingConfig, model_config: Any = None
+) -> StageManifest | None:
+    """Build the stage manifest of a run, or `None` when its config asks for none.
+
+    Args:
+        model: The model the run trains.
+        config: The training config; its `stage` is the switch.
+        model_config: The `ModelConfig` that built `model`, for the digest of the manifest.
+            `None` leaves the digest out.
+
+    Returns:
+        `None` when `config.stage` is `None` (a run that records no stage), otherwise the
+        manifest `buildStageManifest` builds.
+
+    Raises:
+        ValueError: If `config.stage` is set and is not a non-empty string. The message names
+            `training.stage`.
+    """
+    if config.stage is None:
+        return None
+    if not isinstance(config.stage, str) or not config.stage.strip():
+        raise ValueError(
+            f"training.stage must be a non-empty string or null, got {config.stage!r}. "
+            f"Leave it null for a run that records no stage."
+        )
+    return buildStageManifest(model, stage=config.stage, model_config=model_config)
+
+
 def buildTrainerFromConfig(
-    model: GlobalVae, config: TrainingConfig, config_snapshot: Any = None
+    model: GlobalVae,
+    config: TrainingConfig,
+    config_snapshot: Any = None,
+    model_config: Any = None,
 ) -> Trainer:
     """Build a real `Trainer` from a validated `TrainingConfig`.
 
@@ -801,6 +842,9 @@ def buildTrainerFromConfig(
             `global_vae.config.experiment.loadExperimentConfig`.
         config_snapshot: Forwarded to `buildCallbacksFromConfig` for
             checkpoint snapshotting.
+        model_config: The `ModelConfig` that built `model` (`ExperimentConfig.model`), used
+            only to put a digest of it in the stage manifest when `config.stage` is set
+            (roadmap P6-1, ADR 0051). `None` (default) leaves the digest out of the manifest.
 
     Returns:
         A `Trainer` instance wired with the resolved optimizer,
@@ -827,8 +871,10 @@ def buildTrainerFromConfig(
             default (`"mse"`, `1.0`, `"mean"`), a silent change of the
             objective (ADR 0029, ADR 0030, ADR 0045). Also if a
             `loss_terms` entry is invalid (see `buildLossTerms`) or a term's
-            `validateModel` refuses `model` (ADR 0047).
+            `validateModel` refuses `model` (ADR 0047), or if `config.stage` is set and is not
+            a non-empty string (ADR 0051).
     """
+    stage_manifest = buildStageManifestFromConfig(model, config, model_config)
     optimizer_cls = resolveOptimizerClass(config.optimizer.name)
     reconstruction_loss_fn = resolveReconstructionLoss(config.reconstruction_loss, model)
     reconstruction_weights = resolveReconstructionWeight(config.reconstruction_weight, model)
@@ -868,6 +914,7 @@ def buildTrainerFromConfig(
         compile_kwargs=dict(config.compile_kwargs),
         loss_terms=loss_terms,
         loss_term_weights=loss_term_weights,
+        stage_manifest=stage_manifest,
     )
 
 

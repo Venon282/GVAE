@@ -103,6 +103,16 @@ with the order of the points forgotten, a row of `NaN` in the target is a point 
 have different numbers of points: the `data.sequence_length.point_cloud` of the data file and the `num_points` of the decoder
 need not be equal (`docs/how-to/train-on-point-clouds.md`).
 
+`pair_solo_signal.yaml` and `pair_solo_image.yaml` (roadmap P6-1, ADR 0051) are the two solo stages of the staged pair
+recipe (`docs/how-to/train-in-stages.md`): ordinary single-modality runs, composing `configs/model/signal_single_latent.yaml`
+or `image_single_latent.yaml` with the data contract of the signal plus image pair (`configs/data/signal_image.yaml`, so
+one loader serves every stage; each model reads its own batch key and ignores the other) and
+`configs/training/default.yaml`. What they add is `training.stage` (`solo_signal`, `solo_image`), which makes every checkpoint
+carry a stage manifest: the label, the modalities, the latent space with its width and a digest of the model config. The image
+one sets the loss scale of `image_vae.yaml` (`sum`, weight 0.5). They train through `scripts/train.py`
+(`tests/integration/test_stage_manifest.py`). The third stage (`pair_align`, the warm start and the pair loss terms) is P6-2
+to P6-7.
+
 # Still open
 
 The paired data itself: `configs/data/signal_image.yaml` only states the contract (a

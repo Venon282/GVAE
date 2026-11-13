@@ -24,6 +24,14 @@ for every modality): a loss that owns a parameter has it in the optimizer, clipp
 `reconstruction_loss_state_dict` and restored on resume. A loss with no parameter, and a plain function such as
 `torch.nn.functional.mse_loss`, adds nothing and writes no key.
 
+The stage manifest (roadmap P6-1, `docs/adr/0051-stage-manifest-and-solo-recipes.md`, `stage_manifest.py`) is what a
+checkpoint of a staged recipe says about itself: a free `stage` label, the modalities the encoders ingest, the latent spaces
+with their widths and `computeConfigDigest` of the model config, as plain values. It is opt-in (`training.stage`, `null` by
+default): `buildTrainerFromConfig` builds it, the `Trainer` holds it (`Trainer.stage_manifest`) and `Trainer.saveCheckpoint`
+writes it under the key `stage_manifest`, so the checkpoint callbacks write it without a change. `loadCheckpoint` returns it
+in four optional fields of `CheckpointMetadata`, which keep their defaults for a file with no manifest. Checking a manifest
+against a model is the warm start of P6-2, not built.
+
 `beta_schedules/` predates `trainer.py` and does not depend on it: see
 `beta_schedules/base.py`, `beta_schedule_resolution.py`, and
 `docs/adr/0004-pluggable-beta-schedules.md`. `Trainer` calls

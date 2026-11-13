@@ -38,6 +38,12 @@ without any training state at all:
 - `reconstruction_loss_state_dict`: the same for the reconstruction losses that are modules with
   state (a learned noise scale, say, roadmap P5-3, ADR 0048). Absent for the four classic losses,
   which have none, so their files are what they were.
+- `stage_manifest`: only present when the saving `Trainer` had one (`training.stage` is set,
+  roadmap P6-1, ADR 0051). A dict of plain values saying which stage of a staged recipe the file
+  is: a free label, the modalities, the latent spaces with their widths, and a digest of the model
+  config (`training/stage_manifest.py`). `loadCheckpoint` returns them as optional fields of
+  `CheckpointMetadata`, which keep their "nothing recorded" defaults for a file with no manifest,
+  2.0.0 files included.
 
 Every entry is made of tensors, numbers, strings, `None` and plain containers
 (`dict`, `list`, `tuple`), never of an object of this framework or of NumPy. That is what
@@ -76,6 +82,7 @@ from torch import nn
 from torch.optim import Optimizer
 
 import global_vae
+from global_vae.training.stage_manifest import StageManifest
 
 try:
     import numpy as np
@@ -109,6 +116,14 @@ class CheckpointMetadata:
             for a checkpoint saved without any, or before this field existed.
         scaler_state_dict: The gradient scaler's state when the saving `Trainer` used
             `fp16` mixed precision, otherwise `None`.
+        stage: The free stage label of the manifest (`training.stage`, roadmap P6-1, ADR 0051),
+            or `None` for a checkpoint saved without a manifest or without a label.
+        modalities: The modalities the manifest records (the batch keys the model's encoders
+            ingest), `[]` for a checkpoint saved without a manifest, 2.0.0 files included.
+        latent_spaces: Latent space name to its width, as the manifest records them, `{}` for a
+            checkpoint saved without a manifest.
+        config_digest: The digest of the model config the manifest records
+            (`stage_manifest.computeConfigDigest`), or `None`.
     """
 
     global_step: int = 0
@@ -119,6 +134,10 @@ class CheckpointMetadata:
     rng_state_restored: bool = False
     callbacks_state: list[dict[str, Any]] = field(default_factory=list)
     scaler_state_dict: dict[str, Any] | None = None
+    stage: str | None = None
+    modalities: list[str] = field(default_factory=list)
+    latent_spaces: dict[str, int] = field(default_factory=dict)
+    config_digest: str | None = None
 
 
 def _captureRngState() -> dict[str, Any]:
@@ -191,6 +210,7 @@ def saveCheckpoint(
     scaler_state_dict: dict[str, Any] | None = None,
     loss_terms: nn.Module | None = None,
     reconstruction_losses: nn.Module | None = None,
+    stage_manifest: StageManifest | None = None,
 ) -> None:
     """Save model (+ optionally optimizer, step/epoch/history, config) to `path`.
 
@@ -231,6 +251,10 @@ def saveCheckpoint(
         reconstruction_losses: The module holding the reconstruction losses of the saving
             `Trainer` (`Trainer.reconstruction_losses`, ADR 0048). Its `state_dict()` is saved
             under `reconstruction_loss_state_dict`, and omitted from the file when it is empty.
+        stage_manifest: The manifest of the stage this file belongs to (`Trainer.stage_manifest`,
+            roadmap P6-1, ADR 0051). Stored as a dict of plain values under `stage_manifest`, so
+            the file stays readable in the safe mode, and omitted from the file when `None`
+            (default), so the file of a run that records no stage is what it was.
     """
     checkpoint: dict[str, Any] = {
         "global_vae_version": global_vae.__version__,
@@ -254,6 +278,8 @@ def saveCheckpoint(
         losses_state = reconstruction_losses.state_dict()
         if losses_state:
             checkpoint["reconstruction_loss_state_dict"] = losses_state
+    if stage_manifest is not None:
+        checkpoint["stage_manifest"] = stage_manifest.toDict()
     if include_rng_state:
         checkpoint["rng_state"] = _captureRngState()
 
@@ -369,6 +395,28 @@ def _restoreLossState(
     )
 
 
+def _readStageManifest(saved: Any, path: Path) -> StageManifest:
+    """Read the `stage_manifest` block of a checkpoint, or the empty manifest when it has none.
+
+    Args:
+        saved: `checkpoint.get("stage_manifest")`: the dict `saveCheckpoint` wrote, or `None`
+            for a file saved without a manifest (2.0.0 files included).
+        path: The checkpoint file, named in the error.
+
+    Returns:
+        The manifest, with its defaults ("nothing recorded") when `saved` is `None`.
+
+    Raises:
+        ValueError: If the block is not a mapping of the shape `StageManifest.toDict` writes.
+    """
+    if saved is None:
+        return StageManifest()
+    try:
+        return StageManifest.fromDict(saved)
+    except (ValueError, AttributeError) as error:
+        raise ValueError(f"Checkpoint '{path}' has a malformed stage_manifest: {error}") from error
+
+
 def loadCheckpoint(
     path: str | Path,
     model: nn.Module,
@@ -426,7 +474,9 @@ def loadCheckpoint(
 
     Returns:
         `CheckpointMetadata` holding everything besides the tensors
-        that were just loaded in place.
+        that were just loaded in place. Its `stage`, `modalities`, `latent_spaces` and
+        `config_digest` are those of the file's `stage_manifest` (roadmap P6-1, ADR 0051), and
+        keep their "nothing recorded" defaults when the file has none.
 
     Raises:
         FileNotFoundError: If `path` does not exist.
@@ -436,7 +486,8 @@ def loadCheckpoint(
             file.
         ValueError: If `optimizer` is given but the checkpoint has no
             `optimizer_state_dict` (it was saved without one), or if the loss terms and the
-            checkpoint disagree as described for `loss_terms`.
+            checkpoint disagree as described for `loss_terms`, or if the file's
+            `stage_manifest` is malformed (the message names the file).
     """
     resolved_path = Path(path)
     if not resolved_path.exists():
@@ -488,6 +539,8 @@ def loadCheckpoint(
             )
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
+    manifest = _readStageManifest(checkpoint.get("stage_manifest"), resolved_path)
+
     rng_state_restored = False
     if restore_rng_state and "rng_state" in checkpoint:
         _restoreRngState(checkpoint["rng_state"])
@@ -508,4 +561,8 @@ def loadCheckpoint(
         rng_state_restored=rng_state_restored,
         callbacks_state=checkpoint.get("callbacks_state", []),
         scaler_state_dict=checkpoint.get("scaler_state_dict"),
+        stage=manifest.stage,
+        modalities=list(manifest.modalities),
+        latent_spaces=dict(manifest.latent_spaces),
+        config_digest=manifest.config_digest,
     )

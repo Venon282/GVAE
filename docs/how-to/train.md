@@ -64,12 +64,17 @@ training setup. All of them read your data through a `loader_factory`.
 | `signal_image_shared_private` | A shared plus private latent spaces | `signal`, `image` | `mse`, mean |
 | `signal_image_transformer_vae` | Both, fused by `cross_attention` | `signal`, `image` | `mse`, sum, weight 0.5 |
 | `signal_image_shared_transformer_vae` | Both, through one shared transformer, no fusion | `signal`, `image` | `mse`, sum, weight 0.5 |
+| `pair_solo_signal` | Stage 1 of the staged pair recipe: a solo signal VAE that records a stage manifest | `signal` (reads `signal_image`'s batches) | `mse`, mean |
+| `pair_solo_image` | Stage 2: a solo image VAE that records a stage manifest | `image` (reads `signal_image`'s batches) | `mse`, sum, weight 0.5 |
 
 - The `sum` reduction with weight 0.5 is there because the default `mean` collapsed an image model on
   synthetic data. See [choose beta](choose-beta.md#choose-a-reduction).
 - The four transformer experiments are described in ADR 0037. How the models are written is in
   [configure encoders, decoders and latent spaces](configure-latent-spaces.md).
 - The paired loader below serves the signal and image experiments.
+- `pair_solo_signal` and `pair_solo_image` are the solo stages of a staged recipe ([train in
+  stages](train-in-stages.md), ADR 0051): ordinary single-modality runs that also set `training.stage`,
+  so that their checkpoints say which modality, latent space and model config they belong to.
 
 ### The other modalities
 
@@ -387,6 +392,11 @@ loadCheckpoint("runs/old/best.pt", model=model, weights_only=False)  # or read i
 `scripts/evaluate.py` and `scripts/visualize_latent.py` take `--trust-checkpoint` for the last one.
 A `config` passed to `saveCheckpoint` should be plain data (a dict of numbers, strings and lists);
 a dataclass instance is stored as a dict.
+
+A run with `training.stage` set also writes a `stage_manifest` (the label, the modalities, the latent
+spaces with their widths and a digest of the model config) in every checkpoint, which
+`loadCheckpoint` returns in `CheckpointMetadata`. A file without one, 2.0.0 files included, loads
+as before. See [train in stages](train-in-stages.md#read-the-manifest).
 
 ## Choose the reconstruction reduction
 

@@ -7,7 +7,9 @@ each. `TestEveryRow` is the one parametrized test over it: for every row, and fo
 assembler on an `LN` row, it checks the reconstruction shapes, the shapes of every latent space, a
 finite loss, a finite gradient on every parameter, and that a few optimizer steps lower the loss.
 `test_the_eight_rows_are_all_in_the_matrix` fails when a row, or an assembler of an `LN` row, is
-dropped. The per-stage classes below keep what is specific to a topology.
+dropped. The per-stage classes below keep what is specific to a topology. A fourth stage, delivered
+by P6-7, adds the pair model of the staged recipe as one more variant of `EN-LN-DN`
+(`EN-LN-DN+pair`, below).
 
 Stage 1, delivered by P0-4(d), covers the four `EN-*` rows, with the real modules of the two
 modalities the framework ships (`1d_cnn_*` for a signal, `2d_cnn_*` for an image) instead of the
@@ -79,6 +81,7 @@ import global_vae.decoders  # noqa: F401  (registers the built-in decoders)
 import global_vae.encoders  # noqa: F401  (registers the built-in encoders)
 import global_vae.fusion  # noqa: F401  (registers the built-in fusion strategies)
 from global_vae.assemblers.registry import listRegisteredAssemblers
+from global_vae.config.experiment import loadExperimentConfig
 from global_vae.config.model import (
     DecoderConfig,
     DecoderConsumptionConfig,
@@ -378,7 +381,7 @@ def run(row_code: str, assembler: str | None) -> _Run:
         The model, batch, outputs and recorded assembler calls.
     """
     torch.manual_seed(0)
-    row = {**_ROWS, **_STAGE_2_ROWS}[row_code]
+    row = {**_ROWS, **_STAGE_2_ROWS, **_PAIR_ROWS}[row_code]
     model = row.build(assembler)
 
     batch = {
@@ -938,6 +941,96 @@ class TestStage3Rows:
 
 
 # ----------------------------------------------------------------------------------------------
+# Stage 4: the pair model of the staged recipe, a variant of `EN-LN-DN` (roadmap P6-7, ADR 0057).
+# ----------------------------------------------------------------------------------------------
+
+PAIR = "+pair"
+PAIR_LATENTS = ("z_signal", "z_image")
+
+
+def _buildEnLnDnPair(assembler: str | None) -> GlobalVae:
+    """`EN-LN-DN+pair`: the model of `configs/model/signal_image_pair.yaml`, at the matrix's sizes.
+
+    Two encoders, each into a latent space of its own through an identity edge, and a decoder per
+    modality that reads its own space only, so it has no assembler and no fusion exists. The model
+    is the one `experiment/pair_align` trains, composed from its file; only the sizes of the data
+    and of the networks are cut down (a signal of 32 points, a 32 x 32 image, two small layers), so
+    that the topology under test is the file's and the test stays as quick as the other rows.
+    """
+    assert assembler is None
+    config = loadExperimentConfig(
+        "experiment/pair_align",
+        overrides=["data.loader_factory=unused:unused", "data.train_path=unused"],
+    ).model
+    config.encoders["signal"].kwargs["hidden_channels"] = [8, 16]
+    config.encoders["image"].kwargs["hidden_channels"] = [8, 16]
+    config.decoders["signal"].kwargs.update(output_length=SIGNAL_LENGTH, hidden_channels=[16, 8])
+    config.decoders["image"].kwargs.update(output_shape=list(IMAGE_SHAPE), hidden_channels=[16, 8])
+    return buildModelFromConfig(config)
+
+
+_PAIR_ROWS: dict[str, _Row] = {
+    f"EN-LN-DN{PAIR}": _Row(
+        build=_buildEnLnDnPair,
+        reconstructions={"signal": (SIGNAL_LENGTH,), "image": IMAGE_SHAPE},
+        latents=frozenset(PAIR_LATENTS),
+        fused=frozenset(),
+        assembled_decoders=frozenset(),
+    )
+}
+
+PAIR_CASES = [pytest.param(code, None, id=code) for code in _PAIR_ROWS]
+
+
+def test_stage_4_lists_the_pair_variant() -> None:
+    """Dropping the pair model from the matrix fails this test."""
+    assert set(_PAIR_ROWS) == {f"EN-LN-DN{PAIR}"}
+    assert {case.values[0] for case in PAIR_CASES} == set(_PAIR_ROWS)
+    assert {case.values[1] for case in PAIR_CASES} == {None}
+
+
+@pytest.mark.parametrize(("row_code", "assembler"), PAIR_CASES)
+class TestPairRow:
+    """The topology of the pair model: two spaces, nothing crosses between the modalities."""
+
+    def test_two_spaces_with_no_fusion_and_no_assembler(self, run: _Run) -> None:
+        """One latent space per modality, and since each is read by one decoder, nothing joins."""
+        model = run.model
+        assert set(model.latent_spaces) == set(PAIR_LATENTS)
+        assert set(model.encoders) == {"signal", "image"}
+        assert set(model.decoders) == {"signal", "image"}
+        assert not model.fusions
+        assert not model.assemblers
+
+    def test_each_encoder_feeds_its_own_space_and_each_decoder_reads_its_own(
+        self, run: _Run
+    ) -> None:
+        """The edges are the identity, so a space is the posterior of its encoder, and only that."""
+        graph = run.model.routing_graph
+        assert graph.encoder_to_latents == {"signal": ["z_signal"], "image": ["z_image"]}
+        assert graph.latent_to_decoders == {"z_signal": ["signal"], "z_image": ["image"]}
+        for modality in ("signal", "image"):
+            assert run.model.getHead(modality, f"z_{modality}") is None, modality
+
+    def test_a_code_decoded_under_the_other_spaces_name_gives_the_other_modality(
+        self, run: _Run
+    ) -> None:
+        """What the cross reconstruction of stage 3 relies on: the decoding seam of ADR 0046."""
+        samples = run.outputs["latent_samples"]
+        image = run.model.decode({"z_image": samples["z_signal"]})
+        signal = run.model.decode({"z_signal": samples["z_image"]})
+        assert set(image) == {"image"}
+        assert set(signal) == {"signal"}
+        assert image["image"].shape == (BATCH_SIZE, *IMAGE_SHAPE)
+        assert signal["signal"].shape == (BATCH_SIZE, SIGNAL_LENGTH)
+
+    def test_the_two_spaces_have_the_same_width(self, run: _Run) -> None:
+        """Roadmap D-16: the distance of stage 3 compares them coordinate by coordinate."""
+        widths = {name: space.dim for name, space in run.model.latent_spaces.items()}
+        assert widths["z_signal"] == widths["z_image"]
+
+
+# ----------------------------------------------------------------------------------------------
 # The matrix: every row, one parametrized test (roadmap P1-6).
 # ----------------------------------------------------------------------------------------------
 
@@ -971,11 +1064,18 @@ MATRIX: dict[str, _MatrixRow] = {
     "EN-LN-DN": _MatrixRow(_buildEnLnDn, _SHARED_RECONSTRUCTIONS),
     f"EN-LN-D1{SHARED_PRIVATE}": _MatrixRow(_buildEnLnD1SharedPrivate, _IMAGE_OUT),
     f"EN-LN-DN{SHARED_PRIVATE}": _MatrixRow(_buildEnLnDnSharedPrivate, _SHARED_RECONSTRUCTIONS),
+    f"EN-LN-DN{PAIR}": _MatrixRow(_buildEnLnDnPair, _SHARED_RECONSTRUCTIONS),
 }
 
 
 def _assemblersFor(row_code: str) -> tuple[str | None, ...]:
-    """Every registered assembler for an `LN` row, none for an `L1` row."""
+    """Every registered assembler for an `LN` row, none for an `L1` row or the pair variant.
+
+    The pair model's decoders each read one latent space, so no assembler is involved and there is
+    nothing to run it through (ADR 0025 makes an assembler optional for such a decoder).
+    """
+    if row_code in _PAIR_ROWS:
+        return (None,)
     return ASSEMBLERS if "-LN-" in row_code else (None,)
 
 
@@ -990,20 +1090,27 @@ def test_the_eight_rows_are_all_in_the_matrix() -> None:
     """Dropping a row of spec §2.1, a stage 2 variant or an assembler of an `LN` row fails here."""
     assert {code for code in MATRIX if "+" not in code} == EIGHT_ROWS
     assert {code.split("+")[0] for code in MATRIX} == EIGHT_ROWS
-    assert set(_ROWS) | set(_STAGE_2_ROWS) | set(_SHARED_ROWS) == set(MATRIX)
+    assert set(_ROWS) | set(_STAGE_2_ROWS) | set(_SHARED_ROWS) | set(_PAIR_ROWS) == set(MATRIX)
+    assert f"EN-LN-DN{PAIR}" in MATRIX
 
-    stage_rows: dict[str, _Row | _SharedRow] = {**_ROWS, **_STAGE_2_ROWS, **_SHARED_ROWS}
+    stage_rows: dict[str, _Row | _SharedRow] = {
+        **_ROWS,
+        **_STAGE_2_ROWS,
+        **_SHARED_ROWS,
+        **_PAIR_ROWS,
+    }
     for code, row in MATRIX.items():
         assert row.build is stage_rows[code].build, code
-    for code, en_row in {**_ROWS, **_STAGE_2_ROWS}.items():
+    for code, en_row in {**_ROWS, **_STAGE_2_ROWS, **_PAIR_ROWS}.items():
         assert MATRIX[code].reconstructions == en_row.reconstructions, code
 
-    stage_cases = STAGE_1_CASES + STAGE_2_CASES + STAGE_3_CASES
+    stage_cases = STAGE_1_CASES + STAGE_2_CASES + STAGE_3_CASES + PAIR_CASES
     assert {case.values[0] for case in stage_cases} == set(MATRIX)
     assert {case.values[0] for case in MATRIX_CASES} == set(MATRIX)
     for code in MATRIX:
         covered = {case.values[1] for case in MATRIX_CASES if case.values[0] == code}
-        assert covered == (set(ASSEMBLERS) if "-LN-" in code else {None}), code
+        runs_every_assembler = "-LN-" in code and code not in _PAIR_ROWS
+        assert covered == (set(ASSEMBLERS) if runs_every_assembler else {None}), code
     assert set(ASSEMBLERS) == set(listRegisteredAssemblers())
 
 

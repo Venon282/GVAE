@@ -103,20 +103,25 @@ with the order of the points forgotten, a row of `NaN` in the target is a point 
 have different numbers of points: the `data.sequence_length.point_cloud` of the data file and the `num_points` of the decoder
 need not be equal (`docs/how-to/train-on-point-clouds.md`).
 
-`pair_solo_signal.yaml` and `pair_solo_image.yaml` (roadmap P6-1, ADR 0051) are the two solo stages of the staged pair
-recipe (`docs/how-to/train-in-stages.md`): ordinary single-modality runs, composing `configs/model/signal_single_latent.yaml`
-or `image_single_latent.yaml` with the data contract of the signal plus image pair (`configs/data/signal_image.yaml`, so
-one loader serves every stage; each model reads its own batch key and ignores the other) and
-`configs/training/default.yaml`. What they add is `training.stage` (`solo_signal`, `solo_image`), which makes every checkpoint
-carry a stage manifest: the label, the modalities, the latent space with its width and a digest of the model config. The image
-one sets the loss scale of `image_vae.yaml` (`sum`, weight 0.5). They train through `scripts/train.py`
-(`tests/integration/test_stage_manifest.py`). The third stage (`pair_align`) is P6-7 (the freeze and learning-rate groups it can use, `freeze_modules` and `training.param_groups`, are built since P6-5, ADR 0055); the pair loss terms it will list in
-`training.loss_terms`, `latent_alignment` and `cross_reconstruction`, are built in since P6-4 (ADR 0054; they refuse modality
-dropout, which `training=several_latents` sets to 0.15, so a stage 3 config sets `training.modality_dropout_p=0`). Its
-model is `configs/model/signal_image_pair.yaml` and its start is `training.warm_start` (roadmap P6-2, ADR 0052). Until
-`pair_align` lands, compose it from `pair_solo_signal`, `model=signal_image_pair`, `training=several_latents` and
-`training.stage=pair` (`docs/how-to/train-in-stages.md`, `tests/integration/test_warm_start_script.py`). The keys of
-`training.beta_schedules` are space names, so the pair model needs its own (`z_signal`, `z_image`) or none.
+`pair_solo_signal.yaml`, `pair_solo_image.yaml` and `pair_align.yaml` (roadmap P6-1 and P6-7, ADR 0051 and ADR 0057) are
+the three stages of the staged pair recipe (`docs/how-to/train-in-stages.md`), three ordinary runs of `scripts/train.py`
+chained by checkpoints (roadmap D-15). The two solo ones are single-modality runs, composing
+`configs/model/signal_single_latent.yaml` or `image_single_latent.yaml` with the data contract of the signal plus image
+pair (`configs/data/signal_image.yaml`, so one loader serves every stage; each model reads its own batch key and ignores
+the other) and `configs/training/default.yaml`. What they add is `training.stage` (`solo_signal`, `solo_image`), which makes
+every checkpoint carry a stage manifest: the label, the modalities, the latent space with its width and a digest of the
+model config. Both sum their reconstruction (`reconstruction_reduction: sum`) and the image has the weight 0.5 of
+`image_vae.yaml`: the averaged signal collapsed on the reference dataset (ADR 0057). `pair_align.yaml` is stage 3: the model
+`configs/model/signal_image_pair.yaml` with `training=several_latents`, `training.stage=pair`, modality dropout 0 (the pair
+terms refuse it), a `training.warm_start` that names the `best.pt` of the two solo experiments at the folders they write to
+(roadmap P6-2, ADR 0052), and `training.loss_terms` with `latent_alignment` (the distance `wasserstein2_diag`, as a name so
+that `training.loss_terms.0.kwargs.distance=mean_mse` replaces it) and `cross_reconstruction`, each with a ramp from 0 to
+0.3 over 100 steps (roadmap P6-4, ADR 0054). It sets no freeze and no learning-rate group (D-14, ADR 0055 says how). The
+three train through `scripts/train.py` (`tests/integration/test_stage_manifest.py`, `test_warm_start_script.py` and
+`test_staged_training.py`, which runs all three, then evaluates and resumes stage 3). The keys of `training.beta_schedules`
+are space names, so a pair model needs its own (`z_signal`, `z_image`): `pair_align` gives each a `constant` schedule whose value
+is `${training.beta}`, since every shipped experiment names a schedule for every latent space
+(`tests/integration/test_model_config_schema.py`) and `training.beta` stays the one setting.
 
 # Still open
 

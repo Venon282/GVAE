@@ -55,3 +55,4 @@
 - [0054: Pair-stage loss terms](0054-pair-stage-loss-terms.md)
 - [0055: Freeze modules and learning-rate groups](0055-freeze-and-learning-rate-groups.md)
 - [0056: Evaluation across two separate latent spaces, with baselines](0056-evaluation-across-two-latent-spaces.md)
+- [0057: Staged training end to end: the pair experiment, the solo handoff and the integration test](0057-staged-training-end-to-end.md)

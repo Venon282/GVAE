@@ -6,46 +6,46 @@ A staged recipe trains a pair of modalities in three runs that hand checkpoints 
 |---|---|---|---|---|
 | 1, solo A | encoder A and decoder A | every sample that has modality A | `pair_solo_signal` | yes |
 | 2, solo B | encoder B and decoder B | every sample that has modality B | `pair_solo_image` | yes |
-| 3, pair | both, from the two solo checkpoints | paired samples only | `pair_align` | warm start only (see below) |
+| 3, pair | both, from the two solo checkpoints | paired samples only | `pair_align` | yes |
 
-Stages 1 and 2 are ordinary runs of a single-modality model, so there is no new training code in
-them. This page covers what they add, a **stage manifest** written into every checkpoint, so that a
-later stage can tell which modality, which latent space and which model config a file belongs to,
-and the **warm start** that builds the pair model of stage 3 from the two solo checkpoints and
-checks them against that manifest. The motivation and the full plan are in
+All three are ordinary runs of `scripts/train.py`: they resume, seed and log like any other, and
+the stages hand each other files, not state (roadmap decision D-15). What the staging adds is a
+**stage manifest** written into every checkpoint, so that a later stage can tell which modality,
+which latent space and which model config a file belongs to, the **warm start** that builds the
+pair model of stage 3 from the two solo checkpoints and checks them against that manifest, and the
+two **pair loss terms** that make the two latent spaces say the same thing about a sample. The
+motivation and the full plan are in
 [Phase 6 of the roadmap](../roadmap.md), in [ADR 0051](../adr/0051-stage-manifest-and-solo-recipes.md)
 and in [ADR 0052](../adr/0052-warm-start-from-solo-checkpoints.md).
 
-!!! note "Stage 3 can pull the two spaces together; the experiment file is still to come"
-    The warm start, the pair model file and the guard against a collapsed solo model are here
-    (roadmap P6-2), the distances are registered (P6-3) and the two pair loss terms,
-    `latent_alignment` and `cross_reconstruction`, are registered built-ins (P6-4,
-    [ADR 0054](../adr/0054-pair-stage-loss-terms.md)). Without them a stage 3 run trains the two
-    modalities from their solo weights with the reconstruction and regularization terms only, and
-    nothing pulls the two latent spaces together; you ask for the terms in `training.loss_terms`
-    ([below](#pull-the-two-latent-spaces-together)). Freezing modules and giving them a lower
-    learning rate are built too (P6-5, [ADR 0055](../adr/0055-freeze-and-learning-rate-groups.md),
-    [below](#keep-the-solo-solutions-freeze-or-slow-down)); the `pair_align` experiment file is roadmap
-    item P6-7. [Choose a latent distance](choose-a-latent-distance.md) says what each distance compares and
+!!! note "What it does and does not tell you"
+    The commands below run end to end on the synthetic dataset of `examples/04_paired_loader.py`
+    (about six minutes on two CPU cores for the three stages). That dataset is a toy, and what it
+    shows is that the stages chain and what each guard sees, not how the recipe does on your pairs
+    ([ADR 0057](../adr/0057-staged-training-end-to-end.md) has the numbers, and the caveats).
+    [Choose a latent distance](choose-a-latent-distance.md) says what each distance compares and
     which to try first.
 
 **On this page**
 
-- [Run the two solo stages](#run-the-two-solo-stages)
+- [Run the three stages](#run-the-three-stages)
 - [What each stage needs](#what-each-stage-needs)
+- [What to look at between the stages](#what-to-look-at-between-the-stages)
 - [Read the manifest](#read-the-manifest)
 - [Use it in your own experiment](#use-it-in-your-own-experiment)
 - [Start the pair stage from the two solo checkpoints](#start-the-pair-stage-from-the-two-solo-checkpoints)
 - [What the warm start refuses](#what-the-warm-start-refuses)
 - [What it copies, and what it does not](#what-it-copies-and-what-it-does-not)
 - [Pull the two latent spaces together](#pull-the-two-latent-spaces-together)
+- [Which distance to try first](#which-distance-to-try-first)
 - [Keep the solo solutions: freeze or slow down](#keep-the-solo-solutions-freeze-or-slow-down)
+- [Read the result against the baselines](#read-the-result-against-the-baselines)
 
-## Run the two solo stages
+## Run the three stages
 
-The two solo experiments read the data contract of the signal plus image pair
-(`configs/data/signal_image.yaml`), so one loader and one data folder serve every stage. Each model
-uses its own key (`signal` or `image`) and ignores the other. With the reference loader of
+The three experiments read the data contract of the signal plus image pair
+(`configs/data/signal_image.yaml`), so one loader and one data folder serve every stage. Each solo
+model uses its own key (`signal` or `image`) and ignores the other. With the reference loader of
 `examples/04_paired_loader.py` and a folder in the layout it describes, from the repository root:
 
 ```bash
@@ -58,17 +58,27 @@ PYTHONPATH=. python scripts/train.py --config-name experiment/pair_solo_signal \
 PYTHONPATH=. python scripts/train.py --config-name experiment/pair_solo_image \
     data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
     data.train_path=/path/to/paired_dataset
+
+# Stage 3: the pair model, from the two solo checkpoints, with the two pair loss terms
+PYTHONPATH=. python scripts/train.py --config-name experiment/pair_align \
+    data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
+    data.train_path=/path/to/paired_dataset
 ```
 
 Running `python examples/04_paired_loader.py` with no argument writes a small synthetic paired
-dataset you can point `data.train_path` at. Each run writes its checkpoints to
-`outputs/pair_solo_signal/checkpoints/` and `outputs/pair_solo_image/checkpoints/`: `best.pt` (the
-epoch with the lowest validation loss) and the last three periodic files. `best.pt` is the file the
-pair stage should take.
+dataset to `examples/outputs/04_paired_loader/data` (git-ignored), which is what `data.train_path`
+can point at to try the three commands. Each run writes its checkpoints to
+`outputs/<experiment>/checkpoints/`: `best.pt` (the epoch with the lowest validation total loss)
+and the last three periodic files. Stage 3 needs no path on its command line: `pair_align` lists
+`outputs/pair_solo_signal/checkpoints/best.pt` and `outputs/pair_solo_image/checkpoints/best.pt` as
+its warm start, which are where the first two commands write, so run the three from the same folder.
+If you gave a solo stage another `output_dir`, name the files in `training.warm_start`
+([below](#start-the-pair-stage-from-the-two-solo-checkpoints)).
 
-Both runs are resumable like any other (`training.resume_from=...`, see
+All three are resumable like any other run (`training.resume_from=...`, see
 [Train a model](train.md#resume-an-interrupted-run)). Resume with the same experiment file, and the
-manifest is in the checkpoints of the resumed part too.
+manifest is in the checkpoints of the resumed part too. A stage 3 that resumes does not read the solo
+files again.
 
 ## What each stage needs
 
@@ -79,12 +89,30 @@ manifest is in the checkpoints of the resumed part too.
   is enough to run the recipe and to read the manifest, but not what a real run wants.
 - **Stage 3: paired samples only**, in the row order that makes row `i` of every modality one
   sample.
-- **The loss scale of the image.** `pair_solo_image` sets `reconstruction_reduction: sum` and
-  `reconstruction_weight: 0.5`, as `image_vae` does, because a 64 x 64 image under the default `mean`
-  reduction collapses the model ([Choose beta and the loss scale](choose-beta.md)).
+- **The loss scale, the same in all three.** Both solo experiments sum their reconstruction
+  (`reconstruction_reduction: sum`), and the image has a weight of 0.5, as `image_vae` does
+  ([Choose beta and the loss scale](choose-beta.md)); `pair_align` has the same. An averaged
+  reconstruction weighs 256 times less for a signal of 256 points against a beta that warms up to 1, and
+  on the reference dataset that ended with every latent dimension of the signal model inactive
+  ([ADR 0057](../adr/0057-staged-training-end-to-end.md)). If you trained a solo stage at another
+  scale, give stage 3 the same one (`training.reconstruction_reduction`, `reconstruction_weight`), or
+  the pair stage pulls the copied weights toward another objective than the one they were trained for.
 - **Judge each solo model before going on.** Evaluate it alone
   ([Evaluate and visualize a checkpoint](evaluate.md)): a collapsed or poor solo VAE is found
   cheaply here, and not after the pair stage.
+
+## What to look at between the stages
+
+Each stage ends with a short list of things worth reading before the next one starts; none of them
+needs more than the log and `scripts/evaluate.py`.
+
+| After | Look at | What it tells you |
+|---|---|---|
+| Stage 1 or 2 | The last `New best val/loss/total=... at epoch N` line of the log. | The epoch of `best.pt`. The total includes a beta that is still rising during the warm-up, so it favours early epochs: with a run of 200 epochs, a best epoch of 25 holds a model that never saw the final beta, and stage 3 continues it at beta 1. Train longer, or shorten the warm-up, until the best epoch is near the end. |
+| Stage 1 or 2 | The solo model on its own ([Evaluate and visualize a checkpoint](evaluate.md)): reconstructions, latent diagnostics. | A solo model that reconstructs badly or uses 0 latent units is cheaper to find here. The warm start refuses a collapsed one. |
+| Stage 3, at the start | The two `Warm start: copied ...` lines. | Which files it took, their stage labels and **how many latent units are active** in each space. Keep these two numbers: they are the reference of the collapse guard of the evaluation. |
+| Stage 3, during | `train/loss/latent_alignment` and `train/loss/cross_reconstruction` in the log, next to the same two under `val/`. | The values are after the weight, so they start at exactly 0 (the ramp) and rise before they fall. A validation term far above the training one (on the reference dataset, 1.4 against 0.09) is a stage that learns its pairs: with few pairs, stop earlier or freeze ([below](#keep-the-solo-solutions-freeze-or-slow-down)). |
+| Stage 3, at the end | `scripts/evaluate.py --latent-pair` on held-out pairs ([below](#read-the-result-against-the-baselines)). | Whether the spaces say the same thing: the retrieval of the partner against chance, the cross reconstruction, the self reconstruction against what the solo models had, the active units. A distance that fell is not the answer. |
 
 ## Read the manifest
 
@@ -171,19 +199,20 @@ same width (16), `z_signal` and `z_image`, each fed by its own encoder and read 
 If you change a kwarg in a solo model file, change it in the pair file too, or the warm start
 refuses the checkpoint (below).
 
-`training.warm_start` is a list of entries, one per solo checkpoint, and is empty by default. Until
-`pair_align` lands (P6-7), compose the pair stage from the solo experiment file and the pair model:
+`training.warm_start` is a list of entries, one per solo checkpoint, and is empty by default.
+`pair_align` sets it to the `best.pt` of the two solo experiments at the folders they write to, so
+the third command above needs nothing more. A solo stage that wrote somewhere else (an `output_dir`
+of your own), or a file you would rather start from, is named on the command line. The list is
+replaced as a whole, so give both entries, and quote it, or the shell splits the braces:
 
 ```bash
-PYTHONPATH=. python scripts/train.py --config-name experiment/pair_solo_signal \
-    model=signal_image_pair training=several_latents training.stage=pair \
-    output_dir=outputs/pair \
+PYTHONPATH=. python scripts/train.py --config-name experiment/pair_align \
     data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
     data.train_path=/path/to/paired_dataset \
-    'training.warm_start=[{checkpoint: outputs/pair_solo_signal/checkpoints/best.pt, modules: [signal]},{checkpoint: outputs/pair_solo_image/checkpoints/best.pt, modules: [image]}]'
+    'training.warm_start=[{checkpoint: runs/signal/checkpoints/best.pt, modules: [signal]},{checkpoint: runs/image/checkpoints/best.pt, modules: [image]}]'
 ```
 
-Or in a YAML file:
+In a YAML file of your own, the same two entries are:
 
 ```yaml
 training:
@@ -211,11 +240,14 @@ bit; the test suite pins it.
 
 **Beta stays constant.** The solo runs already went through their warm-up, and a warm-up restarted
 at step 0 would pull a trained posterior back toward the prior. `training: several_latents` has no
-`beta_schedules`, so both spaces are weighted by the constant `training.beta` (1.0, the end value of
-the solo warm-up). If a solo stage ended at another value, set `training.beta` to it. A schedule
-left over from `training: default` is keyed by `z_fused`, names no space of the pair model, and the
-trainer says so in a warning. Per-space settings follow the new names: the regularizer is declared
-with each space, and `training.beta_schedules` is keyed by `z_signal` and `z_image`.
+`beta_schedules`, so a pair stage built on it alone weights both spaces by the constant `training.beta`
+(1.0, the end value of the solo warm-up). `pair_align` writes that out: each of `z_signal` and `z_image`
+has a `constant` schedule whose value is `${training.beta}`, because every shipped experiment names a
+schedule for every latent space, and so `training.beta` stays the one setting. If a solo stage ended at
+another value, set `training.beta` to it and both spaces follow. A schedule left over from
+`training: default` is keyed by `z_fused`, names no space of the pair model, and the trainer says so in
+a warning. Per-space settings follow the new names: the regularizer is declared with each space, and
+`training.beta_schedules` is keyed by `z_signal` and `z_image`.
 
 A run that resumes (`training.resume_from`) does not apply `warm_start`: the checkpoint it resumes
 holds the weights of the pair run, which already started from the solo files, and those files need
@@ -259,18 +291,20 @@ modalities, two spaces). Keeping the copied modules fixed, or at a lower learnin
 Warm-started and left alone, the two spaces of the pair model stay where the solo runs put them:
 nothing in the loss asks `z_signal` and `z_image` to agree about the same sample. Two loss terms
 do, and you list them in `training.loss_terms` like any other term
-([ADR 0047](../adr/0047-extra-loss-terms.md), [ADR 0054](../adr/0054-pair-stage-loss-terms.md)):
+([ADR 0047](../adr/0047-extra-loss-terms.md), [ADR 0054](../adr/0054-pair-stage-loss-terms.md)).
+`pair_align` lists both, and this is the part of it that sets them up:
 
 ```yaml
 training:
   stage: pair
   modality_dropout_p: 0.0              # required: see "What the terms refuse"
-  reconstruction_reduction: sum        # the scale the solo stages used (finding I-4)
+  reconstruction_reduction: sum        # the scale of the solo stages (finding I-4)
+  reconstruction_weight: {signal: 1.0, image: 0.5}
   loss_terms:
     - name: latent_alignment
       kwargs:
         pairs: [[z_signal, z_image]]
-        distance: {name: wasserstein2_diag, kwargs: {squared: true}}
+        distance: wasserstein2_diag    # a name; {name, kwargs} when the distance has options
       schedule: {strategy: linear_warmup, kwargs: {warmup_steps: 100, end_value: 0.3}}
     - name: cross_reconstruction
       kwargs:
@@ -333,7 +367,8 @@ staying where the solo stages left them. Measure the three before and after the 
     ([ADR 0054](../adr/0054-pair-stage-loss-terms.md) gives the table and the four seeds). These are
     the numbers of a toy, not a recommendation for a weight or a distance: a constant weight of 1 on
     both terms at the default `beta` of 1 was worse. Which distance to train with is roadmap decision
-    D-13, still open: the comparison exists (below) and the synthetic pair does not decide it.
+    D-13, still open: the comparison exists ([Read the result against the
+    baselines](#read-the-result-against-the-baselines)) and the synthetic pair does not decide it.
 
 Two things to know. The cross reconstruction runs the decoders in training mode, so their batch
 normalization layers update their running statistics with activations that come from the other
@@ -343,6 +378,33 @@ evaluation mode and keeps their statistics where the solo stage left them. And a
 with the terms resumes like any other (`training.resume_from`): the terms have no parameters, and
 the random-number state of the checkpoint is what makes a stochastic distance such as `mixture_jsd`
 resume to the same curve.
+
+## Which distance to try first
+
+`pair_align` trains with **`wasserstein2_diag`**, in its default squared form: it compares the two
+posteriors, means and variances, in closed form, with a gradient everywhere
+([Choose a latent distance](choose-a-latent-distance.md#which-to-try-first) says why, and what each of
+the other five ignores). The ablation to run next is **`mean_mse`**, the squared gap of the two
+posterior means: if it does as well on your pairs, the variances were not what mattered. The distance
+is a name in the file, so the command line replaces it, and a different `output_dir` keeps the first
+run's files:
+
+```bash
+PYTHONPATH=. python scripts/train.py --config-name experiment/pair_align \
+    data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
+    data.train_path=/path/to/paired_dataset \
+    training.loss_terms.0.kwargs.distance=mean_mse output_dir=outputs/pair_align_mean_mse
+```
+
+`loss_terms.0` is `latent_alignment`, the first entry of the list. Compare the two runs with the
+evaluation below, on the same held-out pairs, and not by their training curves: the two distances are
+on different scales, so a lower value says nothing about the better run.
+
+D-13 stays open. That order is where to start and not a result: no distance has been measured on a real
+pair, and on the reference dataset `mean_mse` did as well as `wasserstein2_diag` within what one seed on 24
+held-out pairs can tell (the numbers are [below](#read-the-result-against-the-baselines)). The six
+distances, and the comparison that settles it from your own pairs, are in
+[Choose a latent distance](choose-a-latent-distance.md).
 
 ## Keep the solo solutions: freeze or slow down
 
@@ -437,12 +499,115 @@ other (roadmap I-8). Three things make the number mean something
 - **Evaluate the pair model across its two spaces.** `scripts/evaluate.py --latent-pair z_signal z_image` gives the
   retrieval of each direction against its chance level, every registered distance on paired and on mismatched
   samples, the cross reconstruction next to the self reconstruction, and the active units of both spaces. Pass the
-  active units that each solo stage had (`--solo-active-units z_signal=12 z_image=9`, from the manifest of the solo
-  stage or from its own evaluation): a space that ends with fewer is flagged, which is what a stage 3 that traded
-  information for agreement looks like.
+  active units that each solo stage had (`--solo-active-units`, the numbers of the two `Warm start` lines of stage 3):
+  a space that ends with fewer is flagged, which is what a stage 3 that traded information for agreement looks like.
 - **Check that the pairs are pairs.** Pass the training pairs (`--train-dataloader-factory`): the orthogonal map fitted
   on them must recover the partner above chance, or row `i` of the two modalities may not be one sample.
-- **Compare with what stage 3 has to beat.** `examples/05_alignment_baselines.py` runs, on one split, the solo spaces as
-  they are (expected at chance), a closed-form orthogonal Procrustes map between them, stage 3 once for each
-  registered distance, and joint training from scratch with a shared latent space, over repeated random splits and
-  seeds. If the Procrustes row matches a stage 3 row on your pairs, the learned alignment is not buying anything yet.
+- **Compare with what stage 3 has to beat.** The same report holds the Procrustes row: a closed-form orthogonal map
+  between the two spaces, fitted on the training pairs and applied to the held-out ones. `examples/05_alignment_baselines.py`
+  runs, on one split, the solo spaces as they are (expected at chance), that map, stage 3 once for each registered
+  distance, and joint training from scratch with a shared latent space, over repeated random splits and seeds. If the
+  Procrustes row matches a stage 3 row on your pairs, the learned alignment is not buying anything yet.
+
+### The command
+
+`scripts/evaluate.py` takes three factories, written as `module:function`: the pair model, the held-out pairs and the
+training pairs. For the reference dataset they are a few lines, which build both from `pair_align` and the loader of the
+three commands (save it as `my_project/pair_eval.py`, and set `DATA`):
+
+```python
+"""The three factories `scripts/evaluate.py` takes for the pair model of the staged recipe."""
+
+import importlib
+
+from global_vae.config.experiment import ExperimentConfig, loadExperimentConfig
+from global_vae.config.model import buildModelFromConfig
+from global_vae.models.global_vae import GlobalVae
+
+LOADER = "examples.04_paired_loader"
+DATA = "/path/to/paired_dataset"
+
+
+def _experiment() -> ExperimentConfig:
+    return loadExperimentConfig(
+        "experiment/pair_align",
+        overrides=[
+            f"data.loader_factory={LOADER}:buildPairedDataloaders",
+            f"data.train_path={DATA}",
+        ],
+    )
+
+
+def buildPairModel() -> GlobalVae:
+    return buildModelFromConfig(_experiment().model)
+
+
+def buildTestPairs() -> list:
+    return list(importlib.import_module(LOADER).buildPairedDataloaders(_experiment().data).test)
+
+
+def buildTrainPairs() -> list:
+    return list(importlib.import_module(LOADER).buildPairedDataloaders(_experiment().data).train)
+```
+
+```bash
+PYTHONPATH=.:my_project python scripts/evaluate.py \
+    --checkpoint outputs/pair_align/checkpoints/best.pt \
+    --model-factory pair_eval:buildPairModel \
+    --dataloader-factory pair_eval:buildTestPairs \
+    --train-dataloader-factory pair_eval:buildTrainPairs \
+    --latent-pair z_signal z_image \
+    --solo-active-units z_signal=1 z_image=15 \
+    --output-dir results/pair_align/
+```
+
+`z_signal=1 z_image=15` are the numbers the two `Warm start` lines printed on the reference dataset; use yours. The
+report is `results/pair_align/latent_alignment.md` (and `.json`). Read it from the top: the flags, then the retrieval
+against its chance level, then the distance ratios, then the cross reconstruction next to the self reconstruction.
+The self reconstruction error each modality had before stage 3 is the figure to hold its error after stage 3 against
+(evaluate the two solo checkpoints for it, [Evaluate and visualize a checkpoint](evaluate.md)): a modality whose own
+reconstruction got worse paid for the agreement.
+
+### What it reads on the reference dataset
+
+One run of the three commands above on the dataset `examples/04_paired_loader.py` writes (200 epochs each, the shipped
+settings, 192 training pairs), read on its **24 held-out pairs** ([ADR 0057](../adr/0057-staged-training-end-to-end.md)
+has the table and the controls):
+
+| | start of stage 3 | end, `wasserstein2_diag` | end, `mean_mse` |
+|---|---|---|---|
+| `recall@5` of the partner, signal to image / image to signal (chance 0.21) | 0.33 / 0.08 | 0.54 / 0.46 | 0.54 / 0.50 |
+| self error, signal / image | 0.0014 / 0.0032 | 0.0011 / 0.0040 | 0.0013 / 0.0028 |
+| R2 of the cross reconstruction, image from the signal / signal from the image | 0.21 / 0.56 | 0.36 / 0.92 | 0.39 / 0.98 |
+| active units, `z_signal` / `z_image` | 1 / 15 | 7 / 14 | 7 / 12 |
+
+What to take from it, and what not:
+
+- **The recipe moves the right numbers and the baseline is not beaten on retrieval.** The retrieval rises from near chance to
+  0.5, and the signal is rebuilt from the image's code. The Procrustes row of the same report reads `recall@5` 0.54 / 0.46, the
+  same as stage 3 (one pair is 0.04 of recall at this size), and rebuilds the image from the signal's code as well (R2
+  0.36); it rebuilds the signal from the image's code worse (R2 0.83 against 0.92). On this dataset stage 3 matches
+  a closed-form map for the retrieval and beats it for one cross reconstruction.
+- **The image paid for it.** Its own reconstruction error ends 23 % above the solo model's with `wasserstein2_diag`
+  (0.0040 against 0.0032), and `scripts/evaluate.py` flags `z_image` for 14 active units against the 15 the solo stage had;
+  the 24 held-out samples can account for a unit of difference, and the flag is worth reading, not obeying. With `mean_mse`
+  the image error went the other way (0.0028), and two more units went quiet (12). If the image's own reconstruction matters
+  to you, this is the number to watch, and [freezing the image side or slowing it down](#keep-the-solo-solutions-freeze-or-slow-down)
+  is what the stage offers.
+- **192 pairs are few for 200 epochs.** The alignment term is 0.09 on the training pairs and 1.37 on the validation ones.
+  Stop earlier, or freeze, before you trust the curve.
+- **The two distances do not separate** here: the same recall, and the differences in the other rows go both ways. That is one
+  seed on 24 pairs of a synthetic dataset where one factor of three is shared (finding I-15), not a verdict on either; D-13
+  stays open.
+
+If a run of yours ends with the retrieval at chance, or with the Procrustes row above stage 3 on both the retrieval and
+the cross reconstruction, look first at the solo stages (the best epoch and the active units, in
+[What to look at between the stages](#what-to-look-at-between-the-stages)), before the loss terms: a solo model that
+learned little leaves the pair stage nothing to align.
+
+### If a solo file is missing
+
+Stage 3 stops before the first step with `FileNotFoundError: No checkpoint found at
+'outputs/pair_solo_signal/checkpoints/best.pt'`. The file named is the one of `training.warm_start` that does not exist, so
+either a solo stage has not been run from this folder, or it wrote to another `output_dir`: run the stage, or name its file
+([above](#start-the-pair-stage-from-the-two-solo-checkpoints)).

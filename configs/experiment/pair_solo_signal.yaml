@@ -19,6 +19,16 @@
 #       data.train_path=/path/to/paired_dataset
 # The checkpoints are written to `outputs/pair_solo_signal/checkpoints/` (`best.pt` is the one the
 # pair stage should take).
+#
+# The reconstruction is SUMMED, as in the image stage (`pair_solo_image.yaml`), and not averaged as
+# in `signal_vae.yaml`. Averaged over 256 points, the reconstruction weighs 256 times less against a
+# beta that warms up to 1, and on the reference dataset (examples/04_paired_loader.py) the model ends
+# the 200 epochs with 0 of 16 latent dimensions active: the collapse that the warm start of stage 3
+# refuses (docs/adr/0052-warm-start-from-solo-checkpoints.md). Its `best.pt` is then the model of
+# epoch 25, picked while beta was still 0.16, which is not the model at the beta that stage 3
+# continues with. Summed, the model keeps one active dimension (the dataset's signal carries one
+# factor) and its best epoch is 145, at a beta of 0.87 (docs/adr/0057-staged-training-end-to-end.md).
+# Both solo stages and the pair stage then share the same reduction, and only the weight differs.
 defaults:
   - /model: signal_single_latent
   - /data: signal_image
@@ -31,3 +41,4 @@ output_dir: outputs/pair_solo_signal
 
 training:
   stage: solo_signal
+  reconstruction_reduction: sum

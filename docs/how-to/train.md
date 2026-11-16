@@ -72,9 +72,10 @@ training setup. All of them read your data through a `loader_factory`.
 - The four transformer experiments are described in ADR 0037. How the models are written is in
   [configure encoders, decoders and latent spaces](configure-latent-spaces.md).
 - The paired loader below serves the signal and image experiments.
-- `pair_solo_signal` and `pair_solo_image` are the solo stages of a staged recipe ([train in
-  stages](train-in-stages.md), ADR 0051): ordinary single-modality runs that also set `training.stage`,
-  so that their checkpoints say which modality, latent space and model config they belong to.
+- `pair_solo_signal`, `pair_solo_image` and `pair_align` are the three stages of a staged recipe ([train in
+  stages](train-in-stages.md), ADR 0051 and ADR 0057): the first two are ordinary single-modality runs that also
+  set `training.stage`, so that their checkpoints say which modality, latent space and model config they belong
+  to, and the third trains the pair model from their two `best.pt` files with the two pair loss terms.
 
 ### The other modalities
 

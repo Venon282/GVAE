@@ -739,7 +739,7 @@ the integrity check in 5 of 5 repeats and a collapsed stage 3 by the guard in 5 
 
 ### P6-7. Configs, script wiring, how-to and end-to-end test (M, needs D-15)
 
-**status**: todo
+**status**: done
 **Do.**
 - Experiment files for the three stages on the synthetic signal plus image pair (`pair_solo_signal`,
   `pair_solo_image`, `pair_align`), and the wiring in `scripts/train.py` of `training.warm_start`
@@ -757,6 +757,32 @@ the integrity check in 5 of 5 repeats and a collapsed stage 3 by the guard in 5 
   explicitly and fails when one is dropped).
 **Done when.** The integration test passes in CI on 3.11 and 3.13, and the how-to commands run as
 written.
+**Delivered.** ADR 0057; no change in `src/`. The wiring of `training.warm_start` and `training.loss_terms` in
+`scripts/train.py` was already there (P6-2 and P6-4), so the item is the experiment, the test and the how-to.
+`configs/experiment/pair_align.yaml` is stage 3: the pair model with `training: several_latents`, `stage: pair`,
+modality dropout 0, a `warm_start` that names the `best.pt` of the two solo experiments at the folders they write to (so
+the three commands need no path between them), the loss scale of the solo stages (sum; the image weighs 0.5), a constant
+beta, and `latent_alignment` (`wasserstein2_diag`, a plain name so that
+`training.loss_terms.0.kwargs.distance=mean_mse` replaces it) and `cross_reconstruction` in both directions, each ramped
+from 0 to 0.3 over 100 steps. **`pair_solo_signal` now sums its reconstruction** (`reconstruction_reduction: sum`): run as the
+how-to prints it on the reference dataset, the averaged signal ended with 0 of 16 latent units active and a `best.pt` from
+epoch 25 (beta 0.16), and stage 3 on it left retrieval at chance and the signal's own error 6.1 times higher; the summed one
+has a `best.pt` from epoch 145 and a stage 3 that retrieves above chance. `docs/how-to/train-in-stages.md` is rewritten for
+the three commands (run as written on the reference dataset), what each stage needs, what to look at between the stages, which
+distance to try first (`wasserstein2_diag`, then `mean_mse`), the evaluation command with its factories and what it reads on the
+reference dataset. `tests/integration/test_staged_training.py` (25 tests, marked `slow`, about 80 s) runs the three stages
+through `scripts/train.py` in subprocesses on a linked synthetic pair and asserts (a) the warm start exact, bit for bit
+against the solo models, (b) the latent distance under a tenth of its start, (c) `recall@10` within 0.15 of chance before and
+at least 0.5 above it after, (d) the self error within 1.10 of its start, (e) the cross error under 0.8 of the mean-sample
+baseline, (f) a stage 3 resumed from the middle of the ramp equal to the uninterrupted one (relative 1e-6), (g) no other
+experiment sets a stage, a warm start, a loss term or a group, and every existing suite unchanged; it also runs
+`scripts/evaluate.py --latent-pair` on the result and the missing-solo-file error. A control without the terms fails (b), (c)
+and (e); (d) is not binding on the toy (the solo stages are short and stage 3 keeps training both models), and the ADR says so.
+The pair model is `EN-LN-DN+pair` in the configuration matrix, which fails when the entry is dropped. **D-15 stays at A**: three
+ordinary runs chained by checkpoints carried the whole recipe, resumed and evaluated, with no driver, so B is not needed.
+On the reference dataset (one seed, 24 held-out pairs, finding I-15) the retrieval rises from near chance to 0.5 and **matches
+the Procrustes row of the same report**, the signal is rebuilt from the image's code better than with the map, the image's own
+reconstruction ends 23% worse than the solo model's, and `mean_mse` does as well as `wasserstein2_diag`: D-13 and D-14 stay open.
 
 ### P6-8. Extensions (L, gated, one go-ahead each)
 
@@ -1116,7 +1142,7 @@ measured.
 | D-7 | **Serving target** (spec §11, fourth bullet): API, batch inference or edge. | unknown | Nothing beyond steps 0 and 1 of P4-4 until answered | P4-4 steps 2 and 3 |
 | D-13 | **The latent distance of the pair stage.** The text of PairVAE read for this roadmap does not name its distance, and its supplementary information was not accessible. | one of the six of P6-3, or several | Ship all six. Train with `wasserstein2_diag` (the squared form) by default, and `mean_mse` as the ablation. Settle it after reading the paper's supplementary information and on a real pair: the comparison is built (P6-6, `examples/05_alignment_baselines.py`), and on the synthetic pair the six do not separate within the spread (ADR 0056) | P6-3, P6-4, P6-6 |
 | D-14 | **What is frozen in stage 3.** The paper trains both VAEs together. | nothing; the decoders; one side; both VAEs, with an alignment head only | Nothing frozen. Freezing is opt-in (P6-5, built; ADR 0055 measures the options on the synthetic pair) | P6-5 |
-| D-15 | **Stage orchestration.** | A: three ordinary runs chained by checkpoints. B: one driver that runs the three stages from one config | A, since each stage is then a normal, resumable, reproducible run. Revisit B after P6-7 | P6-7 |
+| D-15 | **Stage orchestration.** | A: three ordinary runs chained by checkpoints. B: one driver that runs the three stages from one config | A, since each stage is then a normal, resumable, reproducible run. Revisited after P6-7 (ADR 0057): the three runs chained by checkpoints trained, resumed and were evaluated end to end with no driver, so A stays and B is not planned | P6-7 |
 | D-16 | **Latent widths in a pair.** | require equal widths; or an adapter head used by the alignment only | Require equal widths. The adapter is a P6-8 extension | P6-4 |
 | D-17 | **Go-ahead and order for Phases 7 and 4.** | per item | Phase 7: P7-1, P7-2 and P7-3 first, since they answer I-4 and need only Phase 5. P7-4 and P7-5 on a named need. Phase 4: P4-0, then the order of section 7 | Phases 7 and 4 |
 | D-18 | **Docs toolchain after the end of life of Material for MkDocs (2027-05-05).** | stay on the pinned MkDocs 1.6.x and Material 9.x; move to ProperDocs, which the plugin notice names as a drop-in continuation of MkDocs 1.x (the Material team says that notice is not its own); move to Zensical, which the Material notice names as its successor | Stay pinned for now, with an upper bound on `mkdocs-material`. Try the build with ProperDocs or Zensical on a branch before the end of life, and decide then | P5-9 (the trial only) |

@@ -1,0 +1,104 @@
+# @package _global_
+# Stage 3 of the staged pair recipe (roadmap P6-7, docs/how-to/train-in-stages.md): the pair model,
+# `signal -> z_signal -> signal` and `image -> z_image -> image` in one model, started from the two
+# solo checkpoints and trained on PAIRED samples only, with the two terms that make the two latent
+# spaces say the same thing about a sample (docs/adr/0054-pair-stage-loss-terms.md):
+#
+#   L = sum_m w_m rec_m(x_m, dec_m(z_m))                          self reconstruction, as in stages 1 and 2
+#     + sum_(m != n) w_n rec_n(x_n, dec_n(z_m))                   cross reconstruction (a ramp to 0.3)
+#     + beta * (KL(z_signal) + KL(z_image))
+#     + lambda * d(q(z_signal | signal), q(z_image | image))      latent distance (a ramp to 0.3)
+#
+# It is an ordinary run like the two solo ones (roadmap decision D-15: three runs chained by
+# checkpoints, not one driver), so it resumes, seeds and logs like any other, and its checkpoints carry
+# a stage manifest saying `pair` (docs/adr/0051-stage-manifest-and-solo-recipes.md).
+#
+# What it takes from the two solo experiments, and why each setting is what it is:
+#
+# - `training.warm_start` lists the `best.pt` of `pair_solo_signal` and `pair_solo_image` at the
+#   folders those experiments write to by default, so the third command needs no path. A run with
+#   other output folders names its own files on the command line (docs/how-to/train-in-stages.md). A
+#   missing file stops the run before the first step, naming the entry.
+# - The loss scale of each modality is the one of its solo stage: both sum their reconstruction, the
+#   signal with weight 1.0 (the default) and the image with weight 0.5 (the `image_vae.yaml` scale,
+#   docs/how-to/choose-beta.md). The cross reconstruction scores a modality with that modality's own loss
+#   whichever space it is rebuilt from, so the same scale serves it. If you trained a solo stage with
+#   another scale, set it here too, or the pair stage pulls the copied weights toward another
+#   objective than the one they were trained for. Mixing the two scales (an averaged signal, a summed
+#   image) is worse still: the cross term of the image then weighs hundreds of times more on the
+#   signal encoder than the signal's own reconstruction does.
+# - Beta is constant in both spaces, at `training.beta` (1.0 of `several_latents`, the end value of the
+#   solo warm-up): a warm-up restarted from step 0 would pull a trained posterior back toward the prior
+#   (docs/adr/0052-warm-start-from-solo-checkpoints.md). Each space has a `constant` schedule that reads
+#   `training.beta`, because every shipped experiment names a schedule for every latent space
+#   (tests/integration/test_model_config_schema.py); if a solo stage ended at another value, set
+#   `training.beta` and both spaces follow.
+# - `modality_dropout_p` is 0: a pair stage has no fusion to be robust for, and the terms refuse it
+#   (ADR 0054).
+# - The ramps start the two terms at 0, so that a distance that is large at the start does not pull on
+#   weights that are already good. The end values (0.3) and the distance are what ADR 0054 measured on
+#   the synthetic pair, not a recommendation for your data. `wasserstein2_diag` is its default, squared
+#   form; the choice of distance is roadmap decision D-13 and docs/how-to/choose-a-latent-distance.md
+#   says what each one compares. It is a name, so that another one replaces it from the command line
+#   (the first loss term is `latent_alignment`):
+#     training.loss_terms.0.kwargs.distance=mean_mse
+#
+# It reads the data contract of the signal plus image pair, like the solo stages, and needs batches in
+# which row `i` of the signal and of the image are the same sample, on every loader (the terms refuse a
+# batch that lacks a modality). The reference loader of examples/04_paired_loader.py gives that.
+#
+# Run with, after the two solo stages (the repository root on PYTHONPATH so that
+# `examples.04_paired_loader` imports):
+#   PYTHONPATH=. python scripts/train.py --config-name experiment/pair_align \
+#       data.loader_factory=examples.04_paired_loader:buildPairedDataloaders \
+#       data.train_path=/path/to/paired_dataset
+# The checkpoints are written to `outputs/pair_align/checkpoints/` (`best.pt` is the pair model).
+defaults:
+  - /model: signal_image_pair
+  - /data: signal_image
+  - /training: several_latents
+  - _self_
+
+seed: 0
+deterministic: false
+output_dir: outputs/pair_align
+
+training:
+  stage: pair
+  modality_dropout_p: 0.0
+  reconstruction_reduction: sum
+  reconstruction_weight:
+    signal: 1.0
+    image: 0.5
+  beta_schedules:
+    z_signal:
+      strategy: constant
+      kwargs:
+        value: ${training.beta}
+    z_image:
+      strategy: constant
+      kwargs:
+        value: ${training.beta}
+  warm_start:
+    - checkpoint: outputs/pair_solo_signal/checkpoints/best.pt
+      modules: [signal]
+    - checkpoint: outputs/pair_solo_image/checkpoints/best.pt
+      modules: [image]
+  loss_terms:
+    - name: latent_alignment
+      kwargs:
+        pairs: [[z_signal, z_image]]
+        distance: wasserstein2_diag
+      schedule:
+        strategy: linear_warmup
+        kwargs:
+          warmup_steps: 100
+          end_value: 0.3
+    - name: cross_reconstruction
+      kwargs:
+        pairs: [[z_signal, z_image], [z_image, z_signal]]
+      schedule:
+        strategy: linear_warmup
+        kwargs:
+          warmup_steps: 100
+          end_value: 0.3

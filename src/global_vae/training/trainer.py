@@ -35,7 +35,7 @@ own decoder target.
 import contextlib
 import logging
 import math
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -61,6 +61,7 @@ from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.checkpoint import loadCheckpoint as loadCheckpointFile
 from global_vae.training.checkpoint import saveCheckpoint as saveCheckpointFile
 from global_vae.training.learning_rate import isLearningRateKey, learningRateMetrics
+from global_vae.training.param_groups import ParamGroupSpec, applyLrFactors, buildParamGroups
 from global_vae.training.stage_manifest import StageManifest
 from global_vae.utils.autograd import backward
 
@@ -274,6 +275,7 @@ class Trainer:
         loss_terms: dict[str, AbstractLossTerm] | None = None,
         loss_term_weights: dict[str, float | AbstractBetaSchedule] | None = None,
         stage_manifest: StageManifest | None = None,
+        param_groups: Sequence[ParamGroupSpec] | None = None,
     ) -> None:
         """Build a `Trainer` around an already-constructed `GlobalVae`.
 
@@ -390,6 +392,12 @@ class Trainer:
                 `buildStageManifest` builds one from the model). Written into every checkpoint
                 `saveCheckpoint` makes, and so into those of the checkpoint callbacks. `None`
                 (default) writes none, and the file is what it was before the manifest existed.
+            param_groups: Learning-rate groups by module (`training/param_groups.py`, roadmap
+                P6-5, ADR 0055): each entry runs the parameters of the modules it names at its
+                `lr_factor` times the optimizer's rate, and the parameters no entry names stay in
+                one more group at the optimizer's rate. `None` (default) or empty is one group,
+                as before. Only for an `optimizer` that is a class: an optimizer instance has
+                the groups its caller gave it.
 
         Raises:
             ValueError: If `modality_dropout_p` is not in `[0, 1]`, if
@@ -402,7 +410,10 @@ class Trainer:
                 reserved (`total`, `reconstruction`, `regularization`) or has a dot in it,
                 if `loss_term_weights` names something that is not in `loss_terms` or holds a
                 negative or non-finite number, or if a term's `validateModel` refuses `model`
-                or its `bindTrainerSettings` refuses the trainer's setup (ADR 0054).
+                or its `bindTrainerSettings` refuses the trainer's setup (ADR 0054), or if
+                `param_groups` is given with an optimizer instance, or has an entry that is
+                invalid (a pattern that matches no module, an entry with no parameter of its
+                own: see `buildParamGroups`).
         """
         if not (0.0 <= modality_dropout_p <= 1.0):
             raise ValueError(f"modality_dropout_p must be in [0, 1], got {modality_dropout_p}.")
@@ -449,9 +460,27 @@ class Trainer:
             term.validateModel(self.model)
             term.bindTrainerSettings(term_settings)
 
+        self.param_groups = tuple(param_groups or ())
         if isinstance(optimizer, Optimizer):
+            if self.param_groups:
+                raise ValueError(
+                    "param_groups is for the optimizer that Trainer builds from a class. "
+                    "The optimizer you passed is already built, with the parameter groups you "
+                    "gave it: set a learning rate per module there."
+                )
             self.optimizer = optimizer
             self._addLossTermParametersToOptimizer()
+        elif self.param_groups:
+            groups = buildParamGroups(
+                self.model,
+                self.param_groups,
+                extra_parameters=[
+                    *self.loss_terms.parameters(),
+                    *self.reconstruction_losses.parameters(),
+                ],
+            )
+            self.optimizer = optimizer(groups, **(optimizer_kwargs or {}))
+            applyLrFactors(self.optimizer.param_groups)
         else:
             self.optimizer = optimizer(self._trainedParameters(), **(optimizer_kwargs or {}))
 
@@ -672,7 +701,20 @@ class Trainer:
 
         Args:
             loss: The scalar to differentiate (already divided by `accumulate_grad_batches`).
+
+        Raises:
+            RuntimeError: If `loss` does not depend on any parameter that can train. That is
+                what a batch gives when every module it went through is frozen
+                (`freeze_modules`, roadmap P6-5), and PyTorch's own message for it
+                ("element 0 of tensors does not require grad") does not say so.
         """
+        if not loss.requires_grad:
+            raise RuntimeError(
+                "The loss of this batch does not depend on any parameter that can train, so "
+                "there is nothing to backpropagate. Every module the batch went through is "
+                "probably frozen (the `freeze_modules` callback, or `requires_grad_(False)`), "
+                "for example a batch that has only the modality of a frozen side."
+            )
         backward(self.scaler.scale(loss) if self.scaler is not None else loss)
 
     def _scaleGradients(self, factor: float) -> None:

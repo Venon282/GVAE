@@ -638,12 +638,12 @@ D-13 stays open: the terms take the distance by name and have no default, and th
 measurements of P6-6. D-16 is enforced as a build check and not a conversion. The numbers are those of a
 small synthetic pair (I-15). Flagged and not fixed: the logged alignment value is the weighted one, the cross
 decoding runs the decoders in training mode (their BatchNorm statistics see the other modality; the freeze
-policy of P6-5 is the tool for it), and `stop_gradient: target` flips `requires_grad` for one decoding.
+policy of P6-5 puts frozen decoders in evaluation mode, which is the tool for it), and `stop_gradient: target` flips `requires_grad` for one decoding.
 **Depends on.** P5-4, P5-5, P5-6, P6-2, P6-3.
 
 ### P6-5. Freeze and learning-rate policy (M, needs D-14)
 
-**status**: todo
+**status**: done
 **Why.** The pair stage can undo what the solo stages learned, especially with few pairs. PairVAE
 trains both VAEs together. A gentler variant is useful in itself, and the same mechanism serves a
 one-sided alignment, a frozen reference (P7-5) and a post-hoc prior (P4-2).
@@ -663,6 +663,20 @@ baseline and the full stage 3.
 **Done when.** The parameters and the buffers of a frozen module are bit-identical after training
 (a test), an unfreeze epoch works across a resume, and the groups reach the optimizer and the
 checkpoint.
+**Delivered.** ADR 0055; the callback `freeze_modules` (`training/callbacks/freeze_modules.py`: `modules` patterns
+and an optional `until_epoch`, the first epoch in which they train); `training.param_groups` (a list of `modules`,
+`lr_factor` and an optional `name`; `training/param_groups.py`, built by `Trainer` from the class of the optimizer, and
+`ParamGroupConfig` in `config/training.py`), with the default still one group; the pattern matcher both share
+(`training/module_patterns.py`); a check in `loadCheckpoint` that refuses a resume with other groups than the ones that
+wrote the file; a clear error when a batch gives no trainable parameter a gradient. A frozen module keeps its place in
+the optimizer, so a checkpoint has the same layout frozen or not and a run resumes across the release epoch.
+`tests/unit/test_module_patterns.py`, `tests/unit/test_freeze_modules.py`, `tests/unit/test_param_groups.py` and
+`tests/integration/test_freeze_and_param_groups.py` (on the real pair model, both `BatchNorm1d` and `BatchNorm2d`: the
+parameters and buffers of a frozen side or of the decoders are bit-identical after training, with the cross
+reconstruction too; a resume before, at and after the release epoch gives the uninterrupted run; the groups reach the
+optimizer and the checkpoint through Hydra overrides). D-14 stays as proposed: nothing frozen by default, the other
+options opt-in. The option "both VAEs frozen, an alignment head trained" needs the adapter of P6-8 and is refused with
+that message until then. Measured on the synthetic pair (I-15) in ADR 0055.
 
 ### P6-6. Evaluation across two separate latent spaces, with baselines (M)
 
@@ -1075,7 +1089,7 @@ measured.
 | D-6 | **Beta hyperparameters** (spec §11, third bullet): warm-up length, cyclical period, per-space values, the loss weights. Empirical. | none yet | Decide after the first real run (P5-8). P7-1 narrows the question to the choice of beta | none |
 | D-7 | **Serving target** (spec §11, fourth bullet): API, batch inference or edge. | unknown | Nothing beyond steps 0 and 1 of P4-4 until answered | P4-4 steps 2 and 3 |
 | D-13 | **The latent distance of the pair stage.** The text of PairVAE read for this roadmap does not name its distance, and its supplementary information was not accessible. | one of the six of P6-3, or several | Ship all six. Train with `wasserstein2_diag` (the squared form) by default, and `mean_mse` as the ablation. Settle it after reading the paper's supplementary information and after the P6-6 measurements | P6-3, P6-4 |
-| D-14 | **What is frozen in stage 3.** The paper trains both VAEs together. | nothing; the decoders; one side; both VAEs, with an alignment head only | Nothing frozen. Freezing is opt-in (P6-5) | P6-5 |
+| D-14 | **What is frozen in stage 3.** The paper trains both VAEs together. | nothing; the decoders; one side; both VAEs, with an alignment head only | Nothing frozen. Freezing is opt-in (P6-5, built; ADR 0055 measures the options on the synthetic pair) | P6-5 |
 | D-15 | **Stage orchestration.** | A: three ordinary runs chained by checkpoints. B: one driver that runs the three stages from one config | A, since each stage is then a normal, resumable, reproducible run. Revisit B after P6-7 | P6-7 |
 | D-16 | **Latent widths in a pair.** | require equal widths; or an adapter head used by the alignment only | Require equal widths. The adapter is a P6-8 extension | P6-4 |
 | D-17 | **Go-ahead and order for Phases 7 and 4.** | per item | Phase 7: P7-1, P7-2 and P7-3 first, since they answer I-4 and need only Phase 5. P7-4 and P7-5 on a named need. Phase 4: P4-0, then the order of section 7 | Phases 7 and 4 |

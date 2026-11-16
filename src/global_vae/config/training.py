@@ -66,6 +66,7 @@ from global_vae.training.beta_schedules.registry import getBetaScheduleClass
 from global_vae.training.callbacks.base import TrainerCallback
 from global_vae.training.callbacks.registry import getCallbackClass
 from global_vae.training.loggers.registry import getLoggerClass
+from global_vae.training.param_groups import ParamGroupSpec
 from global_vae.training.stage_manifest import (
     StageManifest,
     buildStageManifest,
@@ -186,6 +187,28 @@ class WarmStartEntryConfig:
 
 
 @dataclass
+class ParamGroupConfig:
+    """One learning-rate group of the optimizer: some modules and a factor (roadmap P6-5, ADR 0055).
+
+    Attributes:
+        modules: Module name patterns, matched against the dotted names of the model's modules
+            (`encoders.signal`, `decoders.*`; `*` stands for any characters, dots included).
+            A module stands for its parameters and those of every module inside it. A pattern
+            that matches no module is an error.
+        lr_factor: The group's learning rate is this times `optimizer.kwargs.lr`: `0.1` for a
+            pretrained module that should move slowly. Above zero; to stop a module from
+            training use the `freeze_modules` callback.
+        name: What the group is called in the checkpoint and in messages. `None` (default) uses
+            the patterns joined by `+`. Not `default`, the name of the group of every parameter
+            that no entry names.
+    """
+
+    modules: list[str] = MISSING
+    lr_factor: float = MISSING
+    name: str | None = None
+
+
+@dataclass
 class TrainingConfig:
     """Top-level training configuration, matching `Trainer`'s constructor almost field-for-field.
 
@@ -274,6 +297,14 @@ class TrainingConfig:
             copied: this run has its own optimizer, its own seed and a step counter at 0.
             Applied by `applyWarmStartFromConfig` (`scripts/train.py` calls it), and not when
             `resume_from` is set.
+        param_groups: Learning-rate groups by module, a list of `ParamGroupConfig` (`modules`,
+            `lr_factor`, `name`; roadmap P6-5, ADR 0055), so that pretrained modules can run at a
+            fraction of the rate. Empty (default): one group at the optimizer's rate, as before.
+            Each entry is one optimizer group at `lr_factor` times the rate; a parameter
+            belongs to the first entry that matches it, and what no entry names stays in a last
+            group named `default` at the full rate. A resumed run must have the same list as the
+            run that wrote its checkpoint. To stop modules from training, list them in the
+            `freeze_modules` callback instead (`callbacks`, below).
         loggers: Experiment loggers to attach (spec §10 "Experiment
             tracking"). Empty (default) means no logger; several may
             be listed at once (`docs/adr/0008-experiment-loggers.md`).
@@ -351,6 +382,7 @@ class TrainingConfig:
     resume_from: str | None = None
     stage: str | None = None
     warm_start: list[WarmStartEntryConfig] = field(default_factory=list)
+    param_groups: list[ParamGroupConfig] = field(default_factory=list)
 
 
 def listSupportedOptimizerNames() -> list[str]:
@@ -770,6 +802,46 @@ def buildLossTerms(
     return terms, weights
 
 
+def buildParamGroupSpecs(config: TrainingConfig) -> list[ParamGroupSpec]:
+    """Build the `Trainer`'s learning-rate group specs from `config.param_groups`.
+
+    Args:
+        config: The training config. Its `param_groups` entries are read in order.
+
+    Returns:
+        One `ParamGroupSpec` per entry; empty for `param_groups: []`. Whether a pattern matches a
+        module of the model is checked later, when the trainer builds the optimizer.
+
+    Raises:
+        ValueError: If an entry is not a mapping with `modules` and `lr_factor`, or if the
+            entry is invalid (see `ParamGroupSpec`). The message names the entry by its index.
+    """
+    specs: list[ParamGroupSpec] = []
+    for index, entry in enumerate(config.param_groups):
+        where = f"training.param_groups[{index}]"
+        if not _isParamGroupEntry(entry):
+            raise ValueError(
+                f"{where} must be a mapping with `modules` (a list of module name patterns) and "
+                f"`lr_factor` (a number above zero), got {entry!r}."
+            )
+        try:
+            specs.append(
+                ParamGroupSpec(
+                    modules=tuple(entry.modules),
+                    lr_factor=entry.lr_factor,
+                    name=entry.name,
+                )
+            )
+        except ValueError as error:
+            raise ValueError(f"{where}: {error}") from error
+    return specs
+
+
+def _isParamGroupEntry(entry: Any) -> bool:
+    """Whether `entry` has the three attributes of a `ParamGroupConfig` (a dataclass or a node)."""
+    return all(hasattr(entry, key) for key in ("modules", "lr_factor", "name"))
+
+
 def buildCallbacksFromConfig(
     config: TrainingConfig, config_snapshot: Any = None
 ) -> list[TrainerCallback]:
@@ -1088,6 +1160,7 @@ def buildTrainerFromConfig(
         loss_terms=loss_terms,
         loss_term_weights=loss_term_weights,
         stage_manifest=stage_manifest,
+        param_groups=buildParamGroupSpecs(config),
     )
 
 

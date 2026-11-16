@@ -23,9 +23,11 @@ and in [ADR 0052](../adr/0052-warm-start-from-solo-checkpoints.md).
     [ADR 0054](../adr/0054-pair-stage-loss-terms.md)). Without them a stage 3 run trains the two
     modalities from their solo weights with the reconstruction and regularization terms only, and
     nothing pulls the two latent spaces together; you ask for the terms in `training.loss_terms`
-    ([below](#pull-the-two-latent-spaces-together)). The freeze policy and the `pair_align`
-    experiment file are roadmap items P6-5 to P6-7. [Choose a latent distance](choose-a-latent-distance.md)
-    says what each distance compares and which to try first.
+    ([below](#pull-the-two-latent-spaces-together)). Freezing modules and giving them a lower
+    learning rate are built too (P6-5, [ADR 0055](../adr/0055-freeze-and-learning-rate-groups.md),
+    [below](#keep-the-solo-solutions-freeze-or-slow-down)); the `pair_align` experiment file is roadmap
+    item P6-7. [Choose a latent distance](choose-a-latent-distance.md) says what each distance compares and
+    which to try first.
 
 **On this page**
 
@@ -37,6 +39,7 @@ and in [ADR 0052](../adr/0052-warm-start-from-solo-checkpoints.md).
 - [What the warm start refuses](#what-the-warm-start-refuses)
 - [What it copies, and what it does not](#what-it-copies-and-what-it-does-not)
 - [Pull the two latent spaces together](#pull-the-two-latent-spaces-together)
+- [Keep the solo solutions: freeze or slow down](#keep-the-solo-solutions-freeze-or-slow-down)
 
 ## Run the two solo stages
 
@@ -247,8 +250,9 @@ decoder you name, parameters and buffers (the running statistics of a batch norm
 included). Not copied: the optimizer state, the step and epoch counters, the history, the
 random-number state and the callbacks' state. Stage 3 is a new run, with its own optimizer, its
 own seed and a step counter at 0, and its checkpoints carry its own manifest (`stage: pair`, two
-modalities, two spaces). Freezing the copied modules and a lower learning rate for them are a later roadmap item
-(P6-5); the pair loss terms are [the next section](#pull-the-two-latent-spaces-together).
+modalities, two spaces). Keeping the copied modules fixed, or at a lower learning rate, is
+[a section of its own](#keep-the-solo-solutions-freeze-or-slow-down); the pair loss terms are
+[the next section](#pull-the-two-latent-spaces-together).
 
 ## Pull the two latent spaces together
 
@@ -334,7 +338,91 @@ staying where the solo stages left them. Measure the three before and after the 
 Two things to know. The cross reconstruction runs the decoders in training mode, so their batch
 normalization layers update their running statistics with activations that come from the other
 modality's codes; a long stage with a small momentum should check the self reconstruction in
-evaluation mode (the freeze policy of P6-5 will put frozen modules in evaluation mode). And a run
+evaluation mode, or [freeze the decoders](#keep-the-solo-solutions-freeze-or-slow-down), which puts them in
+evaluation mode and keeps their statistics where the solo stage left them. And a run
 with the terms resumes like any other (`training.resume_from`): the terms have no parameters, and
 the random-number state of the checkpoint is what makes a stochastic distance such as `mixture_jsd`
 resume to the same curve.
+
+## Keep the solo solutions: freeze or slow down
+
+With a few pairs and small batches the pair stage can undo what the solo stages learned: every weight is free to
+move, and the `BatchNorm` layers of the CNN blocks move their running statistics at every forward pass in training
+mode, whether the weights train or not. Two settings, both off by default (nothing frozen, one learning rate, as in
+the paper), hold the solo solutions back ([ADR 0055](../adr/0055-freeze-and-learning-rate-groups.md)).
+
+### Freeze modules
+
+`freeze_modules` is a callback, chosen in `training.callbacks` like the others:
+
+```yaml
+training:
+  callbacks:
+    freeze_modules:
+      modules: [decoders.*]     # name patterns, see below
+      until_epoch: 10           # optional: frozen in epochs 0 to 9, training from epoch 10
+```
+
+or from the command line (quote it, the shell would expand the `*`):
+
+```bash
+python scripts/train.py ... '+training.callbacks.freeze_modules.modules=[decoders.*]' \
+  +training.callbacks.freeze_modules.until_epoch=10
+```
+
+A frozen module is three things at once: its parameters do not train (and no optimizer moves them, weight decay
+included), it is in **evaluation mode** every epoch (so its `BatchNorm` statistics and any dropout stand still, which
+`requires_grad=False` alone does not do), and it **stays in the optimizer**, so the checkpoint has the same layout
+whether a module is frozen or not. `until_epoch` is the first epoch in which the modules train; without it they stay
+frozen for the whole run. A run interrupted before, at or after that epoch and resumed is frozen, or released, exactly
+as the uninterrupted one would have been. When the run ends, every `requires_grad` goes back as it was.
+
+The patterns match the dotted names of the model's modules (`encoders.signal`, `decoders.image`, a layer inside one, as
+in `encoders.signal.conv.0`), with `*` standing for any characters, dots included. A module stands for its own parameters
+and for every module inside it. A pattern that matches no module stops the run with a message that lists real names,
+because a typo that freezes nothing looks like a stage that works.
+
+| You want | `modules` |
+|---|---|
+| The decoders fixed, the encoders adapt to them | `[decoders.*]` |
+| One modality as an anchor, the other moves toward it | `[encoders.signal, decoders.signal]` |
+| Only the encoder of one modality fixed | `[encoders.image]` |
+| Both VAEs fixed and only an alignment head trained | Not available yet: it needs the adapter of roadmap P6-8. Freezing every parameter the optimizer holds stops before the first step and says so. |
+
+All the patterns of one `freeze_modules` share its `until_epoch`.
+
+### Slow modules down
+
+`training.param_groups` gives some modules a fraction of the learning rate:
+
+```yaml
+training:
+  optimizer: {name: adamw, kwargs: {lr: 0.0003}}
+  param_groups:
+    - modules: [encoders.signal, decoders.signal]
+      lr_factor: 0.1              # a tenth of the rate, 0.00003
+      name: signal                # optional, shown in the checkpoint and the messages
+```
+
+The trainer builds the optimizer from one group per entry, in order, and a last group named `default` with everything
+that no entry took (and the parameters of the loss terms) at the full rate. The first entry that matches a parameter
+takes it, so put a narrow entry before a wide one. An entry that matches no module, or whose modules were all taken by
+earlier entries, is an error. `lr_factor` is above 0 (to stop a module, freeze it: a rate of 0 would leave its
+`BatchNorm` statistics moving). The schedule callbacks (`linear_warmup_lr`, `cosine_lr`) keep the ratio between the
+groups all through the run, and `lr/group<i>` in the logs shows each rate. Without `param_groups` the optimizer is
+built as before.
+
+The groups are written to the checkpoint with the optimizer, and a resumed run must be given the same ones: PyTorch
+restores the saved rates, so a config that says 0.5 where the file says 0.1 would be ignored without a word, and
+`loadCheckpoint` refuses it instead (the message names `training.param_groups` and `restore_optimizer=False`, which
+loads the weights only and starts a new optimizer).
+
+!!! warning "What the measurements say, and do not say"
+    On the small synthetic pair of [ADR 0055](../adr/0055-freeze-and-learning-rate-groups.md) (30 epochs of stage
+    3 on 64 pairs, three seeds), the image self reconstruction of the paper's setting ended anywhere between 57 and
+    385 for a start of 84.5, and with the decoders frozen, or both sides at a tenth of the rate, it ended within 1 of
+    each other, at or below the start. The price was on the other side: the solo signal model was far from converged,
+    the free run kept improving it, and a frozen or slowed side did not. A frozen anchor aligned less in 30 epochs
+    (a distance of 28 to 39 against 7), and a release in the middle of the stage undid part of the protection.
+    These are the numbers of a toy and not a recommendation: D-14 stays at "nothing frozen" until a real pair says
+    otherwise (finding I-15).

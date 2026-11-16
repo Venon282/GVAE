@@ -38,6 +38,9 @@ without any training state at all:
 - `reconstruction_loss_state_dict`: the same for the reconstruction losses that are modules with
   state (a learned noise scale, say, roadmap P5-3, ADR 0048). Absent for the four classic losses,
   which have none, so their files are what they were.
+- `optimizer_state_dict`'s `param_groups` carry a `name` and an `lr_factor` for each group of
+  `training.param_groups` (roadmap P6-5, ADR 0055), so the groups reach the file, and a resume
+  that was given other groups is refused with a message that names both layouts.
 - `stage_manifest`: only present when the saving `Trainer` had one (`training.stage` is set,
   roadmap P6-1, ADR 0051). A dict of plain values saying which stage of a staged recipe the file
   is: a free label, the modalities, the latent spaces with their widths, a digest of the model
@@ -75,6 +78,7 @@ them from there, not from here.
 import logging
 import pickle
 import random
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -518,6 +522,49 @@ def readCheckpointWeights(
     )
 
 
+def _paramGroupLayout(groups: Sequence[Mapping[str, Any]]) -> list[tuple[Any, Any]]:
+    """Return `(name, lr_factor)` of each parameter group; `(None, None)` for one with neither."""
+    return [(group.get("name"), group.get("lr_factor")) for group in groups]
+
+
+def _checkParamGroupLayout(
+    optimizer: Optimizer, saved_state: Mapping[str, Any], path: Path
+) -> None:
+    """Refuse an optimizer whose named learning-rate groups differ from the saved ones.
+
+    The groups of `training.param_groups` (`training/param_groups.py`, ADR 0055) carry a `name`
+    and an `lr_factor`. PyTorch restores a group's own settings, the learning rate among them,
+    from the checkpoint, so a run built with other groups would carry on with the saved rates and
+    ignore its config without a word, and one with another number of groups would be refused with
+    a message that does not say why. This compares the names and the factors, in order, and says
+    that the config must be the one the checkpoint was written with.
+
+    It does nothing when neither side has a named group, which is every checkpoint written before
+    `training.param_groups` existed and every run that does not use them: PyTorch's own check
+    stands then.
+
+    Args:
+        optimizer: The optimizer to restore into, built by the run that resumes.
+        saved_state: The `optimizer_state_dict` stored in the checkpoint.
+        path: The checkpoint's path, for the message.
+
+    Raises:
+        ValueError: If the two layouts differ and at least one holds a name or a factor.
+    """
+    current = _paramGroupLayout(optimizer.param_groups)
+    saved = _paramGroupLayout(saved_state.get("param_groups", []))
+    if current == saved or all(entry == (None, None) for entry in (*current, *saved)):
+        return
+    raise ValueError(
+        f"Checkpoint '{path}' was saved with the learning-rate groups {saved} "
+        f"((name, lr_factor) of each), and this run's optimizer has {current}. A resumed run "
+        f"carries on with the checkpoint's rates, so it must be given the same "
+        f"`training.param_groups` as the run that wrote the file (and the same number of loss "
+        f"term parameters). Change the config back, or load the weights only "
+        f"(`restore_optimizer=False`) to start a new optimizer."
+    )
+
+
 def loadCheckpoint(
     path: str | Path,
     model: nn.Module,
@@ -622,6 +669,7 @@ def loadCheckpoint(
                 f"Checkpoint '{resolved_path}' has no optimizer state (it was saved without "
                 f"an optimizer). Pass optimizer=None to load model weights only."
             )
+        _checkParamGroupLayout(optimizer, checkpoint["optimizer_state_dict"], resolved_path)
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
     manifest = _readStageManifest(checkpoint.get("stage_manifest"), resolved_path)

@@ -40,6 +40,15 @@ training data, that it has not collapsed; a failure leaves the model as it was. 
 `training.warm_start` and `applyWarmStartFromConfig` are in `config/training.py` (training must not import config); the
 mechanism knows nothing of Hydra.
 
+Freezing and learning-rate groups (roadmap P6-5, `docs/adr/0055-freeze-and-learning-rate-groups.md`): the callback
+`callbacks/freeze_modules.py` (`modules` patterns, optional `until_epoch`) turns `requires_grad` off, drops the gradients and puts
+the modules in evaluation mode in `onEpochBegin`, after `Trainer.fitEpoch` has called `model.train()` (the CNN blocks use
+`BatchNorm`, whose running statistics move in training mode whatever `requires_grad` says). A frozen module stays in the
+optimizer, and the callback has no state, since the epoch decides. `Trainer(param_groups=...)` builds the optimizer from
+`ParamGroupSpec`s (`param_groups.py`): one group per entry, then a `default` one, each with `name` and `lr_factor`, and
+`loadCheckpoint` refuses a resume whose groups differ. `module_patterns.py` is the one place that says what a pattern
+matches. `training.param_groups` is built in `config/training.py` (`ParamGroupConfig`, `buildParamGroupSpecs`).
+
 `beta_schedules/` predates `trainer.py` and does not depend on it: see
 `beta_schedules/base.py`, `beta_schedule_resolution.py`, and
 `docs/adr/0004-pluggable-beta-schedules.md`. `Trainer` calls

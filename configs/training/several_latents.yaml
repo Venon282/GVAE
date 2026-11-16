@@ -66,6 +66,19 @@ stage: null
 # configs/experiment/ and docs/adr/0052-warm-start-from-solo-checkpoints.md.
 warm_start: []
 
+# Learning-rate groups by module (docs/adr/0055-freeze-and-learning-rate-groups.md): a list of
+# `{modules: [<module name pattern>, ...], lr_factor: <number above 0>, name: <optional>}`.
+# Each entry is one optimizer group running its modules at `lr_factor` times
+# `optimizer.kwargs.lr`, for pretrained modules that should move slowly, e.g.
+#   param_groups:
+#     - {modules: [encoders.signal, decoders.signal], lr_factor: 0.1}
+# A pattern is matched against the whole dotted name of a module (`encoders.signal`, `decoders.*`;
+# `*` stands for any characters, dots included), a parameter belongs to the first entry that
+# matches it, and what no entry names stays in a last group named `default` at the full rate. `[]`
+# is one group, as before. A resumed run must have the same list as the run that wrote its
+# checkpoint. To stop modules from training at all, use the `freeze_modules` callback below.
+param_groups: []
+
 loggers:
   - name: csv
     kwargs:

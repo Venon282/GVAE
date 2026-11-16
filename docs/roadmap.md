@@ -680,7 +680,7 @@ that message until then. Measured on the synthetic pair (I-15) in ADR 0055.
 
 ### P6-6. Evaluation across two separate latent spaces, with baselines (M)
 
-**status**: todo
+**status**: done
 **Why.** I-8. A distance that goes to zero proves nothing, since two collapsed latent spaces also
 minimize it.
 **Do.** `evaluation/latent_alignment.py`, and flags of `scripts/evaluate.py` that name a pair of
@@ -710,6 +710,32 @@ repeated random splits and seeds, never one run.
 in one command on the synthetic pair, and the collapse guard fires on a deliberately collapsed run
 (a test).
 **Depends on.** P5-5 (encode only), P6-2.
+**Delivered.** ADR 0056; `evaluation/latent_alignment.py` (`evaluateLatentAlignment`, the views `space@modality`, and
+`LatentAlignmentReport` with its JSON, console and Markdown forms) and the flags of `scripts/evaluate.py`
+(`--latent-pair FIRST SECOND`, `--train-dataloader-factory`, `--latent-distances`, `--solo-active-units`,
+`--min-active-units`, `--procrustes-center`, `--integrity-shuffles`, `--integrity-margin`, `--max-train-samples`,
+`--alignment-seed`), which write `latent_alignment.json` and `.md` next to `results.json`. For each pair: every registered
+distance of P6-3 on paired and on mismatched samples (a distance that is 0 for strangers too is marked `separates:
+false`), retrieval in both directions with its chance level (`computeRetrievalMetrics`, unchanged), cross
+reconstruction next to self reconstruction and their gap (the metrics table of P3-6 gets the cross rows and a
+`(cross minus self)` row for each, through the `gaps` argument of `buildMetricsTable`), the latent diagnostics of both
+spaces with the collapse guard (fewer active units than the solo stage, else a floor), the post-hoc orthogonal
+Procrustes baseline (`fitOrthogonalProcrustes`, closed form, fitted on the training pairs and applied to the held-out
+ones, with its retrieval and its cross reconstruction) and the pair-integrity check (the Procrustes recall on the
+training pairs must beat chance plus a margin and a shuffled control, else the pairs are suspect). A shared latent space
+is a pair as well, read from one modality at a time (`z_fused@signal`, `z_fused@image`). The four baselines run in one
+command on the synthetic pair, `python examples/05_alignment_baselines.py` (`evaluation/alignment_baselines.py`,
+`runAlignmentBaselines`): the solo spaces, Procrustes, stage 3 once per distance, and joint training with `poe` at equal
+training, over repeated random splits and seeds (five on 72 pairs by default) with the mean and the spread and the
+integrity check counted per repeat. A run that does not pass the flags is unchanged. The collapse guard fires on a
+deliberately collapsed run, on a tiny pair model whose encoders are collapsed by hand and on the real pipeline under an
+enormous KL weight in stage 3. `tests/unit/test_latent_alignment.py`, `tests/unit/test_alignment_baselines.py`,
+`tests/unit/test_metrics_table.py`, `tests/integration/test_latent_alignment_script.py` and
+`tests/integration/test_alignment_baselines.py` (marked `slow`). Measured on the synthetic pair (I-15) in ADR 0056: the
+solo spaces are at chance, Procrustes is above it and well short of stage 3, every distance of stage 3 beats both, the
+distances do not separate from each other within the spread of five repeats on 18 held-out pairs, so D-13 stays open,
+`mixture_jsd` reads a ratio of 1.000 on narrow posteriors because it saturates at `ln 2`, a permuted join is flagged by
+the integrity check in 5 of 5 repeats and a collapsed stage 3 by the guard in 5 of 5.
 
 ### P6-7. Configs, script wiring, how-to and end-to-end test (M, needs D-15)
 
@@ -1088,7 +1114,7 @@ measured.
 | D-5 | **Pairing mechanism** (spec §11, second bullet). P3-2 took the default and the owner has not confirmed it. | per dataset | Confirm: pair by sample ID in the caller's `loader_factory`, and keep unpaired samples out of the paired stages | P5-8 (paired part), real-data acceptance of Phase 6 |
 | D-6 | **Beta hyperparameters** (spec §11, third bullet): warm-up length, cyclical period, per-space values, the loss weights. Empirical. | none yet | Decide after the first real run (P5-8). P7-1 narrows the question to the choice of beta | none |
 | D-7 | **Serving target** (spec §11, fourth bullet): API, batch inference or edge. | unknown | Nothing beyond steps 0 and 1 of P4-4 until answered | P4-4 steps 2 and 3 |
-| D-13 | **The latent distance of the pair stage.** The text of PairVAE read for this roadmap does not name its distance, and its supplementary information was not accessible. | one of the six of P6-3, or several | Ship all six. Train with `wasserstein2_diag` (the squared form) by default, and `mean_mse` as the ablation. Settle it after reading the paper's supplementary information and after the P6-6 measurements | P6-3, P6-4 |
+| D-13 | **The latent distance of the pair stage.** The text of PairVAE read for this roadmap does not name its distance, and its supplementary information was not accessible. | one of the six of P6-3, or several | Ship all six. Train with `wasserstein2_diag` (the squared form) by default, and `mean_mse` as the ablation. Settle it after reading the paper's supplementary information and on a real pair: the comparison is built (P6-6, `examples/05_alignment_baselines.py`), and on the synthetic pair the six do not separate within the spread (ADR 0056) | P6-3, P6-4, P6-6 |
 | D-14 | **What is frozen in stage 3.** The paper trains both VAEs together. | nothing; the decoders; one side; both VAEs, with an alignment head only | Nothing frozen. Freezing is opt-in (P6-5, built; ADR 0055 measures the options on the synthetic pair) | P6-5 |
 | D-15 | **Stage orchestration.** | A: three ordinary runs chained by checkpoints. B: one driver that runs the three stages from one config | A, since each stage is then a normal, resumable, reproducible run. Revisit B after P6-7 | P6-7 |
 | D-16 | **Latent widths in a pair.** | require equal widths; or an adapter head used by the alignment only | Require equal widths. The adapter is a P6-8 extension | P6-4 |

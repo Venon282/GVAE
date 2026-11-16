@@ -54,3 +54,4 @@
 - [0053: Latent distance registry](0053-latent-distance-registry.md)
 - [0054: Pair-stage loss terms](0054-pair-stage-loss-terms.md)
 - [0055: Freeze modules and learning-rate groups](0055-freeze-and-learning-rate-groups.md)
+- [0056: Evaluation across two separate latent spaces, with baselines](0056-evaluation-across-two-latent-spaces.md)

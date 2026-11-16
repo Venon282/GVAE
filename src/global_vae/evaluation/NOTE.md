@@ -54,4 +54,31 @@ five). `streaming_metrics.py` streams the ten array metrics and refuses the othe
 Not done on purpose: the cross-modal and paired reports keep the five default metrics, `edge_auc` has no node counts to leave
 padding out (call `computeEdgeScores` with them), and a metric of a single modality is not told apart by its data.
 
+# Across two separate latent spaces (roadmap P6-6)
+
+`latent_alignment.py` evaluates a pair of latent **views** (a space and the modalities it is read from: `z_signal`, or
+`z_fused@signal` for a shared space read from one modality) on held-out pairs, where `paired_alignment.py` needs one
+space that both modalities reach (`docs/adr/0056-evaluation-across-two-latent-spaces.md`). `evaluateLatentAlignment`
+reads the held-out batches once, and the training pairs once (posteriors only, through `GlobalVae.encode`), and gives:
+retrieval in both directions with the chance level (`computeRetrievalMetrics`), every registered latent distance on
+paired and on mismatched samples (`computeDistanceTable`: a distance that is 0 for strangers too is marked
+`separates=False`), cross reconstruction (`GlobalVae.decode` of the code of one view under the name of the other's
+space) next to self reconstruction and their gap, the latent diagnostics of both views with the collapse guard
+(`checkCollapse`: fewer active units than the solo stage, else a floor), the post-hoc orthogonal Procrustes baseline
+(`fitOrthogonalProcrustes`, closed form, fitted on the training pairs and applied to the held-out ones) and the
+pair-integrity check (`checkPairIntegrity`: the Procrustes recall on the training pairs must beat chance plus a margin
+and the best of a shuffled control, or the pairs are suspect, roadmap I-8). Opt-in like the other reports:
+`scripts/evaluate.py --latent-pair` runs it, writes `latent_alignment.json` and `.md` next to `results.json`, and adds
+the cross rows and their gap to the metrics table (`buildMetricsTable(..., gaps=...)`). `evaluate()` is unchanged.
+
+`alignment_baselines.py` runs the four baselines of the roadmap on one random split per repeat (`runAlignmentBaselines`:
+the solo spaces, Procrustes, stage 3 once per distance, joint training with a shared latent) and reports a mean and a
+spread over the repeats (`BaselineComparison`); `examples/05_alignment_baselines.py` is its command on a synthetic
+linked pair.
+
+Not done on purpose: the two spaces must have equal widths (roadmap D-16, a distance, a retrieval and an orthogonal map
+are undefined otherwise); a direction whose target space is read only through a `concat` assembler has no cross
+reconstruction; the integrity check is in-sample and so only as strong as its shuffled control; no number here is a
+measurement of real data (roadmap I-15).
+
 # Nothing else is currently deferred.

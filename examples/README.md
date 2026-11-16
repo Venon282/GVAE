@@ -189,3 +189,36 @@ real signal plus image pairs do not have.
 Every output (the synthetic dataset, checkpoints, `metrics.csv`, the Hydra run folder) is
 written to `examples/outputs/04_paired_loader/` (git-ignored, same pattern as above). The
 default 10 epochs take well under a minute on CPU.
+
+## `05_alignment_baselines.py`
+
+The four **alignment baselines** of roadmap P6-6 on a synthetic linked signal plus image pair, in one command
+(`docs/adr/0056-evaluation-across-two-latent-spaces.md`). A distance between two separately trained latent spaces that
+falls during stage 3 is not a result, since two collapsed spaces also minimize it, so the script runs the alternatives
+on the same pairs and the same held-out split and scores each with
+`global_vae.evaluation.latent_alignment.evaluateLatentAlignment`:
+
+- **0**: the two solo spaces as they are, no stage 3 (expected at chance for retrieval);
+- **1**: a post-hoc orthogonal Procrustes map between the solo posterior means, fitted on the training pairs in closed
+  form and applied to the held-out pairs;
+- **2**: stage 3 (the `latent_alignment` and `cross_reconstruction` terms of ADR 0054), once for each registered latent
+  distance;
+- **3**: joint training from scratch with one shared latent space and a product-of-experts fusion, for as many epochs as
+  the staged route spends.
+
+The table is a **mean and a spread over repeated random splits and seeds** (the reference paper uses five seeds on 72
+pairs, which are the defaults): retrieval with its chance level, cross and self reconstruction `R2`, the active units
+against the solo stage, and how many repeats a guard flagged. The pairs are checked as well: the Procrustes retrieval on
+the training pairs must be above chance. The data are synthetic and every setting is a placeholder (finding I-15), so
+the script shows that the harness runs, what its guards catch and what to look at, not which route is best.
+
+```bash
+python examples/05_alignment_baselines.py                    # defaults: 72 pairs, 5 repeats, all distances
+python examples/05_alignment_baselines.py --repeats 2 --pair-epochs 40 --distances cosine mean_mse   # a quick check
+python examples/05_alignment_baselines.py --help             # every option
+```
+
+The defaults train about eleven models per repeat and take a long time on a CPU. Outputs go to
+`examples/outputs/05_alignment_baselines/` (git-ignored): `comparison.md` and `comparison.json`. For your own pairs,
+build a `PairPool` of your tensors and call `global_vae.evaluation.alignment_baselines.runAlignmentBaselines` with a
+`BaselineRecipe` that names your solo and pair experiments.

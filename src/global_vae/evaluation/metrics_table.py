@@ -26,6 +26,10 @@ from global_vae.evaluation.evaluate import EvaluationResults
 ALL_INPUTS = "all"
 """The `inputs` label of the rows that come from an ordinary evaluation pass."""
 
+GAP_SUFFIX = " (cross minus self)"
+"""Appended to the modality of a row that holds the gap between a cross and a self reconstruction
+(`evaluation.latent_alignment`, roadmap P6-6)."""
+
 _LABEL_COLUMNS = ("inputs", "modality")
 
 
@@ -145,6 +149,7 @@ def buildMetricsTable(
     evaluation: EvaluationResults | None = None,
     cross_modal: Mapping[frozenset[str], Mapping[str, Mapping[str, float]]] | None = None,
     omit_subsets: Collection[frozenset[str]] = (),
+    gaps: Mapping[frozenset[str], Mapping[str, Mapping[str, float]]] | None = None,
 ) -> MetricsTable:
     """Build the per-modality table of an evaluation, with the cross-modal cells if there are any.
 
@@ -156,13 +161,18 @@ def buildMetricsTable(
         omit_subsets: Input subsets of `cross_modal` to leave out. Pass the full set of input
             modalities when `evaluation` is given, since the ordinary pass already is that
             subset and the two would write the same numbers twice.
+        gaps: The gap between a cross and a self reconstruction, in the shape of `cross_modal`
+            (`LatentAlignmentReport.gapBySubset`, roadmap P6-6). Each cell becomes one more row,
+            after every other row, with the same `inputs` label and the modality written with
+            `GAP_SUFFIX` (`"image (cross minus self)"`), so that a cross row and its gap sit in
+            the same table. `None` (default) adds nothing.
 
     Returns:
         The `MetricsTable`. Its columns are the metric names of the rows, in order of first
         appearance (`mse`, `rmse`, `mae`, `r2`, `pearson_r` for the defaults).
 
     Raises:
-        ValueError: If neither argument gives a row.
+        ValueError: If no argument gives a row.
     """
     rows: list[MetricsTableRow] = []
     if evaluation is not None:
@@ -178,6 +188,12 @@ def buildMetricsTable(
             rows.extend(
                 MetricsTableRow(_subsetLabel(subset), modality, dict(metrics))
                 for modality, metrics in cross_modal[subset].items()
+            )
+    if gaps is not None:
+        for subset in sorted(gaps, key=lambda s: (len(s), sorted(s))):
+            rows.extend(
+                MetricsTableRow(_subsetLabel(subset), f"{modality}{GAP_SUFFIX}", dict(metrics))
+                for modality, metrics in gaps[subset].items()
             )
     if not rows:
         raise ValueError("There is no metric to put in a table: give an evaluation or cross_modal.")

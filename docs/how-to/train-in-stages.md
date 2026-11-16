@@ -333,7 +333,7 @@ staying where the solo stages left them. Measure the three before and after the 
     ([ADR 0054](../adr/0054-pair-stage-loss-terms.md) gives the table and the four seeds). These are
     the numbers of a toy, not a recommendation for a weight or a distance: a constant weight of 1 on
     both terms at the default `beta` of 1 was worse. Which distance to train with is roadmap decision
-    D-13, open until P6-6.
+    D-13, still open: the comparison exists (below) and the synthetic pair does not decide it.
 
 Two things to know. The cross reconstruction runs the decoders in training mode, so their batch
 normalization layers update their running statistics with activations that come from the other
@@ -426,3 +426,23 @@ loads the weights only and starts a new optimizer).
     (a distance of 28 to 39 against 7), and a release in the middle of the stage undid part of the protection.
     These are the numbers of a toy and not a recommendation: D-14 stays at "nothing frozen" until a real pair says
     otherwise (finding I-15).
+
+## Read the result against the baselines
+
+A latent distance that falls during stage 3 is not a result: two collapsed spaces are also at distance 0 from each
+other (roadmap I-8). Three things make the number mean something
+([ADR 0056](../adr/0056-evaluation-across-two-latent-spaces.md)), all described in
+[evaluate](evaluate.md#across-two-separate-latent-spaces):
+
+- **Evaluate the pair model across its two spaces.** `scripts/evaluate.py --latent-pair z_signal z_image` gives the
+  retrieval of each direction against its chance level, every registered distance on paired and on mismatched
+  samples, the cross reconstruction next to the self reconstruction, and the active units of both spaces. Pass the
+  active units that each solo stage had (`--solo-active-units z_signal=12 z_image=9`, from the manifest of the solo
+  stage or from its own evaluation): a space that ends with fewer is flagged, which is what a stage 3 that traded
+  information for agreement looks like.
+- **Check that the pairs are pairs.** Pass the training pairs (`--train-dataloader-factory`): the orthogonal map fitted
+  on them must recover the partner above chance, or row `i` of the two modalities may not be one sample.
+- **Compare with what stage 3 has to beat.** `examples/05_alignment_baselines.py` runs, on one split, the solo spaces as
+  they are (expected at chance), a closed-form orthogonal Procrustes map between them, stage 3 once for each
+  registered distance, and joint training from scratch with a shared latent space, over repeated random splits and
+  seeds. If the Procrustes row matches a stage 3 row on your pairs, the learned alignment is not buying anything yet.

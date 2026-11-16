@@ -187,6 +187,110 @@ results.alignment["z_fused"]["signal|image"]["cosine_gap"]
 `(samples, latent_dim)` matrices directly, for means you collected yourself. Retrieval is computed
 `chunk_size` queries at a time, so a large `N` does not need an `N x N` matrix.
 
+## Across two separate latent spaces
+
+`--paired` compares the posterior means of a latent space that **both** modalities reach. The pair model of the
+staged recipe (`configs/model/signal_image_pair.yaml`) has one latent space for each modality, `z_signal` and
+`z_image`, so there is no such space, and the question changes: after stage 3, do the two spaces say the same thing
+about a sample, and is that better than what a closed-form map between them would give?
+`--latent-pair FIRST SECOND` answers it ([ADR 0056](../adr/0056-evaluation-across-two-latent-spaces.md)):
+
+```bash
+python scripts/evaluate.py \
+    --checkpoint runs/pair/checkpoints/last.pt \
+    --model-factory mypackage.models:buildPairModel \
+    --dataloader-factory mypackage.data:buildHeldoutPairs \
+    --train-dataloader-factory mypackage.data:buildTrainPairs \
+    --latent-pair z_signal z_image \
+    --solo-active-units z_signal=12 z_image=9 \
+    --output-dir results/pair/
+```
+
+The held-out pairs are the batches of `--dataloader-factory`, and each batch must carry both modalities, row `i` of
+each being one sample. Each space is read from its own modality alone (`GlobalVae.encode`, no decoder runs for the
+posteriors). The report is written next to `results.json` as `latent_alignment.json` and `latent_alignment.md`
+(`latent_alignment_<first>_<second>` when the flag is given more than once), the cross rows join
+`metrics_table.md`, and the flags of the report are also logged as warnings. It holds:
+
+- **Retrieval in both directions**, `recall@k` and the mean rank of the partner, each next to its chance level
+  (`chance_recall@k = min(k, N) / N`). A pair whose two spaces were never aligned reads at chance.
+- **Every registered latent distance** ([choose a latent distance](choose-a-latent-distance.md)), each on the paired
+  samples and on **mismatched** ones (the second space rolled by one sample), and their ratio. A distance that is
+  small proves nothing if it is as small for strangers: two collapsed spaces are at distance 0 from each other, and
+  the report marks a distance that is 0 for mismatched pairs too (`separates: false`).
+- **Cross reconstruction next to self reconstruction.** The cross rows decode the code of one space through the decoder
+  of the other (`model.decode({"z_image": code_from_the_signal})`) and score the image against the sample's own
+  image. Each has a `(cross minus self)` row in the metrics table: the gap to what the same decoder does with its own
+  space. A gap near 0 means that the decoder reads the other modality's code as well as its own.
+- **Latent diagnostics of both spaces** (active units, per-dimension KL) and the **collapse guard**: a space with fewer
+  active units than its solo stage (`--solo-active-units VIEW=N`, measured with the same `--active-unit-threshold`) is
+  flagged. A view without an entry is flagged only below `--min-active-units` (default 1).
+- **With `--train-dataloader-factory`, the Procrustes baseline and the pair-integrity check.** The training pairs fit
+  one orthogonal map between the two sets of posterior means in closed form (`--procrustes-center` centers each space
+  first), and the map is applied to the held-out pairs: its retrieval and its cross reconstruction are the baseline
+  that stage 3 has to beat. The same map, read back on the training pairs themselves, is the integrity check: if row
+  `i` of the two modalities is not the same sample, no map recovers the partner, and the pairs are flagged as suspect
+  (roadmap I-8). The recall has to exceed its chance level by `--integrity-margin` (default 0.05) **and** the best
+  recall that the map reaches on `--integrity-shuffles` shuffled copies of the pairs (default 20), because an
+  orthogonal map in a wide space can partly fit pairs that do not match. Without the training pairs both are skipped
+  and the report says so.
+
+Read it from the top: first the flags (collapse, a distance that is 0 for strangers, suspect pairs), then recall
+against its chance level, then the distance ratios (below 1 means partners are closer than strangers), then the gap of
+the cross reconstruction. A distance that fell during stage 3 is not a result by itself.
+
+One shared latent space is compared with itself by reading it from one modality at a time:
+`--latent-pair z_fused@signal z_fused@image` (a `space@modality` view; `space@a+b` reads it from several). The views
+are then named by their modalities in the report (`signal->image`).
+
+From Python:
+
+```python
+from global_vae.evaluation.latent_alignment import evaluateLatentAlignment
+
+report = evaluateLatentAlignment(
+    model,
+    "z_signal",
+    "z_image",
+    heldout_batches,
+    train=training_batches,
+    reference_active_units={"z_signal": 12, "z_image": 9},
+)
+print(report.summary())
+report.flags  # one sentence per warning, [] when nothing was flagged
+(
+    report.retrieval["z_signal->z_image"]["recall@5"],
+    report.retrieval["z_signal->z_image"]["chance_recall@5"],
+)
+report.distances["wasserstein2_diag"].ratio  # paired / mismatched
+```
+
+### The four baselines in one command
+
+The report scores one model. To read stage 3 against what it has to beat, on the same split and the same held-out
+pairs, `examples/05_alignment_baselines.py` runs four baselines on a synthetic linked pair:
+
+```bash
+python examples/05_alignment_baselines.py                       # 72 pairs, five random splits and seeds
+python examples/05_alignment_baselines.py --repeats 2 --pair-epochs 40 --distances cosine mean_mse
+```
+
+| # | Baseline | What it tells |
+|---|---|---|
+| 0 | The two solo spaces as they are | Expected at chance: nothing made the spaces say the same thing |
+| 1 | Post-hoc orthogonal Procrustes, fitted on the training pairs | The closed-form reference: if it matches stage 3, the learned alignment is not needed |
+| 2 | Stage 3, once per registered distance | The point of the phase |
+| 3 | Joint training from scratch with a shared latent and `poe` | The route the framework already had |
+
+The table is the **mean and the spread over repeated random splits and seeds** (the reference paper uses five seeds on
+72 pairs), with `comparison.md` and `comparison.json` in `--output-dir`. For your own pairs, build a `PairPool` of
+your tensors and call `runAlignmentBaselines` with a `BaselineRecipe` that names your solo and pair experiments
+(`global_vae.evaluation.alignment_baselines`).
+
+!!! warning "What the synthetic pair says, and does not say"
+    The data are synthetic (finding I-15) and every setting is a placeholder. The baselines show that the harness runs,
+    what its guards catch and what to look at, not which route is best on real data.
+
 ## Quick latent-space inspection
 
 ```bash

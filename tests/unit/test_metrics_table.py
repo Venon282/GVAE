@@ -11,6 +11,7 @@ import pytest
 from global_vae.evaluation.evaluate import EvaluationResults
 from global_vae.evaluation.metrics_table import (
     ALL_INPUTS,
+    GAP_SUFFIX,
     MetricsTable,
     MetricsTableRow,
     buildMetricsTable,
@@ -95,6 +96,61 @@ class TestBuild:
             )
         with pytest.raises(ValueError, match="no metric to put in a table"):
             buildMetricsTable(cross_modal={})
+
+
+_GAPS = {
+    frozenset({"signal"}): {"image": {"mse": 0.05, "r2": -0.2}},
+    frozenset({"image"}): {"signal": {"mse": 0.15, "r2": -0.1}},
+}
+
+
+class TestGapRows:
+    """The gap between cross and self reconstruction, next to the cross rows (roadmap P6-6)."""
+
+    def test_a_gap_is_one_row_per_cell_after_every_other_row(self) -> None:
+        table = buildMetricsTable(_evaluation(), _CROSS_MODAL, gaps=_GAPS)
+        assert len(table.rows) == 2 + 6 + 2
+        assert [(row.inputs, row.modality) for row in table.rows[-2:]] == [
+            ("image", f"signal{GAP_SUFFIX}"),
+            ("signal", f"image{GAP_SUFFIX}"),
+        ]
+        assert table.rows[-1].metrics == {"mse": 0.05, "r2": -0.2}
+
+    def test_the_suffix_tells_a_gap_from_a_cross_row_with_the_same_inputs(self) -> None:
+        table = buildMetricsTable(cross_modal=_CROSS_MODAL, gaps=_GAPS)
+        keys = [(row.inputs, row.modality) for row in table.rows]
+        assert len(keys) == len(set(keys))
+        assert ("signal", "image") in keys
+        assert ("signal", f"image{GAP_SUFFIX}") in keys
+
+    def test_the_smaller_subsets_come_first(self) -> None:
+        gaps = {
+            frozenset({"image", "signal"}): {"image": {"mse": 1.0}},
+            frozenset({"signal"}): {"image": {"mse": 2.0}},
+        }
+        table = buildMetricsTable(gaps=gaps)
+        assert [row.inputs for row in table.rows] == ["signal", "image+signal"]
+
+    def test_gaps_alone_make_a_table_and_extend_the_columns(self) -> None:
+        table = buildMetricsTable(gaps={frozenset({"a"}): {"x": {"mae": 1.0}}})
+        assert table.columns == ["mae"]
+        assert table.rows[0].modality == f"x{GAP_SUFFIX}"
+
+    def test_without_gaps_the_table_is_what_it_was(self) -> None:
+        plain = buildMetricsTable(_evaluation(), _CROSS_MODAL)
+        assert buildMetricsTable(_evaluation(), _CROSS_MODAL, gaps=None).rows == plain.rows
+        assert buildMetricsTable(_evaluation(), _CROSS_MODAL, gaps={}).rows == plain.rows
+
+    def test_the_gap_rows_are_copies_and_leave_the_inputs_alone(self) -> None:
+        gaps = {frozenset({"a"}): {"x": {"mae": 1.0}}}
+        table = buildMetricsTable(gaps=gaps)
+        table.rows[0].metrics["mae"] = 99.0
+        assert gaps[frozenset({"a"})]["x"]["mae"] == 1.0
+
+    def test_the_gap_rows_reach_the_markdown_and_the_csv(self) -> None:
+        table = buildMetricsTable(_evaluation(), _CROSS_MODAL, gaps=_GAPS)
+        assert f"image{GAP_SUFFIX}" in table.toMarkdown()
+        assert f"image{GAP_SUFFIX}" in table.toCsv()
 
 
 class TestMarkdown:

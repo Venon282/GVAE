@@ -10,8 +10,10 @@ reasoning is in [ADR 0053](../adr/0053-latent-distance-registry.md) and in
     The loss term `latent_alignment` (roadmap P6-4, [ADR 0054](../adr/0054-pair-stage-loss-terms.md))
     applies one of these distances to the pairs of latent spaces you list, and it has **no default
     distance**: you name one in `distance`, so the choice is in your config and not in the code. Which
-    one to train with is roadmap decision D-13, which stays open until the measurements of P6-6. The
-    page holds no number from a real run. [Train in stages](train-in-stages.md#pull-the-two-latent-spaces-together)
+    one to train with is roadmap decision D-13, which stays open: the comparison of P6-6 exists
+    ([evaluate across two latent spaces](evaluate.md#across-two-separate-latent-spaces),
+    [ADR 0056](../adr/0056-evaluation-across-two-latent-spaces.md)) and, on the synthetic pair, the six do not
+    separate within the spread of five repeats. The page holds no number from a real run. [Train in stages](train-in-stages.md#pull-the-two-latent-spaces-together)
     shows the term in a stage 3 config.
 
 **On this page**
@@ -37,7 +39,12 @@ ablation.
   you have one fewer thing to explain.
 
 That order is a starting point and not a result: no distance has been measured on a real pair yet.
-Roadmap P6-6 compares all six on held-out pairs, and D-13 is settled from that.
+Roadmap P6-6 built the comparison: `examples/05_alignment_baselines.py` trains stage 3 once for each of the six and
+reads them on held-out pairs against the solo spaces, a closed-form Procrustes map and joint training, over repeated
+random splits and seeds ([evaluate](evaluate.md#across-two-separate-latent-spaces)). On the synthetic pair every one
+beat the baselines and none beat the others by more than the spread, and `mixture_jsd` reads a ratio of 1.000 when
+the posteriors are narrow (it saturates at `ln 2`), so read the distance you train with next to `wasserstein2_diag` and
+`cosine`. D-13 is settled from your own pair.
 
 ## The six distances
 

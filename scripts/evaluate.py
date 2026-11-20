@@ -58,6 +58,26 @@ cross-reconstruction rows, and their gap to the self reconstruction, join `metri
         --solo-active-units z_signal=12 z_image=9 \
         --output-dir results/
 
+A model with three modalities or more, each with a latent space of its own, is read across all of
+them with `--latent-set VIEW VIEW VIEW ...` (`docs/adr/0059-more-than-two-models-anchor-mode.md`),
+each view written as for `--latent-pair`, and with `--latent-anchor VIEW` for the hub that `anchor`
+mode trained them toward. For every ordered pair of views it reports the retrieval of the true
+partner as the spaces are, and after the post-hoc orthogonal maps that the training pairs fit (one
+per pair, one per view into a common frame, one per view to the anchor), next to the chance level:
+`multiway_alignment.json` and `multiway_alignment.md` next to `results.json`.
+
+Two spaces that keep their own widths, aligned through an adapter head that the alignment term
+trained (`docs/adr/0060-unequal-latent-widths-adapters.md`), are read with `--latent-pair` and
+`--alignment-adapter SPACE=[HEAD:]WIDTH` (repeatable; the width and the head are the ones of the
+training config's `adapters`). The adapter's weights are read from the checkpoint's loss-term state
+(`--alignment-term`, `latent_alignment` by default):
+
+    python scripts/evaluate.py \
+        --checkpoint runs/pair/checkpoints/best.pt \
+        --latent-pair z_signal z_image \
+        --alignment-adapter z_image=16 \
+        ...
+
 Reconstruction figures are plotted in whatever space the batch itself is in: if your own
 data pipeline applied a `data.transforms` step (`log`/`standardize`/`resample`, spec
 §6.2) before training, the figures show *that* space, not the original physical units,
@@ -100,6 +120,7 @@ from global_vae.evaluation.latent_alignment import (
     DEFAULT_INTEGRITY_MARGIN,
     DEFAULT_INTEGRITY_SHUFFLES,
     DEFAULT_MIN_ACTIVE_UNITS,
+    DEFAULT_MIN_ADAPTER_SPREAD,
     LatentAlignmentReport,
     evaluateLatentAlignment,
     pairLabels,
@@ -107,6 +128,10 @@ from global_vae.evaluation.latent_alignment import (
 )
 from global_vae.evaluation.latent_diagnostics import DEFAULT_ACTIVE_UNIT_THRESHOLD
 from global_vae.evaluation.metrics_table import buildMetricsTable
+from global_vae.evaluation.multiway_alignment import (
+    MultiwayReport,
+    evaluateMultiwayAlignment,
+)
 from global_vae.evaluation.paired_alignment import (
     DEFAULT_CHUNK_SIZE,
     DEFAULT_RETRIEVAL_KS,
@@ -118,12 +143,16 @@ from global_vae.evaluation.paired_alignment import (
 from global_vae.evaluation.visual_export import exportEvaluationFigures
 from global_vae.losses.distances.registry import listRegisteredLatentDistances
 from global_vae.losses.reconstruction import DEFAULT_REDUCTION, validateReduction
+from global_vae.losses.terms.adapters import AdapterSpec, loadAdapters, parseAdapterText
 from global_vae.models.global_vae import GlobalVae
-from global_vae.training.checkpoint import loadCheckpoint
+from global_vae.training.checkpoint import loadCheckpoint, readLossTermState
 from global_vae.utils.imports import importCallable as _importCallable
 from global_vae.visualization.reconstruction_plot import collectCrossModalReconstructions
 
 logger = logging.getLogger("global_vae.scripts.evaluate")
+
+_MIN_SET_VIEWS = 3
+"""A `--latent-set` has at least this many views: for two, `--latent-pair` reads more."""
 
 
 def _splitPairs(text: str, kind: str) -> str | dict[str, str]:
@@ -263,6 +292,14 @@ def _alignmentReportName(report: LatentAlignmentReport, several: bool) -> str:
     return f"latent_alignment_{labels}"
 
 
+def _multiwayReportName(report: MultiwayReport, several: bool) -> str:
+    """The file stem of a multi-way report: one set has the plain name."""
+    if not several:
+        return "multiway_alignment"
+    labels = "_".join(re.sub(r"[^A-Za-z0-9_.+-]", "_", label) for label in report.labels)
+    return f"multiway_alignment_{labels}"
+
+
 def _buildArgumentParser() -> argparse.ArgumentParser:
     """Build this script's `argparse.ArgumentParser`.
 
@@ -398,14 +435,64 @@ def _buildArgumentParser() -> argparse.ArgumentParser:
         "Writes 'latent_alignment.json' and 'latent_alignment.md' next to 'results.json'.",
     )
     parser.add_argument(
+        "--latent-set",
+        nargs="+",
+        action="append",
+        default=[],
+        metavar="VIEW",
+        help="Evaluate across three latent spaces or more (roadmap P6-8, ADR 0059): each is "
+        "written as for --latent-pair. Repeat the flag for several sets. For every ordered pair "
+        "of views, on the batches of --dataloader-factory: the retrieval of the true partner as "
+        "the spaces are, and after the post-hoc orthogonal maps fitted on "
+        "--train-dataloader-factory (one per pair, one per view into a common frame, and, with "
+        "--latent-anchor, one per view to the anchor), each with its chance level and its number "
+        "of maps. Writes 'multiway_alignment.json' and 'multiway_alignment.md' next to "
+        "'results.json'. For two views, --latent-pair reads more.",
+    )
+    parser.add_argument(
+        "--latent-anchor",
+        default=None,
+        metavar="VIEW",
+        help="With --latent-set, the view that the others were trained toward (anchor mode): it "
+        "adds the baseline that goes through it. It must be one of the views of every set, as "
+        "named in the report.",
+    )
+    parser.add_argument(
+        "--alignment-adapter",
+        action="append",
+        default=[],
+        metavar="SPACE=[HEAD:]WIDTH",
+        help="With --latent-pair, read a space through the adapter head that the alignment term "
+        "trained for it (roadmap P6-8, ADR 0060), so that two spaces of different widths are "
+        "compared at one width: 'z_image=16' is a linear head of output width 16, "
+        "'z_image=linear:16' names the head. Give the head and the width of the training config's "
+        "`adapters`; the weights come from the checkpoint. Repeat the flag for several spaces.",
+    )
+    parser.add_argument(
+        "--min-adapter-spread",
+        type=float,
+        default=DEFAULT_MIN_ADAPTER_SPREAD,
+        metavar="RATIO",
+        help="With --alignment-adapter, flag an adapter whose output has less than this fraction "
+        "of the per-dimension spread of the posterior it reads: it may be shrinking its output to "
+        f"make the distance small (default: {DEFAULT_MIN_ADAPTER_SPREAD}).",
+    )
+    parser.add_argument(
+        "--alignment-term",
+        default="latent_alignment",
+        metavar="NAME",
+        help="With --alignment-adapter, the name of the loss term that owns the adapters in "
+        "`training.loss_terms` (default: latent_alignment).",
+    )
+    parser.add_argument(
         "--train-dataloader-factory",
         default=None,
-        help="With --latent-pair, 'module.path:function_name' returning the TRAINING pairs "
-        "(Iterable[dict[str, torch.Tensor]], row i of each modality the same sample). They fit "
-        "the post-hoc orthogonal Procrustes baseline, which is then applied to the held-out "
-        "pairs, and they feed the pair-integrity check: the Procrustes retrieval on the training "
-        "pairs must be above chance, or the pairs are suspect (roadmap I-8). Without it both are "
-        "skipped and the report says so.",
+        help="With --latent-pair or --latent-set, 'module.path:function_name' returning the "
+        "TRAINING pairs (Iterable[dict[str, torch.Tensor]], row i of each modality the same "
+        "sample). They fit the post-hoc orthogonal Procrustes baseline, which is then applied to "
+        "the held-out pairs, and they feed the pair-integrity check: the Procrustes retrieval on "
+        "the training pairs must be above chance, or the pairs are suspect (roadmap I-8). Without "
+        "it both are skipped and the report says so.",
     )
     parser.add_argument(
         "--max-train-samples",
@@ -520,15 +607,34 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser = _buildArgumentParser()
     args = parser.parse_args(argv)
-    if args.paired or args.latent_pair:
+    if args.paired or args.latent_pair or args.latent_set:
         try:
             validateRetrievalSettings(
                 args.retrieval_k, args.retrieval_similarity, DEFAULT_CHUNK_SIZE
             )
         except ValueError as error:
             parser.error(f"--retrieval-k: {error}")
-    if args.train_dataloader_factory is not None and not args.latent_pair:
-        parser.error("--train-dataloader-factory needs --latent-pair.")
+    if args.train_dataloader_factory is not None and not (args.latent_pair or args.latent_set):
+        parser.error("--train-dataloader-factory needs --latent-pair or --latent-set.")
+    if args.latent_anchor is not None and not args.latent_set:
+        parser.error("--latent-anchor needs --latent-set.")
+    if args.alignment_adapter and not args.latent_pair:
+        parser.error("--alignment-adapter needs --latent-pair.")
+    adapter_specs: dict[str, AdapterSpec] = {}
+    for text in args.alignment_adapter:
+        try:
+            space, spec = parseAdapterText(text)
+        except ValueError as error:
+            parser.error(f"--alignment-adapter: {error.args[0]}")
+        if space in adapter_specs:
+            parser.error(f"--alignment-adapter: '{space}' is given twice.")
+        adapter_specs[space] = spec
+    for views in args.latent_set:
+        if len(views) < _MIN_SET_VIEWS:
+            parser.error(
+                f"--latent-set {' '.join(views)}: a set has at least three views (for two, "
+                f"use --latent-pair, which reads more)."
+            )
 
     model_factory = _importCallable(args.model_factory)
     dataloader_factory = _importCallable(args.dataloader_factory)
@@ -618,12 +724,36 @@ def main(argv: list[str] | None = None) -> None:
     # check). Each report is one pass over each, so a single-use iterator is not enough.
     alignment_reports: list[LatentAlignmentReport] = []
     solo_active_units = dict(args.solo_active_units)
+    train_factory = (
+        _importCallable(args.train_dataloader_factory)
+        if args.train_dataloader_factory is not None
+        else None
+    )
     if args.latent_pair:
-        train_factory = (
-            _importCallable(args.train_dataloader_factory)
-            if args.train_dataloader_factory is not None
-            else None
-        )
+        # The adapters of the alignment term, with the weights that training saved (ADR 0060).
+        adapters: dict[str, torch.nn.Module] = {}
+        if adapter_specs:
+            try:
+                adapter_state = readLossTermState(
+                    args.checkpoint,
+                    args.alignment_term,
+                    map_location=resolved_device,
+                    weights_only=not args.trust_checkpoint,
+                )
+                adapters = dict(
+                    loadAdapters(model, adapter_specs, adapter_state, "--alignment-adapter")
+                )
+            except (KeyError, ValueError) as error:
+                parser.error(f"--alignment-adapter: {error.args[0]}")
+            pair_spaces = {
+                resolveLatentView(model, name).space for pair in args.latent_pair for name in pair
+            }
+            unused = sorted(set(adapters) - pair_spaces)
+            if unused:
+                parser.error(
+                    f"--alignment-adapter names {unused}, which is not a space of any "
+                    f"--latent-pair (spaces: {sorted(pair_spaces)})."
+                )
         for first, second in args.latent_pair:
             try:
                 first_view = resolveLatentView(model, first)
@@ -634,6 +764,12 @@ def main(argv: list[str] | None = None) -> None:
                     first_view,
                     second_view,
                     freshDataloader(),
+                    min_adapter_spread=args.min_adapter_spread,
+                    adapters={
+                        space: head
+                        for space, head in adapters.items()
+                        if space in {first_view.space, second_view.space}
+                    },
                     train=train_factory() if train_factory is not None else None,  # type: ignore[operator]
                     distances=args.latent_distances,
                     ks=args.retrieval_k,
@@ -677,6 +813,28 @@ def main(argv: list[str] | None = None) -> None:
                         if m not in cross_modal_metrics.get(subset, {})
                     }
                 )
+    # Across three latent spaces or more (roadmap P6-8, ADR 0059): the retrieval of every ordered
+    # pair as the spaces are and after the post-hoc maps. Each set reads the data afresh.
+    multiway_reports: list[MultiwayReport] = []
+    for views in args.latent_set:
+        try:
+            multiway = evaluateMultiwayAlignment(
+                model,
+                views,
+                freshDataloader(),
+                train=train_factory() if train_factory is not None else None,  # type: ignore[operator]
+                anchor=args.latent_anchor,
+                ks=args.retrieval_k,
+                similarity=args.retrieval_similarity,
+                device=resolved_device,
+                max_samples=args.max_samples,
+                max_train_samples=args.max_train_samples,
+                center=args.procrustes_center,
+            )
+        except (KeyError, ValueError) as error:
+            parser.error(f"--latent-set {' '.join(views)}: {error.args[0]}")
+        print(multiway.summary())
+        multiway_reports.append(multiway)
     gaps: dict[frozenset[str], dict[str, dict[str, float]]] = {}
     for report in alignment_reports:
         for subset, per_modality in report.gapBySubset().items():
@@ -706,6 +864,12 @@ def main(argv: list[str] | None = None) -> None:
             report.save(args.output_dir / f"{stem}.json")
             report.saveMarkdown(args.output_dir / f"{stem}.md")
             logger.info("Saved the latent alignment report '%s' to '%s'.", stem, args.output_dir)
+
+        for multiway in multiway_reports:
+            stem = _multiwayReportName(multiway, several=len(multiway_reports) > 1)
+            multiway.save(args.output_dir / f"{stem}.json")
+            multiway.saveMarkdown(args.output_dir / f"{stem}.md")
+            logger.info("Saved the multi-way report '%s' to '%s'.", stem, args.output_dir)
 
         if want_figures:
             figure_paths = exportEvaluationFigures(

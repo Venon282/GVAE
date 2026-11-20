@@ -374,7 +374,8 @@ class TestWhatItRefuses:
         trainer, spy = _frozenTrainer(["*"], until_epoch=until_epoch)
         with pytest.raises(ValueError, match=r"in epoch 0, every parameter .* is frozen") as caught:
             trainer.fit(tinyBatches(2), num_epochs=2)
-        assert "roadmap P6-8" in str(caught.value)
+        assert "give `latent_alignment` `adapters`" in str(caught.value)
+        assert "ADR 0060" in str(caught.value)
         assert trainer.history == []
 
     def test_a_run_whose_only_trainable_parameters_are_released_later_is_still_refused_at_the_start(

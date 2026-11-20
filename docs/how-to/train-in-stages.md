@@ -318,14 +318,148 @@ start would otherwise pull on weights that are already good.
 
 | Term | What it adds | Arguments |
 |---|---|---|
-| `latent_alignment` | For each pair, the distance between the two posteriors of the **same sample**, averaged over the batch, summed over the pairs. Nothing is encoded again: it reads the posteriors the step already computed. | `pairs`: a list of `[first, second]` latent space names. `distance`: required, a name from [Choose a latent distance](choose-a-latent-distance.md) or `{name, kwargs}`. `stop_gradient`: `none` (default), `source` or `target`. |
-| `cross_reconstruction` | For each **ordered** pair `[source, target]`, the sample of the source space is decoded by the decoders that read the target space, and compared with the target modality of the batch. The loss, the weight and the reduction are the trainer's own for that modality (`training.reconstruction_loss`, `reconstruction_weight`, `reconstruction_reduction`), so a modality is scored the same way whichever space it is rebuilt from. | `pairs`: a list of `[source, target]`, both orders for both directions. `stop_gradient`: `none` (default), `source` or `target`. |
+| `latent_alignment` | For each pair, the distance between the two posteriors of the **same sample**, averaged over the batch, summed over the pairs. Nothing is encoded again: it reads the posteriors the step already computed. | `pairs`: a list of `[first, second]` latent space names (or `anchor` and `others`, see below). `distance`: required, a name from [Choose a latent distance](choose-a-latent-distance.md) or `{name, kwargs}`. `stop_gradient`: `none` (default), `source` or `target`. |
+| `cross_reconstruction` | For each **ordered** pair `[source, target]`, the sample of the source space is decoded by the decoders that read the target space, and compared with the target modality of the batch. The loss, the weight and the reduction are the trainer's own for that modality (`training.reconstruction_loss`, `reconstruction_weight`, `reconstruction_reduction`), so a modality is scored the same way whichever space it is rebuilt from. | `pairs`: a list of `[source, target]`, both orders for both directions (or `anchor`, `others` and `directions`, see below). `stop_gradient`: `none` (default), `source` or `target`. |
 
 `stop_gradient: source` cuts the gradient on the first name of every pair, `target` on the second,
 which makes one side an anchor that the other is trained toward. For `cross_reconstruction`,
 `source` detaches the sample (only the decoders learn to read the other space) and `target` keeps
 the decoders out of this term's gradient (only the encoders learn to write what the decoders read).
 The setting is one per term; a different one for each pair is not offered.
+
+### Three spaces or more: anchor mode
+
+With three modalities that each have a latent space, listing every pair costs `K (K - 1) / 2` distances and
+`K (K - 1)` decodings. Anchor mode aligns every space to one of them instead, in `K - 1` and `2 (K - 1)`
+([ADR 0059](../adr/0059-more-than-two-models-anchor-mode.md)): give a term `anchor` and `others` in place of `pairs`.
+
+```yaml
+training:
+  loss_terms:
+    - name: latent_alignment
+      kwargs:
+        anchor: z_signal
+        others: [z_image, z_text]
+        distance: wasserstein2_diag
+        stop_gradient: target          # the anchor stays where it is; the others move to it
+    - name: cross_reconstruction
+      kwargs:
+        anchor: z_signal
+        others: [z_image, z_text]
+        directions: both               # both, to_anchor or from_anchor
+```
+
+`latent_alignment` builds `[other, anchor]` for each of `others`, so the anchor is the **second** space of every pair
+(`stop_gradient: target` keeps it). `cross_reconstruction` decodes the anchor from every other's sample and every other
+from the anchor's, unless `directions` says one way. `pairs` and `anchor` are not mixed in one term, and each of the two
+terms of a stage names its anchor. Anchor mode aligns each space to the hub and **not** the others to each other: how far
+two non-anchor spaces agree through it is read with `--latent-set` in
+[Evaluate and visualize a checkpoint](evaluate.md#across-three-latent-spaces-or-more).
+
+### Spaces of different widths: adapters
+
+Two solo models trained at the width that suits each modality (16 and 8) do not have to be retrained at one width to be
+aligned ([ADR 0060](../adr/0060-unequal-latent-widths-adapters.md)). Give `latent_alignment` an adapter on one of the
+spaces: a latent head that only this term puts between the space and the distance.
+
+```yaml
+training:
+  loss_terms:
+    - name: latent_alignment
+      kwargs:
+        pairs: [[z_signal, z_image]]        # widths 16 and 8
+        distance: wasserstein2_diag
+        stop_gradient: target               # z_signal stays; the adapter and z_image move
+        adapters:
+          z_image: 16                       # linear, 8 -> 16; or {name: linear, out_dim: 16}
+```
+
+The spaces, their encoders and their decoders keep their widths, and nothing else reads the adapter. It is a parameter of
+the term: it trains with the term, is saved in the checkpoint under `loss_terms_state_dict` and comes back when a run
+resumes. The width compared is the adapter's `out_dim`, so the two spaces of a pair must still be read at one width, and
+the error says so when the adapters leave two.
+
+- **Adapt one space toward the other.** Two trainable adapters can make the distance small by shrinking both outputs. On
+  the synthetic problem of the ADR, one adapter retrieved the true partner at recall@1 of 0.22 to 0.55 (chance 0.003)
+  and kept the spread of what it read; two adapters without a stop gradient retrieved 0.05 to 0.09 and kept 1 to 7 % of
+  it, which the active-unit guard did not flag. Use one adapter and `stop_gradient` on the other space.
+- **Keeping both VAEs and training only the adapter** is `freeze_modules` with `modules: ["*"]` and `adapters` (the table above): the
+  quickest way to align two finished models, and the one that cannot touch what the solo stages settled.
+- **`cross_reconstruction` does not take adapters**: it hands the sample of one space to the decoders of the other, which
+  an adapter cannot make fit. In a stage with unequal widths use `latent_alignment` alone.
+- Read the result with `--latent-pair` and `--alignment-adapter`
+  ([Evaluate and visualize a checkpoint](evaluate.md#spaces-of-different-widths)).
+
+### Few pairs, many unpaired samples
+
+When a few dozen samples carry every modality and thousands carry one, a pair stage that sees only the pairs stops
+refining each VAE on its own data. Put the unpaired batches in the same stream
+([ADR 0061](../adr/0061-few-pairs-many-unpaired.md)). Two settings go together: the pair terms are told to expect batches
+that lack a modality, and the loaders are mixed.
+
+```yaml
+training:
+  loss_terms:
+    - name: latent_alignment
+      kwargs:
+        pairs: [[z_signal, z_image]]
+        distance: wasserstein2_diag
+        on_unpaired: skip              # a batch without both modalities adds a zero and is counted
+```
+
+```python
+from global_vae.data.interleave import interleaveBatches
+
+stream = interleaveBatches(
+    paired_loader,                                      # batches with signal and image
+    {"signal": signal_loader, "image": image_loader},   # batches with one modality each
+    unpaired_per_paired=2,
+)
+trainer.fit(stream, num_epochs=150)
+```
+
+An epoch is one pass over the paired loader, each of its batches followed by `unpaired_per_paired` unpaired ones (`0.5`
+is one after every second paired batch) taken from the unpaired loaders in turn. The unpaired loaders keep their position
+from one epoch to the next and start again when they run out, so every unpaired sample is used over the epochs. The
+reconstruction and the KL of an unpaired batch train its own VAE as in the solo stage; the pair term sees the paired
+ones. `on_unpaired` is `raise` by default, and `skip` is a choice of the stage: a loader that was meant to pair its
+samples and does not would otherwise train on nothing without a trace. `num_applied` and `num_skipped` on each term say
+how many batches it was computed on.
+
+On the synthetic problem of the ADR (16 pairs, 2000 unpaired samples per modality, three seeds), this halved the
+reconstruction error of held-out signals (0.35 to 0.17) at a retrieval that did not fall. Start here.
+
+**A frozen flow prior** is the second tool, with a caveat. It asks one space to be distributed like the other space's
+posterior means over the unpaired samples (Li et al., [arXiv 2506.05240](https://arxiv.org/abs/2506.05240)), which needs no
+pair. Fit it once from the solo checkpoint of the space it is fitted on, then pull the other space toward it:
+
+```bash
+python scripts/fit_flow_prior.py \
+    --checkpoint runs/signal_solo/checkpoints/best.pt \
+    --model-factory my_project.models:buildPairModel \
+    --dataloader-factory my_project.data:buildUnpairedSignalLoader \
+    --space z_signal --output priors/z_signal.pt          # add --dim N if the other space has another width
+```
+
+```yaml
+    - name: flow_prior_alignment
+      kwargs:
+        space: z_image
+        prior: priors/z_signal.pt
+        on_missing: skip
+      weight: 0.01
+```
+
+- It does **not** pair anything. A distribution has symmetries, and on the synthetic problem a run with the prior and no pair
+  term retrieved the true partner at chance. The pairs say which latent goes with which.
+- It is a surrogate, not a likelihood: a cloud pulled toward the middle of the target scores below the target's own
+  points, so the term shrinks the space it moves. Active units stay at their full count and the collapse guard stays quiet
+  while the spread of `z_image` fell from 1.2 to 1.8 down to 0.2 to 0.3 at weight 1.0, and retrieval fell as the weight rose (0.066, 0.051, 0.027 at 0.01, 0.1
+  and 1.0). It did not improve retrieval on the toy worlds of the ADR. Start at 0.01, compare the spread of the pulled
+  space with the same stage without the term, and read `prior.alignmentGap(y)` (the loss of `y` over the loss of the
+  target's own points; a gap below zero means `y` is scoring better than the target).
+- The prior is a frozen submodule of the term, kept in the checkpoint's loss-term state, so a resumed run uses the prior it
+  began with whatever the file now holds.
 
 ### What the terms refuse
 
@@ -335,14 +469,51 @@ when the trainer is built, before the first step:
 | You get | Because |
 |---|---|
 | `modality dropout must be off in this stage` | `several_latents` sets `modality_dropout_p: 0.15`. A pair stage has no fusion to be robust for, and a term that compares two spaces needs both encoded in every step. Set `training.modality_dropout_p=0`. |
-| `has latent widths 16 and 8 ... must have the same width (roadmap D-16)` | The two spaces of a pair have different `dim`. Set the same width for both in the model's `latent.spaces`; nothing projects one onto the other. |
+| `has latent widths 16 and 8 ... must have the same width (roadmap D-16)` | The two spaces of a pair have different `dim`. Set the same width for both in the model's `latent.spaces`, or, for `latent_alignment`, keep the widths and give `adapters` ([below](#spaces-of-different-widths-adapters)). `cross_reconstruction` takes no adapter: it still needs equal widths. |
 | `names 'z_picture', which is not a latent space of this model` | A typo, or a space of another model. The message lists the real ones. |
-| `needs paired batches` | A batch that lacks a modality of a pair. The term raises instead of skipping the pair, because a skipped term would change the objective without a trace in the numbers, and the likeliest cause is a loader that does not pair its samples. The message names the missing modality and says which pair needs it. It applies to the validation loader too. |
+| `needs paired batches` | A batch that lacks a modality of a pair. The term raises instead of skipping the pair, because a skipped term would change the objective without a trace in the numbers, and the likeliest cause is a loader that does not pair its samples. The message names the missing modality and says which pair needs it. It applies to the validation loader too. A stage that mixes unpaired batches on purpose says `on_unpaired: skip` ([above](#few-pairs-many-unpaired-samples)). |
 
 Every batch of both loaders must therefore carry both modalities, with row `i` of one describing
 the same sample as row `i` of the other. A loader that pairs by sample id, as
 `examples/04_paired_loader.py` does, gives that. A `distance` is not defaulted either: leave it out
 and the term raises a `TypeError` naming it.
+
+**Let the loader say that the rows are the same samples.** Nothing in two tensors says that row `i` of
+one is the sample of row `i` of the other, and a loader that joins two sources by position breaks that
+quietly (one side sorted differently, one side filtered), after which stage 3 trains on strangers and
+reads as a retrieval at chance. A loader that knows where each row came from can add one entry per
+modality to the batch, `sample_id.<modality>`, holding the id that *that modality's own source* gave to
+the row (an integer tensor of shape `(batch,)`; `hashSampleIds` makes ids from file names or record
+keys, the same in every process). The two terms and `scripts/evaluate.py --latent-pair` compare them and
+stop on the first batch where they differ ([ADR 0058](../adr/0058-pair-integrity-sample-ids.md)):
+
+```python
+from global_vae.data.sample_ids import hashSampleIds
+
+
+def __getitem__(self, index):
+    return {
+        "signal": self.signal[index],
+        "image": self.image[index],
+        "sample_id.signal": hashSampleIds([self.signal_names[index]])[0],
+        "sample_id.image": hashSampleIds([self.image_names[index]])[0],
+    }
+```
+
+The error reads like this (the ids depend on your names):
+
+```text
+ValueError: Loss term 'latent_alignment': row i of 'signal' and row i of 'image' are not the same
+sample: their ids differ at 8 of 8 rows (row 0 (signal 212308146065094374, image 5871203397045512106),
+...). A pair loss on this batch would train on strangers. Check how the loader pairs its sources: a sort,
+a filter or a shuffle applied to one modality only.
+```
+
+The entries are optional (a batch without them is trusted, as before), a batch that has them for one
+modality and not the other is refused, and `check_sample_ids: false` in a term's `kwargs` turns the
+check off. The ids prove what the loader says and no more: the statistical check of the evaluation
+([below](#read-the-result-against-the-baselines)) is still what catches a join that gives the same ids
+to the wrong rows.
 
 ### Watch it
 
@@ -449,7 +620,7 @@ because a typo that freezes nothing looks like a stage that works.
 | The decoders fixed, the encoders adapt to them | `[decoders.*]` |
 | One modality as an anchor, the other moves toward it | `[encoders.signal, decoders.signal]` |
 | Only the encoder of one modality fixed | `[encoders.image]` |
-| Both VAEs fixed and only an alignment head trained | Not available yet: it needs the adapter of roadmap P6-8. Freezing every parameter the optimizer holds stops before the first step and says so. |
+| Both VAEs fixed and only an alignment head trained | `["*"]`, with `adapters` on `latent_alignment` ([below](#spaces-of-different-widths-adapters)): the adapter is a parameter of the term, not of the model, so it keeps training. Without an adapter there is nothing left to train, and the run stops before the first step and says so. |
 
 All the patterns of one `freeze_modules` share its `until_epoch`.
 

@@ -27,6 +27,8 @@ import torch.nn.functional as F  # noqa: N812 (torch convention)
 from omegaconf import OmegaConf
 from torch import nn
 
+from global_vae.config.experiment import loadExperimentConfig
+from global_vae.config.training import buildLossTerms
 from global_vae.decoders.base import AbstractDecoder
 from global_vae.decoders.registry import registerDecoder
 from global_vae.encoders.base import AbstractEncoder
@@ -39,10 +41,12 @@ from global_vae.losses.terms.base import TrainerSettings
 from global_vae.losses.terms.cross_reconstruction import CrossReconstructionTerm
 from global_vae.losses.terms.latent_alignment import LatentAlignmentTerm
 from global_vae.losses.terms.pairs import (
+    ANCHOR_DIRECTIONS,
     STOP_GRADIENT_CHOICES,
     checkStopGradient,
     parsePairs,
     requireModalitiesInBatch,
+    resolvePairs,
 )
 from global_vae.losses.terms.registry import (
     getLossTermClass,
@@ -747,3 +751,429 @@ class TestWithTheTrainer:
         trainer.fit(batches, num_epochs=30, val_dataloader=[_batch(seed=9)])
         first, last = trainer.history[0], trainer.history[-1]
         assert last["val/loss/latent_alignment"] < 0.5 * first["val/loss/latent_alignment"]
+
+
+def _withIds(
+    batch: dict[str, Any], signal: torch.Tensor | None, other: torch.Tensor | None
+) -> dict[str, Any]:
+    """`batch` with the `sample_id.<modality>` entries the loader of ADR 0058 would add."""
+    with_ids = dict(batch)
+    if signal is not None:
+        with_ids["sample_id.signal"] = signal
+    if other is not None:
+        with_ids["sample_id.other"] = other
+    return with_ids
+
+
+class TestSampleIds:
+    """The pair terms compare the `sample_id.<modality>` entries of a batch (ADR 0058)."""
+
+    @pytest.mark.parametrize("name", ["latent_alignment", "cross_reconstruction"])
+    def test_a_check_is_on_by_default_and_can_be_turned_off(self, name: str) -> None:
+        pairs = [["z_signal", "z_other"]]
+        term = _both()[name]
+        assert term.check_sample_ids
+        kwargs: dict[str, Any] = {"pairs": pairs, "check_sample_ids": False}
+        if name == "latent_alignment":
+            kwargs["distance"] = "mean_mse"
+        assert not getLossTermClass(name)(**kwargs).check_sample_ids
+
+    def test_matching_ids_change_nothing_in_either_term(self) -> None:
+        model, batch = _model(), _batch()
+        outputs = _outputs(model, batch)
+        ids = torch.arange(BATCH)
+        marked = _withIds(batch, ids, ids.clone())
+        for term in (_alignment(model), _cross(model)):
+            assert torch.equal(term(model, batch, outputs, 0), term(model, marked, outputs, 0))
+
+    @pytest.mark.parametrize("which", ["alignment", "cross"])
+    def test_ids_that_differ_are_refused_by_the_term_that_found_them(self, which: str) -> None:
+        model, batch = _model(), _batch()
+        outputs = _outputs(model, batch)
+        other = torch.arange(BATCH).flip(0)
+        term = _alignment(model) if which == "alignment" else _cross(model)
+        name = "latent_alignment" if which == "alignment" else "cross_reconstruction"
+        with pytest.raises(ValueError, match=rf"Loss term '{name}': row i of 'signal' and row i"):
+            term(model, _withIds(batch, torch.arange(BATCH), other), outputs, 0)
+
+    def test_the_message_names_the_first_rows_and_what_to_look_at(self) -> None:
+        model, batch = _model(), _batch()
+        outputs = _outputs(model, batch)
+        shifted = torch.arange(BATCH) + 1
+        with pytest.raises(ValueError, match=r"row 0 \(signal 0, other 1\).*pairs its sources"):
+            _alignment(model)(model, _withIds(batch, torch.arange(BATCH), shifted), outputs, 0)
+
+    @pytest.mark.parametrize("which", ["alignment", "cross"])
+    def test_ids_for_one_modality_only_are_refused(self, which: str) -> None:
+        model, batch = _model(), _batch()
+        outputs = _outputs(model, batch)
+        term = _alignment(model) if which == "alignment" else _cross(model)
+        with pytest.raises(ValueError, match=r"ids for \['signal'\] but none for \['other'\]"):
+            term(model, _withIds(batch, torch.arange(BATCH), None), outputs, 0)
+
+    def test_a_term_with_the_check_off_scores_a_batch_whose_ids_differ(self) -> None:
+        model, batch = _model(), _batch()
+        outputs = _outputs(model, batch)
+        term = LatentAlignmentTerm(
+            pairs=[["z_signal", "z_other"]], distance="mean_mse", check_sample_ids=False
+        )
+        term.validateModel(model)
+        marked = _withIds(batch, torch.arange(BATCH), torch.arange(BATCH).flip(0))
+        assert torch.equal(term(model, marked, outputs, 0), term(model, batch, outputs, 0))
+
+    def test_a_batch_that_lacks_a_modality_is_refused_for_that_before_the_ids_are_read(
+        self,
+    ) -> None:
+        model, batch = _model(), _batch(("signal",))
+        outputs = _outputs(model, batch)
+        with pytest.raises(ValueError, match="needs paired batches"):
+            _alignment(model)(model, _withIds(batch, torch.arange(BATCH), None), outputs, 0)
+
+    def test_the_trainer_stops_on_the_first_step_of_a_loader_that_pairs_wrongly(self) -> None:
+        trainer = _trainer(_both())
+        wrong = _withIds(_batch(), torch.arange(BATCH), torch.arange(BATCH).flip(0))
+        with pytest.raises(ValueError, match="would train on strangers"):
+            trainer.fit([wrong], num_epochs=1)
+        with pytest.raises(ValueError, match="would train on strangers"):
+            trainer.evaluate([wrong])
+
+    def test_the_trainer_trains_on_batches_that_carry_matching_ids(self) -> None:
+        trainer = _trainer(_both())
+        ids = torch.arange(BATCH)
+        batches = [_withIds(_batch(seed=s), ids, ids) for s in range(2)]
+        trainer.fit(batches, num_epochs=2, val_dataloader=[_withIds(_batch(seed=5), ids, ids)])
+        assert trainer.history[-1]["train/loss/latent_alignment"] >= 0.0
+
+    def test_ids_are_not_taken_for_modalities(self) -> None:
+        model = _model()
+        marked = _withIds(_batch(), torch.arange(BATCH), torch.arange(BATCH))
+        assert sorted(model.selectEncoderInputs(marked)) == ["other", "signal"]
+
+
+THREE = ("signal", "other", "third")
+
+
+def _threeModels(seed: int = 0) -> GlobalVae:
+    """Three modalities with a latent space each: `z_signal`, `z_other`, `z_third`."""
+    return _model({name: LATENT for name in THREE}, seed)
+
+
+class TestResolvePairs:
+    """Anchor mode builds the pairs of a term from one space and the spaces aligned to it."""
+
+    def test_pairs_alone_are_parsed_as_before(self) -> None:
+        got = resolvePairs([["a", "b"]], None, None, "t", allow_reversed_duplicates=False)
+        assert got == (("a", "b"),)
+
+    def test_each_other_space_makes_a_pair_with_the_anchor_second(self) -> None:
+        got = resolvePairs(None, "z_a", ["z_b", "z_c"], "t", allow_reversed_duplicates=False)
+        assert got == (("z_b", "z_a"), ("z_c", "z_a"))
+
+    def test_the_directions_choose_which_way_the_pairs_run(self) -> None:
+        def pairsFor(directions: str) -> tuple[tuple[str, str], ...]:
+            return resolvePairs(None, "a", ["b", "c"], "t", True, directions)
+
+        assert pairsFor("to_anchor") == (("b", "a"), ("c", "a"))
+        assert pairsFor("from_anchor") == (("a", "b"), ("a", "c"))
+        assert pairsFor("both") == (("b", "a"), ("a", "b"), ("c", "a"), ("a", "c"))
+        assert set(ANCHOR_DIRECTIONS) == {"to_anchor", "from_anchor", "both"}
+
+    def test_a_list_from_a_yaml_config_is_accepted(self) -> None:
+        others = OmegaConf.create(["z_b", "z_c"])
+        assert resolvePairs(None, "z_a", others, "t", False) == (("z_b", "z_a"), ("z_c", "z_a"))
+
+    def test_neither_pairs_nor_an_anchor_is_refused_and_says_what_to_give(self) -> None:
+        with pytest.raises(ValueError, match=r"give `pairs`.*or `anchor` with `others`"):
+            resolvePairs(None, None, None, "t", False)
+
+    def test_pairs_with_an_anchor_are_refused(self) -> None:
+        with pytest.raises(ValueError, match="`pairs` or `anchor` with `others`, not both"):
+            resolvePairs([["a", "b"]], "a", ["b"], "t", False)
+        with pytest.raises(ValueError, match="not both"):
+            resolvePairs([["a", "b"]], None, ["b"], "t", False)
+
+    @pytest.mark.parametrize(("anchor", "others"), [("a", None), (None, ["b"])])
+    def test_an_anchor_without_others_and_others_without_an_anchor_are_refused(
+        self, anchor: str | None, others: list[str] | None
+    ) -> None:
+        with pytest.raises(ValueError, match="`anchor` and `others` go together"):
+            resolvePairs(None, anchor, others, "t", False)
+
+    @pytest.mark.parametrize("others", [[], "z_b", 3, [""], [3]])
+    def test_others_must_be_a_non_empty_list_of_names(self, others: object) -> None:
+        with pytest.raises(ValueError, match="`others` must"):
+            resolvePairs(None, "a", others, "t", False)
+
+    def test_the_anchor_among_the_others_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="anchor 'a' is also listed in `others`"):
+            resolvePairs(None, "a", ["b", "a"], "t", False)
+
+    def test_a_space_listed_twice_is_refused_by_name(self) -> None:
+        with pytest.raises(ValueError, match=r"lists \['b'\] more than once"):
+            resolvePairs(None, "a", ["b", "c", "b"], "t", False)
+
+    @pytest.mark.parametrize("anchor", ["", 3])
+    def test_the_anchor_must_be_a_name(self, anchor: object) -> None:
+        with pytest.raises(ValueError, match="`anchor` must be a latent space name"):
+            resolvePairs(None, anchor, ["b"], "t", False)
+
+    def test_directions_must_be_one_of_the_three(self) -> None:
+        with pytest.raises(ValueError, match=r"directions must be one of \['to_anchor'"):
+            resolvePairs(None, "a", ["b"], "t", False, "sideways")
+
+
+class TestAnchorMode:
+    """Three spaces aligned to one (roadmap P6-8, ADR 0059)."""
+
+    def _outputs(self) -> tuple[GlobalVae, dict[str, Any], dict[str, Any]]:
+        model, batch = _threeModels(), _batch(THREE)
+        return model, batch, _outputs(model, batch)
+
+    def test_the_alignment_term_builds_the_pairs_and_remembers_the_anchor(self) -> None:
+        term = LatentAlignmentTerm(
+            distance="mean_mse", anchor="z_signal", others=["z_other", "z_third"]
+        )
+        assert term.pairs == (("z_other", "z_signal"), ("z_third", "z_signal"))
+        assert term.anchor == "z_signal"
+
+    def test_the_alignment_is_the_sum_of_the_distances_to_the_anchor(self) -> None:
+        model, batch, outputs = self._outputs()
+        anchored = LatentAlignmentTerm(
+            distance="mean_mse", anchor="z_signal", others=["z_other", "z_third"]
+        )
+        explicit = LatentAlignmentTerm(
+            distance="mean_mse", pairs=[["z_other", "z_signal"], ["z_third", "z_signal"]]
+        )
+        for term in (anchored, explicit):
+            term.validateModel(model)
+            term.bindTrainerSettings(_settings())
+        value = anchored(model, batch, outputs, 0)
+        assert torch.equal(value, explicit(model, batch, outputs, 0))
+        mu = {name: outputs["latent_params"][f"z_{name}"][0] for name in THREE}
+        by_hand = sum(((mu[m] - mu["signal"]) ** 2).mean() for m in ("other", "third"))
+        assert value.item() == pytest.approx(float(by_hand.detach()) * LATENT, rel=1e-5)
+
+    def test_it_is_not_every_pair_of_the_three_spaces(self) -> None:
+        model, batch, outputs = self._outputs()
+        anchored = LatentAlignmentTerm(
+            distance="mean_mse", anchor="z_signal", others=["z_other", "z_third"]
+        )
+        every_pair = LatentAlignmentTerm(
+            distance="mean_mse",
+            pairs=[["z_signal", "z_other"], ["z_signal", "z_third"], ["z_other", "z_third"]],
+        )
+        for term in (anchored, every_pair):
+            term.validateModel(model)
+        assert len(anchored.pairs) == 2 and len(every_pair.pairs) == 3
+        assert anchored(model, batch, outputs, 0) != every_pair(model, batch, outputs, 0)
+
+    def test_the_stop_gradient_that_keeps_the_anchor_in_place_is_target(self) -> None:
+        model, batch, outputs = self._outputs()
+        term = LatentAlignmentTerm(
+            distance="mean_mse",
+            anchor="z_signal",
+            others=["z_other", "z_third"],
+            stop_gradient="target",
+        )
+        term.validateModel(model)
+        paths = [f"encoders.{m}.to_mu.weight" for m in THREE]
+        reached = _reachedBy(term(model, batch, outputs, 0), _params(model, *paths))
+        assert reached == [False, True, True]
+
+    def test_the_batch_must_carry_every_modality_of_every_space_in_it(self) -> None:
+        model = _threeModels()
+        batch = _batch(("signal", "other"))
+        outputs = _outputs(model, batch)
+        term = LatentAlignmentTerm(
+            distance="mean_mse", anchor="z_signal", others=["z_other", "z_third"]
+        )
+        term.validateModel(model)
+        with pytest.raises(ValueError, match=r"needs paired batches.*'third'"):
+            term(model, batch, outputs, 0)
+
+    def test_a_space_the_model_lacks_is_refused_when_the_term_is_built_on_it(self) -> None:
+        term = LatentAlignmentTerm(distance="mean_mse", anchor="z_signal", others=["z_nope"])
+        with pytest.raises(ValueError, match="'z_nope', which is not a latent space"):
+            term.validateModel(_threeModels())
+
+    def test_cross_reconstruction_runs_both_ways_by_default(self) -> None:
+        term = CrossReconstructionTerm(anchor="z_signal", others=["z_other", "z_third"])
+        assert term.pairs == (
+            ("z_other", "z_signal"),
+            ("z_signal", "z_other"),
+            ("z_third", "z_signal"),
+            ("z_signal", "z_third"),
+        )
+
+    def test_cross_reconstruction_in_anchor_mode_is_the_sum_of_its_explicit_pairs(self) -> None:
+        model, batch, outputs = self._outputs()
+        for directions in ("both", "to_anchor", "from_anchor"):
+            anchored = CrossReconstructionTerm(
+                anchor="z_signal", others=["z_other", "z_third"], directions=directions
+            )
+            explicit = CrossReconstructionTerm(pairs=anchored.pairs)
+            for term in (anchored, explicit):
+                term.validateModel(model)
+                term.bindTrainerSettings(_settings())
+            assert torch.equal(
+                anchored(model, batch, outputs, 0), explicit(model, batch, outputs, 0)
+            ), directions
+
+    def test_the_anchor_decodes_what_the_other_spaces_say_when_the_pairs_run_to_it(self) -> None:
+        model, batch, outputs = self._outputs()
+        term = CrossReconstructionTerm(
+            anchor="z_signal", others=["z_other", "z_third"], directions="to_anchor"
+        )
+        term.validateModel(model)
+        term.bindTrainerSettings(_settings())
+        samples = outputs["latent_samples"]
+        expected = torch.stack(
+            [
+                F.mse_loss(model.decode({"z_signal": samples[f"z_{m}"]})["signal"], batch["signal"])
+                for m in ("other", "third")
+            ]
+        ).sum()
+        assert term(model, batch, outputs, 0).item() == pytest.approx(expected.item(), rel=1e-5)
+
+    def test_a_trainer_trains_three_spaces_aligned_to_one(self) -> None:
+        terms = {
+            "latent_alignment": LatentAlignmentTerm(
+                distance="mean_mse", anchor="z_signal", others=["z_other", "z_third"]
+            ),
+            "cross_reconstruction": CrossReconstructionTerm(
+                anchor="z_signal", others=["z_other", "z_third"]
+            ),
+        }
+        trainer = Trainer(
+            _threeModels(), device="cpu", loss_terms=terms, optimizer_kwargs={"lr": 0.02}
+        )
+        batches = [_batch(THREE, seed=s) for s in range(3)]
+        trainer.fit(batches, num_epochs=25, val_dataloader=[_batch(THREE, seed=9)])
+        first, last = trainer.history[0], trainer.history[-1]
+        assert last["val/loss/latent_alignment"] < 0.5 * first["val/loss/latent_alignment"]
+        assert "train/loss/cross_reconstruction" in last
+
+
+class TestAnchorModeFromTheConfig:
+    """The kwargs of a `training.loss_terms` entry in YAML build the same terms."""
+
+    def test_the_pair_align_file_turned_to_anchor_mode_builds_the_terms(self) -> None:
+        config = loadExperimentConfig(
+            "experiment/pair_align",
+            overrides=[
+                "data.loader_factory=unused:unused",
+                "data.train_path=unused",
+                "~training.loss_terms.0.kwargs.pairs",
+                "+training.loss_terms.0.kwargs.anchor=z_signal",
+                "+training.loss_terms.0.kwargs.others=[z_image]",
+                "~training.loss_terms.1.kwargs.pairs",
+                "+training.loss_terms.1.kwargs.anchor=z_signal",
+                "+training.loss_terms.1.kwargs.others=[z_image]",
+            ],
+        )
+        terms, weights = buildLossTerms(config.training)
+        alignment, cross = terms["latent_alignment"], terms["cross_reconstruction"]
+        assert isinstance(alignment, LatentAlignmentTerm)
+        assert isinstance(cross, CrossReconstructionTerm)
+        assert alignment.pairs == (("z_image", "z_signal"),)
+        assert cross.pairs == (("z_image", "z_signal"), ("z_signal", "z_image"))
+        assert set(weights) == {"latent_alignment", "cross_reconstruction"}
+
+
+class TestOnUnpaired:
+    """`on_unpaired: skip` lets a stream mix paired batches with unpaired ones (ADR 0061)."""
+
+    @pytest.mark.parametrize("make", [_alignment, _cross])
+    def test_the_default_refuses_an_unpaired_batch_and_names_the_way_out(self, make: Any) -> None:
+        model = _model()
+        batch = _batch(("signal",))
+        with pytest.raises(ValueError, match="needs paired batches") as raised:
+            make(model)(model, batch, _outputs(model, batch), 0)
+        assert "on_unpaired: skip" in str(raised.value)
+
+    @pytest.mark.parametrize("make", [_alignment, _cross])
+    def test_skip_returns_a_scalar_zero_and_counts_the_batch(self, make: Any) -> None:
+        model = _model()
+        term = make(model, on_unpaired="skip")
+        batch = _batch(("signal",))
+        value = term(model, batch, _outputs(model, batch), 0)
+        assert value.dim() == 0 and float(value) == 0.0
+        assert value.device == next(model.parameters()).device
+        assert (term.num_skipped, term.num_applied) == (1, 0)
+
+    @pytest.mark.parametrize("make", [_alignment, _cross])
+    def test_skip_still_computes_a_paired_batch_as_before(self, make: Any) -> None:
+        model = _model()
+        batch = _batch()
+        outputs = _outputs(model, batch)
+        plain = make(model)(model, batch, outputs, 0)
+        skipping = make(model, on_unpaired="skip")
+        value = skipping(model, batch, outputs, 0)
+        assert torch.equal(plain, value) and float(value.detach()) > 0.0
+        assert (skipping.num_skipped, skipping.num_applied) == (0, 1)
+
+    @pytest.mark.parametrize("make", [_alignment, _cross])
+    def test_a_batch_with_only_one_modality_of_the_pair_is_skipped_either_way_round(
+        self, make: Any
+    ) -> None:
+        model = _model()
+        term = make(model, on_unpaired="skip")
+        for modality in ("signal", "other"):
+            batch = _batch((modality,))
+            assert float(term(model, batch, _outputs(model, batch), 0)) == 0.0
+        assert term.num_skipped == 2
+
+    @pytest.mark.parametrize("make", [_alignment, _cross])
+    @pytest.mark.parametrize("value", ["drop", "", None, True])
+    def test_an_unknown_choice_is_refused_by_name(self, make: Any, value: Any) -> None:
+        with pytest.raises(ValueError, match=r"on_unpaired must be one of \['raise', 'skip'\]"):
+            make(on_unpaired=value)
+
+    def test_a_mixed_stream_trains_every_batch_and_the_pair_term_sees_only_the_paired(self) -> None:
+        terms = {
+            "latent_alignment": LatentAlignmentTerm(
+                pairs=[["z_signal", "z_other"]], distance="wasserstein2_diag", on_unpaired="skip"
+            ),
+            "cross_reconstruction": CrossReconstructionTerm(
+                pairs=[["z_signal", "z_other"]], on_unpaired="skip"
+            ),
+        }
+        trainer = _trainer(terms)
+        stream = [
+            _batch(seed=0),
+            _batch(("signal",), seed=1),
+            _batch(("other",), seed=2),
+            _batch(seed=3),
+        ]
+        trainer.fit(stream, num_epochs=2)
+        for name in terms:
+            term = trainer.loss_terms[name]
+            assert isinstance(term, (LatentAlignmentTerm, CrossReconstructionTerm))
+            assert (term.num_applied, term.num_skipped) == (4, 4)
+        assert trainer.global_step == 8
+
+    def test_an_unpaired_batch_alone_still_trains_the_reconstruction_of_its_modality(self) -> None:
+        trainer = _trainer({"latent_alignment": _alignment(on_unpaired="skip")})
+        before = {k: v.clone() for k, v in trainer.model.state_dict().items()}
+        trainer.fit([_batch(("signal",))], num_epochs=3)
+        after = trainer.model.state_dict()
+        moved = sorted(k for k in before if not torch.equal(before[k], after[k]))
+        assert any(k.startswith("encoders.signal") for k in moved)
+        assert any(k.startswith("decoders.signal") for k in moved)
+        assert not any(k.startswith(("encoders.other", "decoders.other")) for k in moved)
+
+    def test_the_config_passes_the_choice_through(self) -> None:
+        config = loadExperimentConfig(
+            "experiment/pair_align",
+            overrides=[
+                "data.loader_factory=unused:unused",
+                "data.train_path=unused",
+                "+training.loss_terms.0.kwargs.on_unpaired=skip",
+                "+training.loss_terms.1.kwargs.on_unpaired=skip",
+            ],
+        )
+        terms, _ = buildLossTerms(config.training)
+        alignment, cross = terms["latent_alignment"], terms["cross_reconstruction"]
+        assert isinstance(alignment, LatentAlignmentTerm)
+        assert isinstance(cross, CrossReconstructionTerm)
+        assert (alignment.on_unpaired, cross.on_unpaired) == ("skip", "skip")

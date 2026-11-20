@@ -228,11 +228,8 @@ class TestCollectPairPosteriors:
             collectPairPosteriors(buildTinyModel(), tinyBatches(1), SIGNAL, IMAGE, max_samples=room)
 
     def test_two_widths_are_refused_with_the_decision_that_says_why(self) -> None:
-        posteriors = PairPosteriors(
-            torch.zeros(4, 3), torch.zeros(4, 3), torch.zeros(4, 5), torch.zeros(4, 5)
-        )
-        with pytest.raises(ValueError, match="D-16"):
-            latent_alignment._checkWidths(posteriors, SIGNAL, IMAGE)
+        with pytest.raises(ValueError, match=r"width 3.*width 5.*D-16.*adapters"):
+            latent_alignment._checkWidths(3, 5, SIGNAL, IMAGE)
 
 
 class TestFitOrthogonalProcrustes:
@@ -292,13 +289,12 @@ class TestFitOrthogonalProcrustes:
         [
             (torch.zeros(4), torch.zeros(4)),
             (torch.zeros(4, 3), torch.zeros(5, 3)),
-            (torch.zeros(4, 3), torch.zeros(4, 2)),
         ],
     )
-    def test_inputs_that_are_not_two_matrices_of_one_shape_raise(
+    def test_inputs_that_are_not_two_matrices_with_one_row_per_sample_raise(
         self, first: torch.Tensor, second: torch.Tensor
     ) -> None:
-        with pytest.raises(ValueError, match="one shape"):
+        with pytest.raises(ValueError, match="one row per sample"):
             fitOrthogonalProcrustes(first, second)
 
     def test_no_pair_raises(self) -> None:
@@ -400,8 +396,8 @@ class TestPairIntegrity:
         with pytest.raises(ValueError, match=match):
             checkPairIntegrity(first, second, **kwargs)  # type: ignore[arg-type]
 
-    def test_two_sets_of_different_shapes_raise(self) -> None:
-        with pytest.raises(ValueError, match="one shape"):
+    def test_two_sets_with_different_numbers_of_rows_raise(self) -> None:
+        with pytest.raises(ValueError, match="one row per pair"):
             checkPairIntegrity(torch.zeros(5, 3), torch.zeros(6, 3))
 
     @pytest.mark.parametrize(
@@ -438,7 +434,8 @@ class TestDistanceTable:
             assert values[name].paired == pytest.approx(0.0, abs=1e-5), name
 
     def test_a_distance_that_is_zero_for_strangers_too_proves_nothing(self) -> None:
-        constant = PairPosteriors(*(torch.zeros(12, 4) for _ in range(4)))
+        zeros = torch.zeros(12, 4)
+        constant = PairPosteriors(zeros, zeros, zeros, zeros)
         values, _ = computeDistanceTable(
             constant, ["mean_mse", "symmetric_kl", "wasserstein2_diag"]
         )
@@ -1021,3 +1018,73 @@ class TestReportForms:
             gaps[frozenset({"signal"})]["image"]["mse"]
             == report.reconstruction_gap["z_signal->z_image"]["image"]["mse"]
         )
+
+
+def _withIds(
+    batches: list[dict[str, torch.Tensor]], image_shift: int = 0
+) -> list[dict[str, torch.Tensor]]:
+    """The batches with `sample_id.<modality>` entries, the image's ids shifted by `image_shift`."""
+    marked = []
+    for index, batch in enumerate(batches):
+        rows = batch["signal"].shape[0]
+        ids = torch.arange(rows, dtype=torch.int64) + index * rows
+        marked.append({**batch, "sample_id.signal": ids, "sample_id.image": ids + image_shift})
+    return marked
+
+
+class TestSampleIdsInTheEvaluation:
+    """The evaluation compares the `sample_id.<modality>` entries it is given (ADR 0058)."""
+
+    def test_matching_ids_are_counted_by_the_collector(self) -> None:
+        got = collectPairPosteriors(_alignedModel(), _withIds(_linked(3)), SIGNAL, IMAGE)
+        assert got.sample_ids_checked == 24
+
+    def test_batches_without_ids_count_zero(self) -> None:
+        got = collectPairPosteriors(_alignedModel(), _linked(3), SIGNAL, IMAGE)
+        assert got.sample_ids_checked == 0
+
+    def test_only_the_rows_that_are_kept_are_counted(self) -> None:
+        got = collectPairPosteriors(
+            _alignedModel(), _withIds(_linked(3)), SIGNAL, IMAGE, max_samples=10
+        )
+        assert got.num_samples == 10 and got.sample_ids_checked == 10
+
+    def test_ids_that_differ_stop_the_collector_and_name_the_evaluation(self) -> None:
+        with pytest.raises(ValueError, match="Evaluating a pair of latent spaces: row i of"):
+            collectPairPosteriors(_alignedModel(), _withIds(_linked(3), 1), SIGNAL, IMAGE)
+
+    def test_ids_that_differ_stop_the_single_pass_statistics_too(self) -> None:
+        with pytest.raises(ValueError, match="would train on strangers|not the same sample"):
+            collectPairStatistics(_alignedModel(), _withIds(_linked(3), 1), SIGNAL, IMAGE)
+
+    def test_the_statistics_pass_counts_the_rows_it_compared(self) -> None:
+        stats = collectPairStatistics(_alignedModel(), _withIds(_linked(3)), SIGNAL, IMAGE)
+        assert stats.posteriors.sample_ids_checked == 24
+
+    def test_the_report_counts_held_out_and_training_rows_and_says_so(self) -> None:
+        report = evaluateLatentAlignment(
+            _alignedModel(),
+            "z_signal",
+            "z_image",
+            _withIds(_linked(3, 1)),
+            train=_withIds(_linked(6, 2)),
+        )
+        assert report.pair_integrity.sample_ids_checked == 24 + 48
+        assert "agreed across the modalities" in report.toMarkdown()
+        assert "72 rows" in report.summary()
+        assert json.loads(json.dumps(report.toDict()))["pair_integrity"]["sample_ids_checked"] == 72
+
+    def test_without_ids_the_report_says_the_pairs_were_trusted(self) -> None:
+        report = evaluateLatentAlignment(
+            _alignedModel(), "z_signal", "z_image", _linked(3, 1), train=_linked(6, 2)
+        )
+        assert report.pair_integrity.sample_ids_checked == 0
+        assert "were not checked by id" in report.toMarkdown()
+        assert "were not checked by id" in report.summary()
+
+    def test_the_count_is_there_without_training_pairs_too(self) -> None:
+        report = evaluateLatentAlignment(
+            _alignedModel(), "z_signal", "z_image", _withIds(_linked(3, 1))
+        )
+        assert report.pair_integrity.status == INTEGRITY_NOT_CHECKED
+        assert report.pair_integrity.sample_ids_checked == 24

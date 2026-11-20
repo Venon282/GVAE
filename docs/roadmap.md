@@ -675,8 +675,8 @@ the optimizer, so a checkpoint has the same layout frozen or not and a run resum
 parameters and buffers of a frozen side or of the decoders are bit-identical after training, with the cross
 reconstruction too; a resume before, at and after the release epoch gives the uninterrupted run; the groups reach the
 optimizer and the checkpoint through Hydra overrides). D-14 stays as proposed: nothing frozen by default, the other
-options opt-in. The option "both VAEs frozen, an alignment head trained" needs the adapter of P6-8 and is refused with
-that message until then. Measured on the synthetic pair (I-15) in ADR 0055.
+options opt-in. The option "both VAEs frozen, an alignment head trained" needs the adapter of P6-8 and was refused with
+that message until then (it works since ADR 0060). Measured on the synthetic pair (I-15) in ADR 0055.
 
 ### P6-6. Evaluation across two separate latent spaces, with baselines (M)
 
@@ -786,7 +786,7 @@ reconstruction ends 23% worse than the solo model's, and `mean_mse` does as well
 
 ### P6-8. Extensions (L, gated, one go-ahead each)
 
-**status**: todo
+**status**: done
 - **More than two models.** `pairs` is already a list. Add an anchor mode (every model aligned to
   one), and for a symmetric treatment the multi-way scheme of Achara et al. as a baseline first,
   then as a loss (P7-4).
@@ -797,6 +797,44 @@ reconstruction ends 23% worse than the solo model's, and `mean_mse` does as well
   the pair loss interleaved with unpaired reconstruction batches.
 - **Pair integrity.** An optional `sample_id` entry in a batch, which the pair terms compare across
   modalities, so that a mismatched pair fails loudly instead of reading as chance (I-8).
+
+The four extensions were each given a go-ahead and delivered in turn, each with an ADR before its code, its tests and its
+docs, as its own commit. The multi-way **loss** (P7-4) and the correction of Achara et al. (GCPA) are not part of it.
+
+**Delivered, pair integrity.** ADR 0058; `global_vae.data.sample_ids` (`sampleIdKey`, `hashSampleIds`, the checks). A
+loader can add one integer entry per modality to a batch, `sample_id.<modality>`, holding the id that the modality's own
+source gave to row `i`. `latent_alignment`, `cross_reconstruction` and `scripts/evaluate.py --latent-pair` compare them and
+stop on the first batch where they differ, with the rows and ids in the message; a batch with no ids is trusted as before,
+a batch with ids for one modality only is refused, and `check_sample_ids: false` turns the term's check off. The ids prove
+what the loader says and no more: the statistical check of the evaluation is still what catches a join that gives the same
+ids to the wrong rows (I-8).
+
+**Delivered, more than two models.** ADR 0059; `anchor` and `others` in `latent_alignment` and `cross_reconstruction` in
+place of `pairs` (`resolvePairs` in `losses/terms/pairs.py`; a mix is refused by name), and `evaluation/multiway_alignment.py`
+with `scripts/evaluate.py --latent-set`: a multi-way Procrustes baseline in the spirit of Achara et al. (arXiv 2602.06205),
+whose correction (GCPA) is **not** implemented since the page read does not give its formulas. Anchor mode aligns each space
+to the hub and not the others to each other, and the evaluation says how far two non-anchor spaces agree through it. The
+multi-way loss stays P7-4.
+
+**Delivered, unequal latent widths.** ADR 0060; `adapters` in `latent_alignment` (a width, a `linear` head, or
+`{name, out_dim, kwargs}`), built in `validateModel` from the model's widths, a parameter of the term in the optimizer and
+in `loss_terms_state_dict`, read by nothing else (not the decoders, not the cross reconstruction); the evaluation reads them
+back (`--alignment-adapter`) and reports a `spread_ratio` per adapter with a flag under `min_adapter_spread`. D-16 stays at
+equal widths by default. On a toy problem (I-15, three seeds) one adapter aligned the spaces and two trainable adapters
+shrank their output by one to two orders of magnitude, which the active-unit guard did not flag: use one adapter and a stop
+gradient. With adapters, "both VAEs frozen, an alignment head trained" (the option that P6-5 left for this item) works:
+`freeze_modules` on `["*"]` leaves the adapter training, and its error message now says so.
+
+**Delivered, few pairs, many unpaired samples.** ADR 0061; `on_unpaired: skip` on the two pair terms, `interleaveBatches`
+(`data/interleave.py`) for a stream in which each paired batch is followed by unpaired ones, `FlowPrior`, `fitFlowPrior`,
+`saveFlowPrior` and `loadFlowPrior` (`losses/priors/`), the term `flow_prior_alignment` (the frozen prior is a submodule, so
+a resume keeps it), `collectSpaceMeans` and `scripts/fit_flow_prior.py`. Both routes of the roadmap are built. Measured on a
+toy problem (I-15: 16 pairs, 2000 unpaired samples per modality, three seeds, and a clustered variant): the unpaired batches
+halve the reconstruction error of held-out signals at a retrieval that does not fall; a distribution term alone retrieves at
+chance, since a distribution has symmetries that only pairs break; the flow prior is a surrogate and not a likelihood, so it
+shrinks the space it moves (the active-unit guard does not see it) at a cost that grows with its weight, and it did **not**
+improve retrieval or cluster accuracy in any setting tried. The first route is the recommended one; the second is available
+with its caveat and has not been shown to help on data that resembles the paper's (pretrained features).
 
 ---
 
@@ -1143,7 +1181,7 @@ measured.
 | D-13 | **The latent distance of the pair stage.** The text of PairVAE read for this roadmap does not name its distance, and its supplementary information was not accessible. | one of the six of P6-3, or several | Ship all six. Train with `wasserstein2_diag` (the squared form) by default, and `mean_mse` as the ablation. Settle it after reading the paper's supplementary information and on a real pair: the comparison is built (P6-6, `examples/05_alignment_baselines.py`), and on the synthetic pair the six do not separate within the spread (ADR 0056) | P6-3, P6-4, P6-6 |
 | D-14 | **What is frozen in stage 3.** The paper trains both VAEs together. | nothing; the decoders; one side; both VAEs, with an alignment head only | Nothing frozen. Freezing is opt-in (P6-5, built; ADR 0055 measures the options on the synthetic pair) | P6-5 |
 | D-15 | **Stage orchestration.** | A: three ordinary runs chained by checkpoints. B: one driver that runs the three stages from one config | A, since each stage is then a normal, resumable, reproducible run. Revisited after P6-7 (ADR 0057): the three runs chained by checkpoints trained, resumed and were evaluated end to end with no driver, so A stays and B is not planned | P6-7 |
-| D-16 | **Latent widths in a pair.** | require equal widths; or an adapter head used by the alignment only | Require equal widths. The adapter is a P6-8 extension | P6-4 |
+| D-16 | **Latent widths in a pair.** | require equal widths; or an adapter head used by the alignment only | Require equal widths. The adapter is a P6-8 extension. Revisited after P6-8 (ADR 0060): adapters are built and opt-in (`adapters` of `latent_alignment`), and the default stays equal widths | P6-4, P6-8 |
 | D-17 | **Go-ahead and order for Phases 7 and 4.** | per item | Phase 7: P7-1, P7-2 and P7-3 first, since they answer I-4 and need only Phase 5. P7-4 and P7-5 on a named need. Phase 4: P4-0, then the order of section 7 | Phases 7 and 4 |
 | D-18 | **Docs toolchain after the end of life of Material for MkDocs (2027-05-05).** | stay on the pinned MkDocs 1.6.x and Material 9.x; move to ProperDocs, which the plugin notice names as a drop-in continuation of MkDocs 1.x (the Material team says that notice is not its own); move to Zensical, which the Material notice names as its successor | Stay pinned for now, with an upper bound on `mkdocs-material`. Try the build with ProperDocs or Zensical on a branch before the end of life, and decide then | P5-9 (the trial only) |
 

@@ -178,7 +178,10 @@ number.
 
 - **Spaces of different widths.** The two latent spaces must have the same `dim` (roadmap D-16), and
   the message names both shapes and says that the widths must be equal. Equal widths are a choice
-  of the pair model file, and `configs/model/signal_image_pair.yaml` makes it.
+  of the pair model file, and `configs/model/signal_image_pair.yaml` makes it. The `latent_alignment`
+  term can read a space through an adapter head, so that the distance sees equal widths and the
+  spaces keep theirs ([ADR 0060](../adr/0060-unequal-latent-widths-adapters.md)); the distance
+  itself never adapts.
 - **Different batch sizes**, a `logvar` of another shape than its `mu`, tensors that are not
   `(batch, dim)`, or that are not floating point.
 - **More spaces than it compares.** A distance of two spaces refuses a third; only `mixture_jsd`

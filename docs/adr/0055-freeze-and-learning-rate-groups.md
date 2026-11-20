@@ -80,7 +80,7 @@ every checkpoint written before this item and every run that does not use the gr
 **6. A clear error when everything that trains is frozen.** If, in an epoch, no parameter the optimizer holds can train,
 `freeze_modules` raises before the first step, and the message says what to change. It also says that keeping both VAEs
 frozen and training only an alignment head needs a head that the model does not have yet (the adapter of P6-8, roadmap
-D-16). A batch that only a frozen modality can use (no trainable parameter takes part in the loss) gives, in
+D-16; since ADR 0060 the message points at `latent_alignment`'s `adapters`). A batch that only a frozen modality can use (no trainable parameter takes part in the loss) gives, in
 `Trainer._backward`, a `RuntimeError` that says so, where PyTorch says "element 0 of tensors does not require grad".
 
 **7. D-14 is implemented as opt-in.** The default is nothing frozen and one group, as in the paper. The options of the
@@ -192,7 +192,8 @@ at "nothing frozen", and the table is there to show that the options work and wh
   guards on both, so the first epoch of each state is expected to recompile the graph once. It was not measured, and
   `compile_model` is off by default (ADR 0031).
 - **Limit: both VAEs frozen with only an alignment head trained** needs the adapter of P6-8. Until then the run stops
-  with a message that names it.
+  with a message that names it (ADR 0060 delivered the adapter, and the message now says to give `latent_alignment`
+  `adapters`).
 - **The cross reconstruction's `BatchNorm` finding of ADR 0054 has its tool:** freeze the decoders, or all the modules
   whose statistics must not move. It is still a finding for a run that does not.
 - **A frozen module keeps its optimizer state.** An Adam state for a parameter that never trains is a few tensors of the

@@ -34,11 +34,15 @@ from global_vae.losses.reconstruction.aggregate import computeTotalReconstructio
 from global_vae.losses.terms.base import AbstractLossTerm, TrainerSettings
 from global_vae.losses.terms.pairs import (
     Pair,
+    batchHasModalities,
+    checkOnUnpaired,
     checkStopGradient,
-    parsePairs,
     refuseModalityDropout,
     requireModalitiesInBatch,
+    requireSameSamples,
+    resolvePairs,
     validatePairsAgainstModel,
+    zeroLoss,
 )
 from global_vae.losses.terms.registry import registerLossTerm
 from global_vae.models.global_vae import GlobalVae
@@ -94,21 +98,51 @@ class CrossReconstructionTerm(AbstractLossTerm):
             this term (only the encoders learn to write what the decoders read).
     """
 
-    def __init__(self, pairs: Sequence[Sequence[str]], stop_gradient: str = "none") -> None:
+    def __init__(
+        self,
+        pairs: Sequence[Sequence[str]] | None = None,
+        *,
+        stop_gradient: str = "none",
+        check_sample_ids: bool = True,
+        anchor: str | None = None,
+        others: Sequence[str] | None = None,
+        directions: str = "both",
+        on_unpaired: str = "raise",
+    ) -> None:
         """Configure the term.
 
         Args:
             pairs: A non-empty list of ordered `[source, target]` latent space names. List both
-                orders for both directions: a pair listed once is decoded one way.
+                orders for both directions: a pair listed once is decoded one way. Give this, or
+                `anchor` with `others`.
             stop_gradient: `"none"` (default), `"source"` or `"target"`, as in the class.
+            check_sample_ids: Compare the `sample_id.<modality>` entries of a batch, when the loader
+                gives them, and raise if the modalities are not the same samples (ADR 0058).
+            anchor: The latent space that every space of `others` is cross-decoded with (anchor
+                mode, roadmap P6-8, ADR 0059).
+            others: The latent spaces cross-decoded with `anchor`.
+            directions: In anchor mode, `"both"` (default: every other space is decoded from the
+                anchor's sample and the anchor from every other's), `"to_anchor"` (the anchor's
+                decoders read the others' samples) or `"from_anchor"` (the others' decoders read
+                the anchor's sample). Not read with `pairs`.
+            on_unpaired: `"raise"` (default) or `"skip"`: what the term does with a batch that
+                lacks a modality of a pair (roadmap P6-8, ADR 0061). With `"skip"` it returns zero
+                on such a batch and counts it in `num_skipped`.
 
         Raises:
             ValueError: If `pairs` or `stop_gradient` is malformed (the message names the entry),
                 or a pair is listed twice in the same order.
         """
         super().__init__()
-        self.pairs: tuple[Pair, ...] = parsePairs(pairs, TERM_NAME, allow_reversed_duplicates=True)
+        self.pairs: tuple[Pair, ...] = resolvePairs(
+            pairs, anchor, others, TERM_NAME, allow_reversed_duplicates=True, directions=directions
+        )
+        self.anchor = anchor
         self.stop_gradient = checkStopGradient(stop_gradient, TERM_NAME)
+        self.check_sample_ids = bool(check_sample_ids)
+        self.on_unpaired = checkOnUnpaired(on_unpaired, TERM_NAME)
+        self.num_applied = 0
+        self.num_skipped = 0
         self._needs: tuple[tuple[str, str], ...] = ()
         # A plain attribute: the loss it holds may be a module that the trainer already owns.
         self._settings: TrainerSettings | None = None
@@ -173,7 +207,8 @@ class CrossReconstructionTerm(AbstractLossTerm):
 
         Raises:
             ValueError: If the batch lacks a modality that a pair needs (the stage needs paired
-                batches).
+                batches; not with `on_unpaired: skip`), or its sample ids say that the
+                modalities are not the same samples.
             RuntimeError: If the term was never bound to a trainer, so it does not know which
                 loss to score a modality with.
         """
@@ -184,7 +219,13 @@ class CrossReconstructionTerm(AbstractLossTerm):
                 f"(`bindTrainerSettings`)."
             )
         settings = self._settings
+        if self.on_unpaired == "skip" and not batchHasModalities(batch, self._needs):
+            self.num_skipped += 1
+            return zeroLoss(model)
         requireModalitiesInBatch(batch, self._needs, TERM_NAME)
+        self.num_applied += 1
+        if self.check_sample_ids:
+            requireSameSamples(batch, self._needs, TERM_NAME)
         samples: Mapping[str, torch.Tensor] = outputs["latent_samples"]
         values = []
         for source, target in self.pairs:

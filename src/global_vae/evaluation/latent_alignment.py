@@ -48,8 +48,10 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from torch import nn
 
 import global_vae.losses.distances  # noqa: F401 (registers the built-in distances)
+from global_vae.data.sample_ids import checkSampleIds
 from global_vae.evaluation.latent_diagnostics import (
     DEFAULT_ACTIVE_UNIT_THRESHOLD,
     LatentDiagnostics,
@@ -79,6 +81,17 @@ DEFAULT_INTEGRITY_SHUFFLES = 20
 
 DEFAULT_INTEGRITY_MARGIN = 0.05
 """The recall of the Procrustes map on the training pairs must beat chance by this much."""
+
+DEFAULT_MIN_ADAPTER_SPREAD = 0.1
+"""An adapter whose output spreads less than this fraction of its input, per dimension, is flagged.
+
+A trained adapter can lower the distance by shrinking its output, which the active-unit guard does
+not see (the variance stays above its threshold). On the synthetic measurement of ADR 0060 (three
+seeds, a toy problem) one adapter kept 0.4 to 1.1 of the per-dimension spread, and two trainable
+adapters without a stop gradient kept 0.01 to 0.07, so 0.1 separates them there; with a stop
+gradient on one space and two adapters it kept 0.03 to 0.23, which 0.1 does not. It is a place to
+start reading, not a proof of either: the retrieval is what says whether the alignment works.
+"""
 
 INTEGRITY_OK = "ok"
 INTEGRITY_SUSPECT = "suspect"
@@ -212,17 +225,64 @@ class PairPosteriors:
         first_logvar: Its log-variance, the same shape.
         second_mu: Posterior mean of the second view.
         second_logvar: Its log-variance.
+        sample_ids_checked: How many rows had their `sample_id.<modality>` entries compared across
+            the modalities of the two views (0 when the batches carried no ids, ADR 0058).
     """
 
     first_mu: torch.Tensor
     first_logvar: torch.Tensor
     second_mu: torch.Tensor
     second_logvar: torch.Tensor
+    sample_ids_checked: int = 0
 
     @property
     def num_samples(self) -> int:
         """The number of paired samples."""
         return int(self.first_mu.shape[0])
+
+
+def adaptPosteriors(
+    posteriors: PairPosteriors,
+    first: LatentView,
+    second: LatentView,
+    adapters: Mapping[str, nn.Module],
+) -> PairPosteriors:
+    """Read the posteriors of two views through the adapters of their spaces (ADR 0060).
+
+    A view whose space has no adapter is returned as it is. The adapters run on their own device
+    with no gradient, and the result is back on the CPU in `float32`, like the posteriors.
+
+    Args:
+        posteriors: The two views' posteriors at their own widths.
+        first: The first view (its `space` names the adapter).
+        second: The second view.
+        adapters: Latent space name -> a latent head (`heads/`), as the alignment term trained it.
+
+    Returns:
+        New `PairPosteriors`, with the same `sample_ids_checked`.
+    """
+
+    def read(
+        space: str, mu: torch.Tensor, logvar: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        adapter = adapters.get(space)
+        if adapter is None:
+            return mu, logvar
+        parameter = next(adapter.parameters(), None)
+        device = parameter.device if parameter is not None else torch.device("cpu")
+        with torch.no_grad():
+            adapted_mu, adapted_logvar = adapter(mu.to(device), logvar.to(device))
+        return adapted_mu.float().cpu(), adapted_logvar.float().cpu()
+
+    first_mu, first_logvar = read(first.space, posteriors.first_mu, posteriors.first_logvar)
+    second_mu, second_logvar = read(second.space, posteriors.second_mu, posteriors.second_logvar)
+    return PairPosteriors(
+        first_mu=first_mu,
+        first_logvar=first_logvar,
+        second_mu=second_mu,
+        second_logvar=second_logvar,
+        sample_ids_checked=posteriors.sample_ids_checked,
+    )
 
 
 def _checkBatchHasInputs(batch: Mapping[str, torch.Tensor], needed: Sequence[str]) -> None:
@@ -253,6 +313,21 @@ def _encodeView(
     return latent_params[view.space]
 
 
+def _checkBatchSampleIds(
+    batch: Mapping[str, torch.Tensor], needed: Sequence[str], keep: int
+) -> int:
+    """Compare the sample ids of a batch across the modalities read, and count the rows kept.
+
+    Returns:
+        `keep` when the batch carries ids and they agree, 0 when it carries none.
+
+    Raises:
+        ValueError: As `checkSampleIds`, with the evaluation as the one that found it.
+    """
+    checked = checkSampleIds(batch, needed, "Evaluating a pair of latent spaces")
+    return 0 if checked is None else keep
+
+
 def _rowsToKeep(batch: Mapping[str, torch.Tensor], needed: Sequence[str], room: int | None) -> int:
     """How many rows of a batch to use, given how many more samples may be read (`None`: all)."""
     rows = int(batch[needed[0]].shape[0])
@@ -266,6 +341,7 @@ def collectPairPosteriors(
     second: LatentView,
     device: str | torch.device | None = None,
     max_samples: int | None = None,
+    require_equal_widths: bool = True,
 ) -> PairPosteriors:
     """Encode paired batches and keep the posterior of each view (no decoder runs).
 
@@ -280,13 +356,16 @@ def collectPairPosteriors(
         second: The second view.
         device: Batches are moved here. Defaults to `model`'s own device.
         max_samples: Stop after this many samples, trimming the last batch. `None` reads it all.
+        require_equal_widths: Refuse two views of different widths (default). `False` keeps the
+            posteriors at their own widths, for a pair that is read through adapters (ADR 0060).
 
     Returns:
         The `PairPosteriors`.
 
     Raises:
         ValueError: If `max_samples` is below `1`, a batch lacks a modality of a view, the two
-            views have different widths, or `dataloader` gives no sample.
+            views have different widths and `require_equal_widths` is set, or `dataloader` gives
+            no sample.
     """
     if max_samples is not None and max_samples < 1:
         raise ValueError(f"max_samples must be at least 1, got {max_samples}.")
@@ -295,12 +374,16 @@ def collectPairPosteriors(
     model.eval()
     chunks: list[tuple[torch.Tensor, ...]] = []
     seen = 0
+    ids_checked = 0
     with torch.no_grad():
         for batch in dataloader:
             _checkBatchHasInputs(batch, needed)
             keep = _rowsToKeep(batch, needed, None if max_samples is None else max_samples - seen)
+            ids_checked += _checkBatchSampleIds(batch, needed, keep)
             first_mu, first_logvar = _encodeView(model, batch, first, resolved_device, keep)
             second_mu, second_logvar = _encodeView(model, batch, second, resolved_device, keep)
+            if require_equal_widths:
+                _checkWidths(first_mu.shape[-1], second_mu.shape[-1], first, second)
             chunks.append(
                 tuple(t.float().cpu() for t in (first_mu, first_logvar, second_mu, second_logvar))
             )
@@ -309,19 +392,27 @@ def collectPairPosteriors(
                 break
     if not chunks:
         raise ValueError("The dataloader gave no batch: a pair evaluation needs paired samples.")
-    posteriors = PairPosteriors(*(torch.cat([chunk[i] for chunk in chunks]) for i in range(4)))
-    _checkWidths(posteriors, first, second)
+    posteriors = PairPosteriors(
+        first_mu=torch.cat([chunk[0] for chunk in chunks]),
+        first_logvar=torch.cat([chunk[1] for chunk in chunks]),
+        second_mu=torch.cat([chunk[2] for chunk in chunks]),
+        second_logvar=torch.cat([chunk[3] for chunk in chunks]),
+        sample_ids_checked=ids_checked,
+    )
     return posteriors
 
 
-def _checkWidths(posteriors: PairPosteriors, first: LatentView, second: LatentView) -> None:
-    """Raise if the two views do not have one width (roadmap D-16)."""
-    if posteriors.first_mu.shape[1] != posteriors.second_mu.shape[1]:
+def _checkWidths(
+    first_width: int, second_width: int, first: LatentView, second: LatentView, after: str = ""
+) -> None:
+    """Raise if the two views are not read at one width (roadmap D-16)."""
+    if first_width != second_width:
         raise ValueError(
-            f"'{first.toText()}' has width {posteriors.first_mu.shape[1]} and "
-            f"'{second.toText()}' has width {posteriors.second_mu.shape[1]}. Comparing two latent "
-            "spaces needs equal widths (roadmap D-16): a distance, a retrieval and an orthogonal "
-            "map are all undefined between spaces of different widths."
+            f"'{first.toText()}' has width {first_width} and '{second.toText()}' has width "
+            f"{second_width}{after}. Comparing two latent spaces needs equal widths (roadmap "
+            "D-16): a distance and a retrieval are undefined between spaces of different widths. "
+            "To compare spaces that keep their own widths, read them through adapters of one width "
+            "(`adapters`, ADR 0060)."
         )
 
 
@@ -335,6 +426,8 @@ class OrthogonalMap:
     Attributes:
         rotation: The orthogonal matrix `R` with `R R^T = I`, `(latent_dim, latent_dim)`,
             `float64`. A reflection is allowed: the map is any element of the orthogonal group.
+            For spaces of different widths `(d1, d2)` it has orthonormal rows or columns, whichever
+            are fewer (`fitOrthogonalProcrustes`).
         first_mean: The mean subtracted from the first space before the map, and added back by
             `toFirst`. Zeros when the fit was not centered.
         second_mean: The mean added to the image of the first space. Zeros when not centered.
@@ -368,9 +461,14 @@ def fitOrthogonalProcrustes(
     singular value decomposition `X^T Y = U S V^T`, the solution is `R = U V^T`. There is nothing
     to train, no hyperparameter and no initialization, so the result depends only on the pairs.
 
+    The two spaces may have different widths `d1` and `d2` (spaces that keep their own, ADR 0060):
+    the thin decomposition gives `R` of shape `(d1, d2)` with orthonormal rows (if `d1 <= d2`) or
+    columns (if `d1 > d2`), a **partial isometry**: it embeds the narrower space in the wider one,
+    and `toFirst` projects back, so the map loses what the narrower direction cannot hold.
+
     Args:
-        first: Posterior means of the first space, `(samples, latent_dim)`.
-        second: Posterior means of the second space, the same shape, row `i` the same sample.
+        first: Posterior means of the first space, `(samples, d1)`.
+        second: Posterior means of the second space, `(samples, d2)`, row `i` the same sample.
         center: Subtract each space's mean over the pairs before the fit, and add them back in
             `toSecond` and `toFirst`. `False` (default) is the single orthogonal map of the
             roadmap; `True` also removes a constant offset between the spaces.
@@ -379,13 +477,13 @@ def fitOrthogonalProcrustes(
         The `OrthogonalMap`.
 
     Raises:
-        ValueError: If the inputs are not two matrices of one shape with at least one row, or a
-            value is not finite.
+        ValueError: If the inputs are not two matrices with the same number of rows and at least
+            one, or a value is not finite.
     """
-    if first.ndim != 2 or second.ndim != 2 or first.shape != second.shape:
+    if first.ndim != 2 or second.ndim != 2 or first.shape[0] != second.shape[0]:
         raise ValueError(
-            "Both sets of means must be matrices (samples, latent_dim) of one shape, got "
-            f"{tuple(first.shape)} and {tuple(second.shape)}."
+            "Both sets of means must be matrices (samples, latent_dim) with one row per sample, "
+            f"got {tuple(first.shape)} and {tuple(second.shape)}."
         )
     if first.shape[0] < 1:
         raise ValueError("The orthogonal map needs at least one pair.")
@@ -394,7 +492,9 @@ def fitOrthogonalProcrustes(
         raise ValueError("The posterior means must be finite.")
     first_mean = x.mean(dim=0) if center else torch.zeros(x.shape[1], dtype=torch.float64)
     second_mean = y.mean(dim=0) if center else torch.zeros(y.shape[1], dtype=torch.float64)
-    left, _, right_transposed = torch.linalg.svd((x - first_mean).T @ (y - second_mean))
+    left, _, right_transposed = torch.linalg.svd(
+        (x - first_mean).T @ (y - second_mean), full_matrices=False
+    )
     return OrthogonalMap(
         rotation=left @ right_transposed,
         first_mean=first_mean,
@@ -447,6 +547,9 @@ class PairIntegrity:
         shuffled_recall_max: The largest recall over the shuffles.
         shuffles: How many shuffles were fitted.
         margin: The amount by which `recall` has to exceed chance.
+        sample_ids_checked: How many rows, held-out and training together, had their
+            `sample_id.<modality>` entries compared across the modalities of the two views: 0 when
+            the batches carried none, and then the pairs were not checked by id (ADR 0058).
     """
 
     status: str
@@ -459,6 +562,7 @@ class PairIntegrity:
     shuffled_recall_max: float = math.nan
     shuffles: int = 0
     margin: float = DEFAULT_INTEGRITY_MARGIN
+    sample_ids_checked: int = 0
 
 
 def chooseSelectiveK(ks: Sequence[int], num_pairs: int) -> int:
@@ -541,9 +645,9 @@ def checkPairIntegrity(
         raise ValueError(f"shuffles must be at least 0, got {shuffles}.")
     if not math.isfinite(margin) or margin < 0:
         raise ValueError(f"margin must be finite and at least 0, got {margin}.")
-    if first.shape != second.shape or first.ndim != 2:
+    if first.ndim != 2 or second.ndim != 2 or first.shape[0] != second.shape[0]:
         raise ValueError(
-            "Both sets of means must be matrices (pairs, latent_dim) of one shape, got "
+            "Both sets of means must be matrices (pairs, latent_dim) with one row per pair, got "
             f"{tuple(first.shape)} and {tuple(second.shape)}."
         )
     num_pairs = int(first.shape[0])
@@ -769,6 +873,7 @@ def collectPairStatistics(
     device: str | torch.device | None = None,
     max_samples: int | None = None,
     mapping: OrthogonalMap | None = None,
+    require_equal_widths: bool = True,
 ) -> PairStatistics:
     """One pass over held-out pairs: the posteriors, and the self and cross reconstruction.
 
@@ -788,6 +893,11 @@ def collectPairStatistics(
         device: Batches are moved here. Defaults to `model`'s own device.
         max_samples: Stop after this many samples, trimming the last batch. `None` reads it all.
         mapping: An `OrthogonalMap` from `first`'s space to `second`'s, fitted on training pairs.
+        require_equal_widths: Refuse two views of different widths (default). `False` is for a
+            pair read through adapters (ADR 0060): the posteriors keep their own widths, the cross
+            reconstruction, which would hand a code of one width to the decoders of another, is not
+            computed, and the reconstruction through a `mapping` is (its image has the width of
+            the target).
 
     Returns:
         The `PairStatistics`. A direction whose target space has no decoder that can run from it
@@ -795,7 +905,8 @@ def collectPairStatistics(
 
     Raises:
         ValueError: If `max_samples` is below `1`, a batch lacks a modality of a view, the two
-            views have different widths, the two views are the same, or `dataloader` is empty.
+            views have different widths and `require_equal_widths` is set, the two views are the
+            same, or `dataloader` is empty.
     """
     if max_samples is not None and max_samples < 1:
         raise ValueError(f"max_samples must be at least 1, got {max_samples}.")
@@ -815,15 +926,20 @@ def collectPairStatistics(
     model.eval()
     chunks: list[tuple[torch.Tensor, ...]] = []
     seen = 0
+    ids_checked = 0
     with torch.no_grad():
         for batch in dataloader:
             _checkBatchHasInputs(batch, needed)
             keep = _rowsToKeep(batch, needed, None if max_samples is None else max_samples - seen)
+            ids_checked += _checkBatchSampleIds(batch, needed, keep)
             encoded = [_encodeView(model, batch, view, resolved_device, keep) for view in views]
             chunks.append(
                 tuple(t.float().cpu() for pair in encoded for t in pair),
             )
             codes = [mu for mu, _ in encoded]
+            same_width = codes[0].shape[-1] == codes[1].shape[-1]
+            if require_equal_widths:
+                _checkWidths(codes[0].shape[-1], codes[1].shape[-1], first, second)
             for index, view in enumerate(views):
                 if targets[index]:
                     decoded = model.decode({view.space: codes[index]})
@@ -839,9 +955,10 @@ def collectPairStatistics(
                 if not targets[target]:
                     continue
                 reference = {m: batch[m][:keep].to(resolved_device) for m in targets[target]}
-                decoded = model.decode({views[target].space: codes[source]})
-                for modality in targets[target]:
-                    update("cross", direction, modality, decoded[modality], reference[modality])
+                if same_width:
+                    decoded = model.decode({views[target].space: codes[source]})
+                    for modality in targets[target]:
+                        update("cross", direction, modality, decoded[modality], reference[modality])
                 if mapping is not None:
                     carried = (mapping.toSecond if source == 0 else mapping.toFirst)(
                         codes[source].cpu()
@@ -858,8 +975,13 @@ def collectPairStatistics(
                 break
     if not chunks:
         raise ValueError("The dataloader gave no batch: a pair evaluation needs paired samples.")
-    posteriors = PairPosteriors(*(torch.cat([chunk[i] for chunk in chunks]) for i in range(4)))
-    _checkWidths(posteriors, first, second)
+    posteriors = PairPosteriors(
+        first_mu=torch.cat([chunk[0] for chunk in chunks]),
+        first_logvar=torch.cat([chunk[1] for chunk in chunks]),
+        second_mu=torch.cat([chunk[2] for chunk in chunks]),
+        second_logvar=torch.cat([chunk[3] for chunk in chunks]),
+        sample_ids_checked=ids_checked,
+    )
 
     reconstruction = PairReconstruction()
     sections = {
@@ -1029,6 +1151,14 @@ class LatentAlignmentReport:
         procrustes: Baseline 1, `None` when no training pairs were given.
         pair_integrity: The integrity check (`"not_checked"` without training pairs).
         flags: The warnings, one sentence each: an empty list means nothing was flagged.
+        adapters: Latent space name -> `{"head", "in_dim", "out_dim", "parameters",
+            "spread_ratio"}` for each space the pair was read through an adapter (ADR 0060):
+            `spread_ratio` is the per-dimension spread of the posterior mean after the adapter over
+            before it (`None` if there was none before). Empty without adapters.
+        widths: View label -> the latent width of the view as the model has it.
+        notes: What a reader must know to read the numbers, one sentence each (that the retrieval
+            reads adapted posteriors, that the cross reconstruction was not computed). Not
+            warnings: they are in `flags` when something is wrong.
     """
 
     labels: list[str]
@@ -1049,6 +1179,9 @@ class LatentAlignmentReport:
     procrustes: ProcrustesResult | None
     pair_integrity: PairIntegrity
     flags: list[str] = field(default_factory=list)
+    adapters: dict[str, dict[str, Any]] = field(default_factory=dict)
+    widths: dict[str, int] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
 
     def toDict(self) -> dict[str, Any]:
         """Return a plain, JSON-serializable dict (`dataclasses.asdict(self)`)."""
@@ -1108,6 +1241,7 @@ class LatentAlignmentReport:
         lines.extend(f"  FLAG: {flag}" for flag in self.flags)
         if not self.flags:
             lines.append("  no flag raised")
+        lines.extend(f"  note: {note}" for note in self.notes)
         for direction, metrics in self.retrieval.items():
             recalls = ", ".join(
                 f"recall@{k}={metrics[f'recall@{k}']:.3f} "
@@ -1153,6 +1287,7 @@ class LatentAlignmentReport:
         lines.append(
             f"  pair integrity: {self.pair_integrity.status}. {self.pair_integrity.message}"
         )
+        lines.append(f"  {_sampleIdsSentence(self.pair_integrity.sample_ids_checked)}")
         return "\n".join(lines)
 
     def toMarkdown(self) -> str:
@@ -1170,6 +1305,7 @@ class LatentAlignmentReport:
             f"- `{second}`: space `{self.views[second]['space']}` read from "
             f"`{'+'.join(self.views[second]['inputs'])}`",
             f"- held-out pairs: {self.num_heldout}; training pairs: {self.num_train}",
+            *[f"- {note}" for note in self.notes],
             "",
             "## Flags",
             "",
@@ -1252,6 +1388,8 @@ class LatentAlignmentReport:
             "## Pair integrity",
             "",
             f"**{self.pair_integrity.status}**: {self.pair_integrity.message}",
+            "",
+            _sampleIdsSentence(self.pair_integrity.sample_ids_checked),
         ]
         if self.procrustes is not None:
             lines += ["", "## Procrustes baseline (held-out pairs)", ""]
@@ -1278,6 +1416,19 @@ class LatentAlignmentReport:
         resolved_path = Path(path)
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
         resolved_path.write_text(self.toMarkdown(), encoding="utf-8")
+
+
+def _sampleIdsSentence(checked: int) -> str:
+    """One sentence for the report: were the pairs checked by the loader's own sample ids."""
+    if checked > 0:
+        return (
+            f"Sample ids: the `sample_id.<modality>` entries of {checked} rows agreed across the "
+            f"modalities, so those rows are the same samples by the loader's own account."
+        )
+    return (
+        "Sample ids: the batches carry no `sample_id.<modality>` entries, so the pairs were not "
+        "checked by id and are trusted as the loader gave them (ADR 0058)."
+    )
 
 
 def _collectFlags(
@@ -1331,6 +1482,8 @@ def evaluateLatentAlignment(
     integrity_shuffles: int = DEFAULT_INTEGRITY_SHUFFLES,
     integrity_margin: float = DEFAULT_INTEGRITY_MARGIN,
     seed: int = 0,
+    adapters: Mapping[str, nn.Module] | None = None,
+    min_adapter_spread: float = DEFAULT_MIN_ADAPTER_SPREAD,
 ) -> LatentAlignmentReport:
     """Evaluate a pair of latent views on held-out pairs, with the collapse and integrity guards.
 
@@ -1363,6 +1516,17 @@ def evaluateLatentAlignment(
         integrity_shuffles: How many shuffles of the training pairs the integrity check fits.
         integrity_margin: How far above chance the integrity recall has to be.
         seed: Seeds the stochastic distance and the integrity shuffles.
+        adapters: Latent space name -> the latent head that `latent_alignment` was trained to read
+            that space through (ADR 0060). With adapters the two views may have different widths:
+            the retrieval, the alignment metrics and the distances read the adapted posteriors,
+            which must have one width; the collapse guard reads the posteriors as the model has
+            them and the adapted ones; the Procrustes baseline and the integrity check read the
+            posteriors as the model has them (a partial isometry when the widths differ); and the
+            cross reconstruction, which hands a code to the decoders of the other space, is not
+            computed when the widths differ. `None` (default): equal widths are required.
+        min_adapter_spread: The floor of an adapter's `spread_ratio`, the per-dimension spread of
+            the posterior mean after the adapter over the spread before it. An adapter below it is
+            flagged as possibly shrinking its output to make the distance small.
 
     Returns:
         The `LatentAlignmentReport`.
@@ -1370,28 +1534,48 @@ def evaluateLatentAlignment(
     Raises:
         KeyError: If a space or a distance name is not registered or not in the model.
         ValueError: If a setting is invalid, a view is not valid for the model, the two views are
-            the same or have different widths, a batch lacks a modality, or `heldout` holds fewer
-            than two samples.
+            the same or are read at different widths, `adapters` names a space that is not one
+            of the two, a batch lacks a modality, or `heldout` holds fewer than two samples.
     """
     resolved_ks = validateRetrievalSettings(ks, similarity, chunk_size)
     validateActiveUnitThreshold(active_unit_threshold)
     first_view = resolveLatentView(model, first)
     second_view = resolveLatentView(model, second)
     labels = pairLabels(first_view, second_view)
+    if not math.isfinite(min_adapter_spread) or min_adapter_spread < 0:
+        raise ValueError(
+            f"`min_adapter_spread` must be a finite, non-negative number, got {min_adapter_spread}."
+        )
+    adapter_map = dict(adapters or {})
+    stray = sorted(set(adapter_map) - {first_view.space, second_view.space})
+    if stray:
+        raise ValueError(
+            f"`adapters` names {stray}, which is not a space of the two views "
+            f"('{first_view.space}' and '{second_view.space}')."
+        )
+    equal_widths = not adapter_map
 
     mapping: OrthogonalMap | None = None
     train_posteriors: PairPosteriors | None = None
     if train is not None:
         train_posteriors = collectPairPosteriors(
-            model, train, first_view, second_view, device, max_train_samples
+            model, train, first_view, second_view, device, max_train_samples, equal_widths
         )
         mapping = fitOrthogonalProcrustes(
             train_posteriors.first_mu, train_posteriors.second_mu, procrustes_center
         )
     statistics = collectPairStatistics(
-        model, heldout, first_view, second_view, device, max_samples, mapping
+        model, heldout, first_view, second_view, device, max_samples, mapping, equal_widths
     )
-    posteriors = statistics.posteriors
+    raw = statistics.posteriors
+    posteriors = adaptPosteriors(raw, first_view, second_view, adapter_map) if adapter_map else raw
+    _checkWidths(
+        posteriors.first_mu.shape[1],
+        posteriors.second_mu.shape[1],
+        first_view,
+        second_view,
+        " once the adapters have read them" if adapter_map else "",
+    )
     if posteriors.num_samples < _MIN_PAIRS:
         raise ValueError(
             f"At least {_MIN_PAIRS} held-out pairs are needed, got {posteriors.num_samples}."
@@ -1412,13 +1596,19 @@ def evaluateLatentAlignment(
         reconstruction.self_reconstruction, reconstruction.cross_reconstruction
     )
     diagnostics = {
-        labels[0]: computeLatentDiagnostics(
-            posteriors.first_mu, posteriors.first_logvar, active_unit_threshold
-        ),
+        labels[0]: computeLatentDiagnostics(raw.first_mu, raw.first_logvar, active_unit_threshold),
         labels[1]: computeLatentDiagnostics(
-            posteriors.second_mu, posteriors.second_logvar, active_unit_threshold
+            raw.second_mu, raw.second_logvar, active_unit_threshold
         ),
     }
+    for label, view, mu, logvar in (
+        (labels[0], first_view, posteriors.first_mu, posteriors.first_logvar),
+        (labels[1], second_view, posteriors.second_mu, posteriors.second_logvar),
+    ):
+        if view.space in adapter_map:
+            diagnostics[f"{label} (adapted)"] = computeLatentDiagnostics(
+                mu, logvar, active_unit_threshold
+            )
     collapse = checkCollapse(diagnostics, reference_active_units, min_active_units)
 
     procrustes: ProcrustesResult | None = None
@@ -1427,15 +1617,13 @@ def evaluateLatentAlignment(
             reconstruction.self_reconstruction, reconstruction.mapped_cross_reconstruction
         )
         both = _procrustesRetrieval(
-            mapping, posteriors.first_mu, posteriors.second_mu, resolved_ks, similarity, chunk_size
+            mapping, raw.first_mu, raw.second_mu, resolved_ks, similarity, chunk_size
         )
         procrustes = ProcrustesResult(
             center=mapping.center,
             num_fit_pairs=mapping.num_pairs,
             retrieval={forward_name: both["forward"], backward_name: both["backward"]},
-            alignment=computeAlignmentMetrics(
-                mapping.toSecond(posteriors.first_mu), posteriors.second_mu
-            ),
+            alignment=computeAlignmentMetrics(mapping.toSecond(raw.first_mu), raw.second_mu),
             cross_reconstruction=reconstruction.mapped_cross_reconstruction,
             reconstruction_gap=mapped_gap,
         )
@@ -1458,6 +1646,21 @@ def evaluateLatentAlignment(
             "the pairs match were not run.",
             margin=integrity_margin,
         )
+    integrity.sample_ids_checked = posteriors.sample_ids_checked + (
+        0 if train_posteriors is None else train_posteriors.sample_ids_checked
+    )
+    raw_widths = {labels[0]: int(raw.first_mu.shape[1]), labels[1]: int(raw.second_mu.shape[1])}
+    adapter_report, notes = _describeAdapters(
+        adapter_map,
+        (first_view, second_view),
+        labels,
+        raw,
+        posteriors,
+        mapping is not None,
+        diagnostics,
+    )
+    flags = _collectFlags(collapse, distance_values, integrity)
+    flags.extend(_adapterSpreadFlags(adapter_report, min_adapter_spread))
 
     return LatentAlignmentReport(
         labels=list(labels),
@@ -1480,5 +1683,87 @@ def evaluateLatentAlignment(
         collapse=collapse,
         procrustes=procrustes,
         pair_integrity=integrity,
-        flags=_collectFlags(collapse, distance_values, integrity),
+        flags=flags,
+        adapters=adapter_report,
+        widths=raw_widths,
+        notes=notes,
     )
+
+
+def _describeAdapters(
+    adapters: Mapping[str, nn.Module],
+    views: tuple[LatentView, LatentView],
+    labels: tuple[str, str],
+    raw: PairPosteriors,
+    adapted: PairPosteriors,
+    has_map: bool,
+    diagnostics: Mapping[str, LatentDiagnostics],
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """What the report says about the adapters, and what a reader must know to read the numbers."""
+    widths = (
+        (raw.first_mu.shape[1], adapted.first_mu.shape[1]),
+        (raw.second_mu.shape[1], adapted.second_mu.shape[1]),
+    )
+    described: dict[str, dict[str, Any]] = {}
+    notes: list[str] = []
+    for view, label, (in_dim, out_dim) in zip(views, labels, widths, strict=True):
+        adapter = adapters.get(view.space)
+        if adapter is None:
+            continue
+        described[view.space] = {
+            "head": type(adapter).__name__,
+            "in_dim": int(in_dim),
+            "out_dim": int(out_dim),
+            "parameters": sum(parameter.numel() for parameter in adapter.parameters()),
+            "spread_ratio": _spreadRatio(diagnostics[label], diagnostics[f"{label} (adapted)"]),
+        }
+        notes.append(
+            f"'{label}' is read through the adapter of '{view.space}' "
+            f"({type(adapter).__name__}, {in_dim} -> {out_dim})."
+        )
+    if not described:
+        return described, notes
+    notes.append(
+        "The retrieval, the alignment metrics and the distances read the adapted posteriors, "
+        "which the alignment term trained on the training pairs; the collapse guard reads the "
+        "posteriors as the model has them, and the adapted ones as `(adapted)`."
+    )
+    if raw.first_mu.shape[1] != raw.second_mu.shape[1]:
+        notes.append(
+            f"The spaces have widths {raw.first_mu.shape[1]} and {raw.second_mu.shape[1]}: the "
+            "cross reconstruction, which hands a code of one width to the decoders of the other, "
+            "was not computed"
+            + (
+                ", and the Procrustes baseline is a partial isometry that embeds the narrower "
+                "space in the wider one."
+                if has_map
+                else "."
+            )
+        )
+    return described, notes
+
+
+def _spreadRatio(before: LatentDiagnostics, after: LatentDiagnostics) -> float | None:
+    """Per-dimension spread of the posterior mean after an adapter over before it.
+
+    The mean over dimensions of the variance over samples of each dimension's posterior mean, so
+    that a narrower and a wider space compare. `None` when the space had no spread to begin with.
+    """
+    start = sum(before.mu_variance_per_dimension) / max(before.num_dimensions, 1)
+    end = sum(after.mu_variance_per_dimension) / max(after.num_dimensions, 1)
+    return float(end / start) if start > 0 else None
+
+
+def _adapterSpreadFlags(described: Mapping[str, Mapping[str, Any]], floor: float) -> list[str]:
+    """One sentence per adapter whose output is much less spread than its input."""
+    flags: list[str] = []
+    for space, entry in described.items():
+        ratio = entry["spread_ratio"]
+        if ratio is not None and ratio < floor:
+            flags.append(
+                f"Adapter: the adapter of '{space}' leaves {ratio:.3f} of the per-dimension "
+                f"spread of the posterior mean it reads (the floor is {floor}). An adapter can "
+                "lower a distance by shrinking its output: read the retrieval, which does not "
+                "change with the scale, before reading the distance."
+            )
+    return flags

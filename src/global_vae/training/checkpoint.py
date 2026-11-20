@@ -522,6 +522,51 @@ def readCheckpointWeights(
     )
 
 
+def readLossTermState(
+    path: str | Path,
+    term_name: str,
+    map_location: str | torch.device = "cpu",
+    weights_only: bool = True,
+) -> dict[str, torch.Tensor]:
+    """Read the parameters of one loss term from a checkpoint, without a trainer.
+
+    A term with parameters (the adapters of `latent_alignment`, ADR 0060) saves them in the file's
+    `loss_terms_state_dict` under its name. The evaluation reads them back to apply the same
+    adapters to the same model.
+
+    Args:
+        path: The checkpoint file.
+        term_name: The term's name in `training.loss_terms` (`latent_alignment`).
+        map_location: Where the tensors are loaded. Defaults to `"cpu"`.
+        weights_only: Read the file with the restricted unpickler (default), or, for a file you
+            trust that it refuses, not (ADR 0034).
+
+    Returns:
+        The term's state: parameter name relative to the term (`adapters.z_image.to_mu.weight`)
+        to tensor.
+
+    Raises:
+        FileNotFoundError: If `path` does not exist.
+        ValueError: If the file holds no loss-term state, or none for `term_name` (the message
+            lists the terms it has).
+    """
+    resolved_path = Path(path)
+    checkpoint = _readCheckpointFile(resolved_path, map_location, weights_only)
+    if not isinstance(checkpoint, dict):
+        raise ValueError(f"Checkpoint '{resolved_path}' is not a file written by saveCheckpoint.")
+    saved: dict[str, torch.Tensor] = checkpoint.get("loss_terms_state_dict") or {}
+    prefix = f"{term_name}."
+    own = {key[len(prefix) :]: value for key, value in saved.items() if key.startswith(prefix)}
+    if not own:
+        terms = sorted({key.split(".", 1)[0] for key in saved})
+        raise ValueError(
+            f"Checkpoint '{resolved_path}' holds no parameters for the loss term '{term_name}' "
+            f"(terms with parameters in the file: {terms or 'none'}). Was it trained with that "
+            f"term and with parameters to save, such as `adapters`?"
+        )
+    return own
+
+
 def _paramGroupLayout(groups: Sequence[Mapping[str, Any]]) -> list[tuple[Any, Any]]:
     """Return `(name, lr_factor)` of each parameter group; `(None, None)` for one with neither."""
     return [(group.get("name"), group.get("lr_factor")) for group in groups]

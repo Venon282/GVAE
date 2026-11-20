@@ -179,7 +179,7 @@ class FreezeModules(TrainerCallback):
             raise ValueError(
                 f"freeze_modules: in epoch {epoch}, every parameter that the optimizer holds is "
                 f"frozen (modules {list(self.modules)}), so there is nothing to train. Freeze "
-                f"fewer modules, or set `until_epoch`. Keeping both VAEs frozen and training only "
-                f"an alignment head needs that head, which the model does not have yet "
-                f"(roadmap P6-8)."
+                f"fewer modules, or set `until_epoch`. To keep both VAEs frozen and train only an "
+                f"alignment head, give `latent_alignment` `adapters`: the adapter is a parameter "
+                f"of the term, not of the model, so it keeps training (ADR 0060)."
             )

@@ -56,3 +56,7 @@
 - [0055: Freeze modules and learning-rate groups](0055-freeze-and-learning-rate-groups.md)
 - [0056: Evaluation across two separate latent spaces, with baselines](0056-evaluation-across-two-latent-spaces.md)
 - [0057: Staged training end to end: the pair experiment, the solo handoff and the integration test](0057-staged-training-end-to-end.md)
+- [0058: Pair integrity: optional sample ids in a batch](0058-pair-integrity-sample-ids.md)
+- [0059: More than two models: anchor mode and a multi-way Procrustes baseline](0059-more-than-two-models-anchor-mode.md)
+- [0060: Unequal latent widths: adapters read by the alignment term only](0060-unequal-latent-widths-adapters.md)
+- [0061: Few pairs, many unpaired samples: a mixed stream and a frozen flow prior](0061-few-pairs-many-unpaired.md)

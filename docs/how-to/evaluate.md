@@ -207,7 +207,9 @@ python scripts/evaluate.py \
 ```
 
 The held-out pairs are the batches of `--dataloader-factory`, and each batch must carry both modalities, row `i` of
-each being one sample. Each space is read from its own modality alone (`GlobalVae.encode`, no decoder runs for the
+each being one sample. If the loader adds a `sample_id.<modality>` entry per modality
+([ADR 0058](../adr/0058-pair-integrity-sample-ids.md)), the evaluation compares them and stops on a batch where they
+differ, and the report says how many rows were checked by id; without them the pairs are trusted. Each space is read from its own modality alone (`GlobalVae.encode`, no decoder runs for the
 posteriors). The report is written next to `results.json` as `latent_alignment.json` and `latent_alignment.md`
 (`latent_alignment_<first>_<second>` when the flag is given more than once), the cross rows join
 `metrics_table.md`, and the flags of the report are also logged as warnings. It holds:
@@ -290,6 +292,90 @@ your tensors and call `runAlignmentBaselines` with a `BaselineRecipe` that names
 !!! warning "What the synthetic pair says, and does not say"
     The data are synthetic (finding I-15) and every setting is a placeholder. The baselines show that the harness runs,
     what its guards catch and what to look at, not which route is best on real data.
+
+## Spaces of different widths
+
+A pair whose spaces keep their own widths, aligned through the adapter that `latent_alignment` trained
+([ADR 0060](../adr/0060-unequal-latent-widths-adapters.md)), is read with the same flag and the adapter given again:
+
+```bash
+python scripts/evaluate.py \
+    --checkpoint runs/pair/best.pt \
+    --model-factory my_project.models:buildPairModel \
+    --dataloader-factory my_project.data:buildHeldoutLoader \
+    --train-dataloader-factory my_project.data:buildTrainingLoader \
+    --latent-pair z_signal z_image \
+    --alignment-adapter z_image=16
+```
+
+`--alignment-adapter SPACE=[HEAD:]WIDTH` (repeatable) names the head and the width of the training config's `adapters`
+(`z_image=16` is a `linear` head, `z_image=linear:16` says so), and the weights are read from the checkpoint's loss-term
+state (`--alignment-term` is the term's name in `training.loss_terms`, `latent_alignment` by default). A width the
+checkpoint does not hold stops with what it lacks. Without the flag two widths are refused, with the way out in the message.
+
+With adapters, the retrieval, the alignment metrics and the distances read the **adapted** posteriors, and the collapse guard reads
+both the posteriors as the model has them and the adapted ones (`z_image (adapted)`). The Procrustes baseline and the
+pair-integrity check read the posteriors as the model has them: between two widths the orthogonal map is a partial isometry
+that embeds the narrower space in the wider one. The cross reconstruction is **not computed** (it hands a code of one
+width to the decoders of the other), and `notes` in `latent_alignment.json` says so, next to the `widths`, the `adapters`
+and, for each, its `spread_ratio`: the per-dimension spread of the posterior mean after the adapter over before it. An
+adapter below `--min-adapter-spread` (0.1) is flagged, because a trained adapter can lower a distance by shrinking its
+output, which the active-unit guard does not see. Read the retrieval first: it does not change with the scale.
+
+## Across three latent spaces or more
+
+A model with three modalities that each have a latent space has `K (K - 1) / 2` pairs to read. `--latent-set` reads them
+all at once, against the post-hoc maps that a model without a learned alignment would get for free
+([ADR 0059](../adr/0059-more-than-two-models-anchor-mode.md)):
+
+```bash
+python scripts/evaluate.py \
+    --checkpoint runs/triple/best.pt \
+    --model-factory my_project.models:buildTripleModel \
+    --dataloader-factory my_project.data:buildHeldoutLoader \
+    --train-dataloader-factory my_project.data:buildTrainingLoader \
+    --latent-set z_signal z_image z_text \
+    --latent-anchor z_signal
+```
+
+It writes `multiway_alignment.json` and `.md` next to `results.json` (repeat `--latent-set` for several sets, which
+are then named by their views). For **every ordered pair** `a -> b` of held-out samples it gives the retrieval of the
+true partner (`recall@k`, mean rank, `mrr`, with the chance level) after each of four maps, all fitted on the training
+pairs only:
+
+| Row | Maps | Reads as |
+|---|---|---|
+| identity | 0 | the spaces as training left them: what a learned alignment is judged by |
+| pairwise | `K (K - 1) / 2` | the best an orthogonal map does for each pair, none shared |
+| common | `K` | one orthogonal map per view into a shared frame (generalized Procrustes) |
+| anchor | `K - 1` | one map per view to `--latent-anchor`, and two other views go through it |
+
+If `pairwise` beats `identity` by a wide margin the spaces are not aligned and a map would align them; if `common` is
+close to `pairwise`, `K` maps do the work of `K (K - 1) / 2`; if `anchor` is close to `common`, a hub is enough. The report
+also gives what each frame leaves of the views' size (`0` is a perfect agreement) on the training and on the held-out
+means. A set has at least three views, of one width (for two, `--latent-pair` reads more), and the `sample_id` entries
+of [ADR 0058](../adr/0058-pair-integrity-sample-ids.md) are compared across all the modalities of the views.
+
+From Python:
+
+```python
+from global_vae.evaluation.multiway_alignment import evaluateMultiwayAlignment
+
+report = evaluateMultiwayAlignment(
+    model,
+    ["z_signal", "z_image", "z_text"],
+    heldout_batches,
+    train=training_batches,
+    anchor="z_signal",
+)
+print(report.summary())
+report.meanRetrieval("common")["recall@5"]
+report.num_maps  # {"identity": 0, "pairwise": 3, "common": 3, "anchor": 2}
+```
+
+!!! note "What it does not do"
+    The correction that Achara et al. add on top of the common frame (GCPA) is not implemented, and neither is a loss
+    that ties `K` spaces to one learned reference (roadmap P7-4, gated on a project that needs it).
 
 ## Quick latent-space inspection
 

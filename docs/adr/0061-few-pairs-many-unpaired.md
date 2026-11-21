@@ -34,8 +34,8 @@ The sample-id check (ADR 0058) runs on the batches that are computed and not on 
 
 ```python
 stream = interleaveBatches(
-    paired_loader,                                      # batches with every modality
-    {"signal": signal_loader, "image": image_loader},   # batches with one modality each
+    paired_loader,  # batches with every modality
+    {"signal": signal_loader, "image": image_loader},  # batches with one modality each
     unpaired_per_paired=2,
 )
 trainer.fit(stream, num_epochs=150)

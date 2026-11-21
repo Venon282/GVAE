@@ -18,6 +18,7 @@ Two families of function:
   only inferable from a scalar training curve.
 """
 
+import importlib
 from collections.abc import Iterable, Sequence
 from typing import Any
 
@@ -94,7 +95,11 @@ def _umapProject(
 ) -> torch.Tensor:
     """Project `z` via UMAP (umap-learn, soft dependency)."""
     try:
-        import umap
+        # `import_module` and not `import umap`: umap-learn 0.6 ships `py.typed` without
+        # exporting `UMAP` explicitly, so mypy rejects `umap.UMAP`, while older releases ship no
+        # types at all. A module object is `Any` to mypy for both, with no `type: ignore` that
+        # one of them would report as unused.
+        umap = importlib.import_module("umap")
     except ImportError as error:
         raise ImportError(
             "method='umap' requires umap-learn, which is not installed. Install it with "

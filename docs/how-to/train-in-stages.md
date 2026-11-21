@@ -411,8 +411,8 @@ training:
 from global_vae.data.interleave import interleaveBatches
 
 stream = interleaveBatches(
-    paired_loader,                                      # batches with signal and image
-    {"signal": signal_loader, "image": image_loader},   # batches with one modality each
+    paired_loader,  # batches with signal and image
+    {"signal": signal_loader, "image": image_loader},  # batches with one modality each
     unpaired_per_paired=2,
 )
 trainer.fit(stream, num_epochs=150)

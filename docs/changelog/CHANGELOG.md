@@ -135,6 +135,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- `mypy` failed on `visualization/latent_plot.py` with umap-learn 0.6, which ships `py.typed` without exporting `UMAP` explicitly; `projectLatentSamples` now loads the module with `importlib.import_module`, which type-checks the same with the typed and the untyped releases. `ruff format --check .` also formats the code blocks of the Markdown files, so the two `interleaveBatches` examples (ADR 0061 and the staged-training how-to) lost their aligned comments.
 - `docs.yaml` failed on `main` since the roadmap commit (`956cc97`): the previous roadmap was
   archived as `docs/archives/roadmap_1.md`, one directory deeper, and its 37 relative links
   (`adr/...` and `global-vae-project-specification.md`) pointed at `archives/`. They now start with
